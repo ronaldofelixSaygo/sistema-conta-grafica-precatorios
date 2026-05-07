@@ -42,7 +42,6 @@ window.VIEW_kanban = (() => {
         </div>`;
     }).join('');
 
-    // click no card → abrir modal
     board.addEventListener('click', e => {
       const cd = e.target.closest('.kb-card');
       if (cd) openCardModal(cd.dataset.id);
@@ -52,7 +51,6 @@ window.VIEW_kanban = (() => {
   }
 
   function cardHtml(c) {
-    const stageMeta = meta.stageMeta[c.currentStage];
     const sp = c.stages.find(s => s.stage === c.currentStage);
     const slaInfo = sp?.slaDeadline
       ? (() => {
@@ -75,7 +73,6 @@ window.VIEW_kanban = (() => {
   }
 
   function openNewCardModal() {
-    // Mostra apenas clientes que ainda não têm card
     const usados = new Set(cards.map(c => c.clienteId));
     const disponiveis = clientesCache.filter(c => !usados.has(c.id));
     const opts = disponiveis.map(c =>
@@ -118,7 +115,6 @@ window.VIEW_kanban = (() => {
           <div id="kb-stages">${card.stages.map(s => stageHtml(card, s)).join('')}</div>
         </div>`);
 
-      // Bind events
       const root = document.getElementById('kb-stages');
       root.addEventListener('click', async ev => {
         const btn = ev.target;
@@ -161,12 +157,50 @@ window.VIEW_kanban = (() => {
             await API.del(`/api/kanban/attachments/${btn.dataset.attid}`);
             UI.toast('Excluído'); openCardModal(card.id);
           } catch (e) { UI.toast(e.message, 'err'); }
+        } else if (btn.dataset.action === 'set-parceiro') {
+          await pickParceiro(card.id, btn.dataset.stage);
         }
       });
     } catch (e) { UI.toast(e.message, 'err'); }
 
+    async function pickParceiro(cardId, stage) {
+      let parceiros = [];
+      try { parceiros = await API.get('/api/parceiros', { stage }); }
+      catch (e) { UI.toast(e.message, 'err'); return; }
+      if (!parceiros.length) {
+        if (confirm('Nenhum parceiro cadastrado para esta etapa. Quer ir cadastrar?')) {
+          UI.closeModal();
+          APP.showView('parceiros');
+        }
+        return;
+      }
+      const opts = parceiros.map(p =>
+        `<option value="${p.id}">${UI.escapeHtml(p.nome)}${p.isSaygo?' (Saygo)':''}${p.cnpj?` — ${p.cnpj}`:''}</option>`).join('');
+      const old = document.getElementById('modal-body').innerHTML;
+      document.getElementById('modal-body').innerHTML = `
+        <div class="form-grid">
+          <div class="full"><label>Selecione o parceiro responsável por esta etapa</label>
+            <select id="pp-select"><option value="">— Sem parceiro —</option>${opts}</select>
+          </div>
+          <div class="full form-actions">
+            <button class="btn" id="pp-cancel">Voltar</button>
+            <button class="btn primary" id="pp-save">Salvar</button>
+          </div>
+        </div>`;
+      document.getElementById('pp-cancel').onclick = () => {
+        document.getElementById('modal-body').innerHTML = old;
+        openCardModal(cardId);
+      };
+      document.getElementById('pp-save').onclick = async () => {
+        const parceiroId = document.getElementById('pp-select').value || null;
+        try {
+          await API.put(`/api/kanban/cards/${cardId}/stages/${stage}`, { parceiroId });
+          UI.toast('Parceiro definido'); openCardModal(cardId);
+        } catch (e) { UI.toast(e.message, 'err'); }
+      };
+    }
+
     async function toggleChecklist(cardId, stage, idx) {
-      // Pega o estado atual e inverte
       const card = await API.get(`/api/kanban/cards/${cardId}`);
       const sp = card.stages.find(s => s.stage === stage);
       const cl = Array.isArray(sp.checklist) ? sp.checklist : [];
@@ -182,13 +216,18 @@ window.VIEW_kanban = (() => {
     const m = meta.stageMeta[sp.stage];
     const checklist = Array.isArray(sp.checklist) ? sp.checklist : [];
     const isCurrent = card.currentStage === sp.stage;
-    const statusColor = sp.status === 'COMPLETED' ? 'var(--green)'
+    const statusColor = sp.status === 'COMPLETED' ? 'var(--primary)'
                       : sp.status === 'IN_PROGRESS' ? 'var(--amber)'
                       : sp.status === 'BLOCKED' ? 'var(--red)' : 'var(--t3)';
     const slaDeadline = sp.startedAt
       ? new Date(new Date(sp.startedAt).getTime() + sp.slaHours * 3600_000)
       : null;
     const overdue = slaDeadline && sp.status !== 'COMPLETED' && slaDeadline < new Date();
+    const isStaff = AUTH.isStaff();
+
+    const parceiroLine = sp.parceiro
+      ? `<strong>${UI.escapeHtml(sp.parceiro.nome)}</strong>${sp.parceiro.isSaygo?' (Saygo)':''}`
+      : '<em class="muted">não definido</em>';
 
     return `
       <div class="kb-stage ${isCurrent?'current':''}">
@@ -203,6 +242,10 @@ window.VIEW_kanban = (() => {
             ${sp.realizedHours != null ? `· realizada em ${sp.realizedHours}h` : ''}
             ${overdue ? '<span style="color:var(--red);margin-left:.5rem">⚠ atrasado</span>' : ''}
           </div>
+        </div>
+        <div class="muted small" style="margin:4px 0">
+          Parceiro: ${parceiroLine}
+          ${isStaff ? `<button class="btn small ghost" data-action="set-parceiro" data-stage="${sp.stage}" data-spid="${sp.id}" style="margin-left:.4rem">Selecionar…</button>` : ''}
         </div>
         <div class="muted small" style="margin:4px 0">
           Responsável: ${sp.responsibleUser ? UI.escapeHtml(sp.responsibleUser.name) : (sp.responsibleRole || '—')}

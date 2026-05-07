@@ -1,4 +1,4 @@
-// Entrypoint — inicia HTTP + Socket.IO juntos.
+// Entrypoint - inicia HTTP + Socket.IO juntos.
 import http from 'node:http';
 import { Server as SocketIOServer } from 'socket.io';
 
@@ -10,15 +10,20 @@ import { prisma } from './config/prisma.js';
 const app = createApp();
 const server = http.createServer(app);
 
+// CORS do Socket.IO: aceita qualquer origin com credentials (reflete o origin do request).
+// Origin '*' nao funciona com credentials:true; precisa refletir explicitamente.
 const io = new SocketIOServer(server, {
-  cors: { origin: env.CORS_ORIGIN, credentials: true },
+  cors: {
+    origin: (origin, cb) => cb(null, origin || true),
+    credentials: true,
+  },
 });
 bindChatSockets(io);
 
 // shutdown gracioso
 function shutdown(sig) {
   return async () => {
-    console.log(`\n[${sig}] desligando…`);
+    console.log('[' + sig + '] desligando...');
     io.close();
     server.close(async () => {
       await prisma.$disconnect();
@@ -31,7 +36,7 @@ process.on('SIGTERM', shutdown('SIGTERM'));
 process.on('SIGINT',  shutdown('SIGINT'));
 
 server.listen(env.PORT, () => {
-  console.log(`🚀 Sistema Conta Gráfica rodando em http://localhost:${env.PORT}`);
-  console.log(`   Modo: ${env.NODE_ENV}`);
-  if (!env.DATABASE_URL) console.warn('⚠ DATABASE_URL ausente — defina antes das migrations.');
+  console.log('Sistema Conta Grafica rodando em http://localhost:' + env.PORT);
+  console.log('   Modo: ' + env.NODE_ENV);
+  if (!env.DATABASE_URL) console.warn('AVISO: DATABASE_URL ausente - defina antes das migrations.');
 });

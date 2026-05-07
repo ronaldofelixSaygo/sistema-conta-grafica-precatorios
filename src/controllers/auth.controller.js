@@ -31,3 +31,12 @@ export async function changePassword(req, res, next) {
     res.json({ ok: true });
   } catch (e) { next(e); }
 }
+
+export async function setTheme(req, res, next) {
+  try {
+    const theme = req.body?.theme === 'light' ? 'light' : 'dark';
+    const { prisma } = await import('../config/prisma.js');
+    await prisma.user.update({ where: { id: req.user.id }, data: { themePref: theme } });
+    res.json({ ok: true, theme });
+  } catch (e) { next(e); }
+}

@@ -11,6 +11,8 @@ import chat from './chat.routes.js';
 import kanban from './kanban.routes.js';
 import partnerRequest from './partnerRequest.routes.js';
 import admin from './admin.routes.js';
+import parceiros from './parceiros.routes.js';
+import permissions from './permissions.routes.js';
 
 const router = Router();
 
@@ -28,5 +30,7 @@ router.use('/chat',            chat);
 router.use('/kanban',          kanban);
 router.use('/partner-requests', partnerRequest);
 router.use('/admin',           admin);
+router.use('/parceiros',       parceiros);
+router.use('/permissions',     permissions);
 
 export default router;

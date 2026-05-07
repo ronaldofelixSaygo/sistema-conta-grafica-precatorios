@@ -37,6 +37,13 @@ model User {
 
   active       Boolean   @default(true)
   lastLoginAt  DateTime?
+  // Preferência de tema do usuário (persistida)
+  themePref    String    @default("dark") // 'dark' | 'light'
+
+  // Para PARTNER: pode estar vinculado a um cadastro de Parceiro (empresa)
+  parceiroId   String?
+  parceiro     Parceiro? @relation(fields: [parceiroId], references: [id], onDelete: SetNull)
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -231,6 +238,10 @@ model KanbanStageProgress {
   startedAt          DateTime?
   completedAt        DateTime?
 
+  // Parceiro/empresa que executa a etapa (do cadastro de Parceiros)
+  parceiroId         String?
+  parceiro           Parceiro?    @relation(fields: [parceiroId], references: [id], onDelete: SetNull)
+
   // Responsável pela etapa: pode ser um user específico (Cliente, Parceiro ou Saygo)
   responsibleUserId  String?
   responsibleUser    User?        @relation("KanbanResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
@@ -315,4 +326,48 @@ model PartnerRequest {
   @@index([partnerOfficeName, status])
   @@index([status])
   @@map("partner_requests")
+}
+
+// ============================================================
+//   PARCEIROS (cadastro de empresas que prestam serviço)
+// ============================================================
+model Parceiro {
+  id        String   @id @default(uuid())
+  nome      String
+  cnpj      String?
+  telefone  String?
+  email     String?
+  // Etapas do Kanban em que esse parceiro atua. Ex: ["CONTRATACAO_SALA","ABERTURA_FILIAL"]
+  stages    KanbanStage[]
+  // Se este parceiro é a própria Saygo (flag)
+  isSaygo   Boolean  @default(false)
+  active    Boolean  @default(true)
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  kanbanStages    KanbanStageProgress[]
+
+  @@index([nome])
+  @@index([cnpj])
+  @@map("parceiros")
+}
+
+// ============================================================
+//   PERMISSÕES POR PERFIL (parâmetros)
+// ============================================================
+// Matriz role × módulo. ADM gerencia na tela Parâmetros.
+model RolePermission {
+  id        String   @id @default(uuid())
+  role      Role
+  module    String   // 'clientes' | 'movimentacoes' | 'kanban' | 'chat' | 'usuarios' | etc
+  canView   Boolean  @default(true)
+  canCreate Boolean  @default(false)
+  canEdit   Boolean  @default(false)
+  canDelete Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@unique([role, module])
+  @@map("role_permissions")
 }

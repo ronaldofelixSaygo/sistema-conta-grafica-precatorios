@@ -57,11 +57,24 @@ window.VIEW_clientes = (() => {
         <div class="full"><label>Nome *</label><input name="nome" required value="${UI.escapeHtml(cli.nome||'')}"></div>
         <div><label>CNPJ</label><input name="cnpj" value="${UI.escapeHtml(cli.cnpj||'')}"></div>
         <div><label>CNPJ filial</label><input name="cnpj_filial" value="${UI.escapeHtml(cli.cnpjFilial||'')}"></div>
-        <div><label>Escritório (Parceiro)</label><input name="escritorio" value="${UI.escapeHtml(cli.escritorio||'')}"></div>
+        <div class="full"><label>Escritório (Parceiro principal)</label><input name="escritorio" value="${UI.escapeHtml(cli.escritorio||'')}"></div>
+
+        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Status dos serviços</strong></div>
+        <div><label>Locação Sala</label><input name="locacao_sala" value="${UI.escapeHtml(cli.locacaoSala||'')}"></div>
+        <div><label>Abertura Filial</label><input name="abertura_filial" value="${UI.escapeHtml(cli.aberturaFilial||'')}"></div>
+        <div><label>Reativação IE</label><input name="reativacao_ie" value="${UI.escapeHtml(cli.reativacaoIe||'')}"></div>
+        <div><label>Conta gráfica</label><input name="conta_grafica" value="${UI.escapeHtml(cli.contaGrafica||'')}"></div>
+        <div><label>Cliente certificado</label><input name="cliente_certificado" value="${UI.escapeHtml(cli.clienteCertificado||'')}"></div>
+
+        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Parceiros responsáveis (sistema antigo)</strong></div>
+        <div><label>Parceiro Sala</label><input name="parceiro_sala" value="${UI.escapeHtml(cli.parceiroSala||'')}"></div>
+        <div><label>Parceiro Filial</label><input name="parceiro_filial" value="${UI.escapeHtml(cli.parceiroFilial||'')}"></div>
+        <div><label>Parceiro IE</label><input name="parceiro_ie" value="${UI.escapeHtml(cli.parceiroIe||'')}"></div>
+
+        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Comissão</strong></div>
         <div><label>% Comissão</label><input type="number" step="0.01" name="percentual_comissao" value="${cli.percentualComissao ?? 0}"></div>
         <div><label>Dia de fechamento</label><input type="number" min="1" max="31" name="dia_fechamento" value="${cli.diaFechamento ?? 1}"></div>
-        <div><label>Cliente certificado</label><input name="cliente_certificado" value="${UI.escapeHtml(cli.clienteCertificado||'')}"></div>
-        <div><label>Conta gráfica</label><input name="conta_grafica" value="${UI.escapeHtml(cli.contaGrafica||'')}"></div>
+
         <div class="full"><label>Observações</label><textarea name="observacoes" rows="3">${UI.escapeHtml(cli.observacoes||'')}</textarea></div>
         <div class="full form-actions">
           <button type="button" class="btn" id="cli-cancel">Cancelar</button>

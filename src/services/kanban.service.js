@@ -4,10 +4,7 @@ import {
   STAGES_ORDER, STAGE_META, MAX_UPLOAD_BYTES, nextStage,
 } from '../utils/kanban.constants.js';
 
-// =====================================================================
-// Helper: Cria automaticamente todas as 5 etapas (+ CONCLUIDO) ao criar
-// um KanbanCard. A 1ª etapa começa IN_PROGRESS, as demais PENDING.
-// =====================================================================
+// Helper: cria todas as 6 etapas ao criar um KanbanCard.
 async function ensureStages(cardId) {
   for (let i = 0; i < STAGES_ORDER.length; i++) {
     const stage = STAGES_ORDER[i];
@@ -29,13 +26,10 @@ async function ensureStages(cardId) {
   }
 }
 
-// Aplica scoping nas queries — Parceiros só veem cards dos clientes do escritório,
-// Cliente só vê seu próprio card, Saygo/Adm vê tudo.
 function cardScopeWhere(user) {
   return { cliente: clienteScope(user) };
 }
 
-// ── Listar todos os cards (board) ────────────────────────────────────
 export async function listCards(user) {
   const cards = await prisma.kanbanCard.findMany({
     where: cardScopeWhere(user),
@@ -45,13 +39,13 @@ export async function listCards(user) {
         orderBy: { stage: 'asc' },
         include: {
           responsibleUser: { select: { id: true, name: true, role: true } },
+          parceiro:        { select: { id: true, nome: true, isSaygo: true } },
         },
       },
       _count: { select: { attachments: true } },
     },
     orderBy: { startedAt: 'desc' },
   });
-  // Agrupa por etapa (board) e calcula previsto/realizado
   return cards.map(c => ({
     id: c.id,
     clienteId: c.clienteId,
@@ -72,7 +66,6 @@ export async function listCards(user) {
   }));
 }
 
-// ── Criar card pra um cliente (apenas ADM/SAYGO) ─────────────────────
 export async function createCard(user, { clienteId, notes }) {
   if (!(user.role === 'ADM' || user.role === 'SAYGO')) {
     const e = new Error('Apenas Saygo pode criar cards no Kanban'); e.status = 403; throw e;
@@ -89,7 +82,6 @@ export async function createCard(user, { clienteId, notes }) {
   return card;
 }
 
-// ── Detalhe de um card (com etapas, anexos, etc) ─────────────────────
 export async function getCard(user, cardId) {
   const card = await prisma.kanbanCard.findFirst({
     where: { id: cardId, ...cardScopeWhere(user) },
@@ -99,6 +91,7 @@ export async function getCard(user, cardId) {
         orderBy: { stage: 'asc' },
         include: {
           responsibleUser: { select: { id: true, name: true, role: true } },
+          parceiro:        { select: { id: true, nome: true, isSaygo: true, telefone: true, email: true } },
           attachments: {
             select: { id: true, filename: true, mimeType: true, size: true, createdAt: true,
                       uploadedBy: { select: { id: true, name: true } } },
@@ -117,9 +110,7 @@ export async function getCard(user, cardId) {
   return card;
 }
 
-// ── Atualizar etapa (checklist, responsável, notes, sla) ─────────────
 export async function updateStage(user, cardId, stage, payload) {
-  // Defesa: só ADM/SAYGO mexe livremente; PARTNER pode marcar checklist se for responsável
   const sp = await prisma.kanbanStageProgress.findFirst({
     where: { cardId, stage, card: cardScopeWhere(user) },
     include: { card: true },
@@ -130,15 +121,14 @@ export async function updateStage(user, cardId, stage, payload) {
   const isResponsible = sp.responsibleUserId === user.id;
   const data = {};
 
-  // Quem pode mudar o quê:
   if (isStaff) {
     if (payload.slaHours          !== undefined) data.slaHours         = Number(payload.slaHours) || 0;
     if (payload.responsibleUserId !== undefined) data.responsibleUserId = payload.responsibleUserId || null;
     if (payload.responsibleRole   !== undefined) data.responsibleRole   = payload.responsibleRole   || null;
+    if (payload.parceiroId        !== undefined) data.parceiroId        = payload.parceiroId || null;
     if (payload.notes             !== undefined) data.notes             = payload.notes || null;
     if (payload.status            !== undefined) data.status            = payload.status;
   }
-  // Checklist pode ser atualizado por staff OU pelo responsável
   if (payload.checklist !== undefined && (isStaff || isResponsible)) {
     if (!Array.isArray(payload.checklist)) {
       const e = new Error('checklist deve ser um array'); e.status = 400; throw e;
@@ -158,7 +148,6 @@ export async function updateStage(user, cardId, stage, payload) {
   return updated;
 }
 
-// ── Concluir etapa: avança o card para a próxima (auto) ──────────────
 export async function completeStage(user, cardId, stage) {
   const sp = await prisma.kanbanStageProgress.findFirst({
     where: { cardId, stage, card: cardScopeWhere(user) },
@@ -171,23 +160,19 @@ export async function completeStage(user, cardId, stage) {
     const e = new Error('Sem permissão para concluir esta etapa'); e.status = 403; throw e;
   }
 
-  // Verifica se todos os itens do checklist estão done
   const checklist = Array.isArray(sp.checklist) ? sp.checklist : [];
   const pending = checklist.filter(it => !it.done);
   if (pending.length > 0 && !isStaff) {
     const e = new Error(`Checklist tem ${pending.length} item(s) pendente(s)`); e.status = 400; throw e;
   }
 
-  // Marca como concluída
   await prisma.kanbanStageProgress.update({
     where: { id: sp.id },
     data: { status: 'COMPLETED', completedAt: new Date() },
   });
 
-  // Avança o card pra próxima etapa
   const nx = nextStage(stage);
   if (nx) {
-    // Inicia a próxima
     await prisma.kanbanStageProgress.updateMany({
       where: { cardId, stage: nx },
       data: { status: 'IN_PROGRESS', startedAt: new Date() },
@@ -200,7 +185,6 @@ export async function completeStage(user, cardId, stage) {
   return { ok: true, nextStage: nx };
 }
 
-// ── Mover card manualmente (apenas Saygo) ────────────────────────────
 export async function moveCard(user, cardId, toStage) {
   if (!(user.role === 'ADM' || user.role === 'SAYGO')) {
     const e = new Error('Apenas Saygo pode mover manualmente'); e.status = 403; throw e;
@@ -211,7 +195,6 @@ export async function moveCard(user, cardId, toStage) {
   const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
   if (!card) { const e = new Error('Card não encontrado'); e.status = 404; throw e; }
 
-  // Atualiza estados das etapas: tudo antes de toStage = COMPLETED, toStage = IN_PROGRESS, depois = PENDING
   for (const stage of STAGES_ORDER) {
     const idx  = STAGES_ORDER.indexOf(stage);
     const tIdx = STAGES_ORDER.indexOf(toStage);
@@ -232,13 +215,11 @@ export async function moveCard(user, cardId, toStage) {
   return { ok: true };
 }
 
-// ── Anexos ───────────────────────────────────────────────────────────
 export async function uploadAttachment(user, cardId, file, { stageProgressId = null } = {}) {
   if (!file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
   if (file.size > MAX_UPLOAD_BYTES) {
     const e = new Error(`Arquivo muito grande (max ${MAX_UPLOAD_BYTES / (1024*1024)}MB)`); e.status = 400; throw e;
   }
-  // Verifica escopo
   const card = await prisma.kanbanCard.findFirst({
     where: { id: cardId, ...cardScopeWhere(user) },
   });
@@ -260,10 +241,7 @@ export async function uploadAttachment(user, cardId, file, { stageProgressId = n
 
 export async function downloadAttachment(user, attachmentId) {
   const att = await prisma.kanbanAttachment.findFirst({
-    where: {
-      id: attachmentId,
-      card: cardScopeWhere(user),
-    },
+    where: { id: attachmentId, card: cardScopeWhere(user) },
   });
   if (!att) { const e = new Error('Anexo não encontrado'); e.status = 404; throw e; }
   return att;
@@ -274,7 +252,6 @@ export async function deleteAttachment(user, attachmentId) {
     where: { id: attachmentId, card: cardScopeWhere(user) },
   });
   if (!att) { const e = new Error('Anexo não encontrado'); e.status = 404; throw e; }
-  // Apenas ADM/SAYGO ou quem fez o upload pode deletar
   if (!(user.role === 'ADM' || user.role === 'SAYGO' || att.uploadedById === user.id)) {
     const e = new Error('Sem permissão'); e.status = 403; throw e;
   }
@@ -282,5 +259,4 @@ export async function deleteAttachment(user, attachmentId) {
   return { ok: true };
 }
 
-// ── Helpers expostos ─────────────────────────────────────────────────
 export const KANBAN = { STAGES_ORDER, STAGE_META };

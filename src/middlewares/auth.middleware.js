@@ -21,7 +21,7 @@ export async function requireAuth(req, res, next) {
       where: { id: decoded.uid },
       select: {
         id: true, email: true, name: true, role: true, active: true,
-        officeName: true, clienteId: true,
+        officeName: true, clienteId: true, themePref: true, parceiroId: true,
       },
     });
     if (!user || !user.active) return res.status(401).json({ error: 'Usuário inválido ou desativado' });
@@ -40,7 +40,9 @@ export async function authenticateSocket(token) {
   if (!decoded?.uid) return null;
   return prisma.user.findUnique({
     where: { id: decoded.uid },
-    select: { id: true, email: true, name: true, role: true, active: true,
-              officeName: true, clienteId: true },
+    select: {
+      id: true, email: true, name: true, role: true, active: true,
+      officeName: true, clienteId: true, themePref: true, parceiroId: true,
+    },
   });
 }

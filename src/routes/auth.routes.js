@@ -7,4 +7,5 @@ router.post('/login',           ctrl.login);
 router.post('/logout',          ctrl.logout);
 router.get ('/me', requireAuth, ctrl.me);
 router.post('/change-password', requireAuth, ctrl.changePassword);
+router.post('/theme',           requireAuth, ctrl.setTheme);
 export default router;

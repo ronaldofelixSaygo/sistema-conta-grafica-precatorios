@@ -10,8 +10,10 @@ window.APP = (() => {
     comissoes: 'Comissões',
     relatorios: 'Relatórios',
     alertas: 'Alertas',
+    parceiros: 'Parceiros',
     usuarios: 'Usuários',
     auditoria: 'Auditoria',
+    parametros: 'Parâmetros',
     admin: 'Migração de Dados',
   };
 
@@ -32,10 +34,10 @@ window.APP = (() => {
   }
 
   function applyRoleVisibility() {
-    const isAdm = AUTH.isAdm();
-    document.querySelectorAll('[data-admin-only]').forEach(el => {
-      el.style.display = isAdm ? '' : 'none';
-    });
+    const isAdm   = AUTH.isAdm();
+    const isStaff = AUTH.isStaff();
+    document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = isAdm   ? '' : 'none');
+    document.querySelectorAll('[data-staff-only]').forEach(el => el.style.display = isStaff ? '' : 'none');
   }
 
   async function bootAfterLogin() {
@@ -46,13 +48,13 @@ window.APP = (() => {
     applyRoleVisibility();
     showView('dashboard');
     CHAT.init();
+    if (window.THEME) THEME.init();
   }
 
   function roleLabel(r) {
     return ({ ADM: 'Administrador', SAYGO: 'Usuário Saygo', PARTNER: 'Parceiro', CLIENT: 'Cliente' })[r] || r;
   }
 
-  // sidebar nav
   document.querySelectorAll('.sidebar nav a').forEach(a => {
     a.addEventListener('click', (ev) => {
       ev.preventDefault();
@@ -70,5 +72,4 @@ window.APP = (() => {
   return { start, bootAfterLogin, showView };
 })();
 
-// kick off
 window.addEventListener('DOMContentLoaded', () => APP.start());
