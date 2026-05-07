@@ -66,7 +66,7 @@ window.VIEW_kanban = (() => {
         })()
       : '';
     return `
-      <div class="kb-card ${isDone?'done':''}" data-id="${c.id}">
+      <div class="kb-card ${isDone?'done':''}" data-id="${c.id}" data-current="${c.currentStage}">
         <div style="font-weight:700;margin-bottom:4px">${UI.escapeHtml(c.clienteNome)}</div>
         <div class="muted small">${UI.escapeHtml(c.clienteEscritorio || 'sem escritorio')}</div>
         <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">

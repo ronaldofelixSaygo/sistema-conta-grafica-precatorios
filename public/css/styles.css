@@ -41,14 +41,24 @@ html[data-theme="light"]{
   --primary-fg: #ffffff;
 }
 /* Cores fixas em modo claro: garantir contraste em campos, modais e tabelas */
-html[data-theme="light"] body{ color: var(--t1); }
+html[data-theme="light"] body,
+html[data-theme="light"] .content,
+html[data-theme="light"] .topbar,
+html[data-theme="light"] .topbar h2 { color: var(--t1) !important; }
+html[data-theme="light"] .topbar { background: var(--s1); border-bottom-color: var(--bd); }
 html[data-theme="light"] .panel,
 html[data-theme="light"] .modal,
 html[data-theme="light"] .login-card,
 html[data-theme="light"] .kb-stage,
 html[data-theme="light"] .kb-card,
-html[data-theme="light"] .table { color: var(--t1); }
+html[data-theme="light"] .table,
+html[data-theme="light"] .kpi { color: var(--t1) !important; }
+html[data-theme="light"] .kpi .l { color: #555 !important; }
+html[data-theme="light"] .kpi .v { color: var(--t1) !important; }
 html[data-theme="light"] .table th { color: var(--t2); background: var(--s3); }
+html[data-theme="light"] .table td,
+html[data-theme="light"] .table tr,
+html[data-theme="light"] .table { color: var(--t1) !important; }
 html[data-theme="light"] input,
 html[data-theme="light"] select,
 html[data-theme="light"] textarea {
@@ -57,8 +67,18 @@ html[data-theme="light"] textarea {
   border-color: var(--bd2) !important;
 }
 html[data-theme="light"] .muted { color: var(--t2) !important; }
+html[data-theme="light"] .small { color: inherit; }
 html[data-theme="light"] .filters input,
-html[data-theme="light"] .filters select { background: var(--s1) !important; }
+html[data-theme="light"] .filters select { background: var(--s1) !important; color: var(--t1) !important; }
+html[data-theme="light"] .btn:not(.primary):not(.danger) { background: var(--s1); color: var(--t1); border-color: var(--bd2); }
+html[data-theme="light"] .btn:not(.primary):not(.danger):hover { background: var(--s3); }
+html[data-theme="light"] .field-hint, html[data-theme="light"] em.muted { color: var(--t2) !important; }
+html[data-theme="light"] strong { color: var(--t1); }
+html[data-theme="light"] .kb-col { background: var(--s2); }
+html[data-theme="light"] .kb-col-head { background: var(--s3); color: var(--t1); }
+html[data-theme="light"] .kb-card { background: var(--s1); color: var(--t1); }
+html[data-theme="light"] .modal header { background: var(--s2); }
+html[data-theme="light"] .form-grid label { color: var(--t2); }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:var(--bg);color:var(--t1);font-family:-apple-system,'Segoe UI',sans-serif;font-size:14px;height:100%}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -182,8 +202,29 @@ a{color:inherit;text-decoration:none}
 .kb-card{background:var(--s1);border:1px solid var(--bd2);border-radius:8px;padding:.6rem .75rem;cursor:pointer;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 .kb-card:hover{border-color:var(--primary);transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,.12)}
 .kb-card.done{border-left:4px solid var(--green);background:linear-gradient(180deg,rgba(0,184,148,.08),var(--s1))}
-.kb-col.col-done .kb-col-head{background:linear-gradient(90deg,var(--green),rgba(0,184,148,.3));color:#fff}
-.kb-col.col-done{border-color:var(--green)}
+
+/* Cor de cada coluna do Kanban (cabeçalho) */
+.kb-col[data-stage="ONBOARDING"]              .kb-col-head{background:linear-gradient(90deg,#4a90e2,rgba(74,144,226,.3));color:#fff}
+.kb-col[data-stage="CONTRATACAO_SALA"]        .kb-col-head{background:linear-gradient(90deg,#9860f0,rgba(152,96,240,.3));color:#fff}
+.kb-col[data-stage="ABERTURA_FILIAL"]         .kb-col-head{background:linear-gradient(90deg,#f0a020,rgba(240,160,32,.3));color:#fff}
+.kb-col[data-stage="REATIVACAO_IE"]           .kb-col-head{background:linear-gradient(90deg,#F58220,rgba(245,130,32,.3));color:#fff}
+.kb-col[data-stage="ABERTURA_CONTA_GRAFICA"]  .kb-col-head{background:linear-gradient(90deg,#10c4b5,rgba(16,196,181,.3));color:#fff}
+.kb-col[data-stage="CONCLUIDO"]               .kb-col-head{background:linear-gradient(90deg,var(--green),rgba(0,184,148,.3));color:#fff}
+
+.kb-col[data-stage="ONBOARDING"]              { border-color:#4a90e2 }
+.kb-col[data-stage="CONTRATACAO_SALA"]        { border-color:#9860f0 }
+.kb-col[data-stage="ABERTURA_FILIAL"]         { border-color:#f0a020 }
+.kb-col[data-stage="REATIVACAO_IE"]           { border-color:#F58220 }
+.kb-col[data-stage="ABERTURA_CONTA_GRAFICA"]  { border-color:#10c4b5 }
+.kb-col[data-stage="CONCLUIDO"]               { border-color:var(--green) }
+
+/* Borda esquerda do card pelo stage atual */
+.kb-card[data-current="ONBOARDING"]              { border-left:4px solid #4a90e2 }
+.kb-card[data-current="CONTRATACAO_SALA"]        { border-left:4px solid #9860f0 }
+.kb-card[data-current="ABERTURA_FILIAL"]         { border-left:4px solid #f0a020 }
+.kb-card[data-current="REATIVACAO_IE"]           { border-left:4px solid #F58220 }
+.kb-card[data-current="ABERTURA_CONTA_GRAFICA"]  { border-left:4px solid #10c4b5 }
+.kb-card[data-current="CONCLUIDO"]               { border-left:4px solid var(--green) }
 
 /* Detalhe / modal */
 .kb-detail{display:flex;flex-direction:column;gap:.75rem}
