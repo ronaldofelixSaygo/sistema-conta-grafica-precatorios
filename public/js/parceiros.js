@@ -63,8 +63,8 @@ window.VIEW_parceiros = (() => {
     UI.openModal(isNew?'Novo parceiro':`Editar parceiro`, `
       <form id="form-pa" class="form-grid">
         <div class="full"><label>Nome *</label><input name="nome" required value="${UI.escapeHtml(p.nome||'')}"></div>
-        <div><label>CNPJ</label><input name="cnpj" value="${UI.escapeHtml(p.cnpj||'')}"></div>
-        <div><label>Telefone</label><input name="telefone" value="${UI.escapeHtml(p.telefone||'')}"></div>
+        <div><label>CNPJ</label><input name="cnpj" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(p.cnpj||'')}"></div>
+        <div><label>Telefone</label><input name="telefone" data-mask="phone" maxlength="15" value="${UI.escapeHtml(p.telefone||'')}"></div>
         <div class="full"><label>E-mail</label><input type="email" name="email" value="${UI.escapeHtml(p.email||'')}"></div>
         <div class="full"><label style="margin-bottom:.4rem">Etapas em que atua</label>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px">${stagesChecks}</div>

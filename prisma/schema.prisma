@@ -355,6 +355,24 @@ model Parceiro {
 }
 
 // ============================================================
+//   CONFIG DE ETAPAS DO KANBAN (editável pelo Adm)
+// ============================================================
+model KanbanStageConfig {
+  id                     String       @id @default(uuid())
+  stage                  KanbanStage  @unique
+  label                  String
+  order                  Int          @default(0)
+  slaHours               Int          @default(72)
+  defaultResponsibleRole Role?
+  // Lista de itens do checklist: ["Item 1", "Item 2", ...]
+  checklist              Json         @default("[]")
+  active                 Boolean      @default(true)
+  updatedAt              DateTime     @updatedAt
+
+  @@map("kanban_stage_configs")
+}
+
+// ============================================================
 //   PERMISSÕES POR PERFIL (parâmetros)
 // ============================================================
 // Matriz role × módulo. ADM gerencia na tela Parâmetros.

@@ -1,9 +1,35 @@
 import * as svc from '../services/kanban.service.js';
+import * as stageCfg from '../services/stageConfig.service.js';
 import { logAction } from '../services/audit.service.js';
-import { STAGES_ORDER, STAGE_META } from '../utils/kanban.constants.js';
+import { STAGES_ORDER } from '../utils/kanban.constants.js';
 
-export async function meta(req, res) {
-  res.json({ stagesOrder: STAGES_ORDER, stageMeta: STAGE_META });
+export async function meta(req, res, next) {
+  try {
+    const configs = await stageCfg.listConfigs();
+    const stageMeta = {};
+    for (const c of configs) {
+      stageMeta[c.stage] = {
+        label: c.label, slaHours: c.slaHours,
+        responsibleRole: c.defaultResponsibleRole,
+        defaultChecklist: (c.checklist || []).map(s =>
+          typeof s === 'string' ? { label: s, done: false } : s
+        ),
+      };
+    }
+    res.json({ stagesOrder: STAGES_ORDER, stageMeta });
+  } catch (e) { next(e); }
+}
+
+export async function listStageConfigs(req, res, next) {
+  try { res.json(await stageCfg.listConfigs()); } catch (e) { next(e); }
+}
+
+export async function updateStageConfig(req, res, next) {
+  try {
+    const r = await stageCfg.updateConfig(req.params.stage, req.body || {});
+    await logAction({ user: req.user, action: 'UPDATE', entity: 'kanban_stage_config', entityId: r.id, ip: req.ip });
+    res.json(r);
+  } catch (e) { next(e); }
 }
 
 export async function listCards(req, res, next) {
@@ -32,9 +58,10 @@ export async function updateStage(req, res, next) {
 
 export async function completeStage(req, res, next) {
   try {
-    const r = await svc.completeStage(req.user, req.params.id, req.params.stage);
+    const force = req.body?.force === true || req.query?.force === 'true';
+    const r = await svc.completeStage(req.user, req.params.id, req.params.stage, { force });
     await logAction({ user: req.user, action: 'COMPLETE_STAGE', entity: 'kanban_card',
-                     entityId: req.params.id, details: req.params.stage, ip: req.ip });
+                     entityId: req.params.id, details: req.params.stage + (force ? ' (forced)' : ''), ip: req.ip });
     res.json(r);
   } catch (e) { next(e); }
 }

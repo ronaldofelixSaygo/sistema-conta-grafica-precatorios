@@ -55,8 +55,8 @@ window.VIEW_clientes = (() => {
     UI.openModal(cli.id ? `Editar cliente #${cli.id}` : 'Novo cliente', `
       <form id="form-cli" class="form-grid">
         <div class="full"><label>Nome *</label><input name="nome" required value="${UI.escapeHtml(cli.nome||'')}"></div>
-        <div><label>CNPJ</label><input name="cnpj" value="${UI.escapeHtml(cli.cnpj||'')}"></div>
-        <div><label>CNPJ filial</label><input name="cnpj_filial" value="${UI.escapeHtml(cli.cnpjFilial||'')}"></div>
+        <div><label>CNPJ</label><input name="cnpj" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(cli.cnpj||'')}"></div>
+        <div><label>CNPJ filial</label><input name="cnpj_filial" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(cli.cnpjFilial||'')}"></div>
         <div class="full"><label>Escritório (Parceiro principal)</label><input name="escritorio" value="${UI.escapeHtml(cli.escritorio||'')}"></div>
 
         <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Status dos serviços</strong></div>

@@ -14,6 +14,8 @@ const router = Router();
 router.use(requireAuth);
 
 router.get ('/meta',                ctrl.meta);
+router.get ('/stage-configs',                  ctrl.listStageConfigs);
+router.put ('/stage-configs/:stage', requireStaff, ctrl.updateStageConfig);
 router.get ('/cards',               ctrl.listCards);
 router.post('/cards', requireStaff, ctrl.createCard);
 router.get ('/cards/:id',           ctrl.getCard);
