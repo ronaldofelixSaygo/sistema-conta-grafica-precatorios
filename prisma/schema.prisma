@@ -49,6 +49,14 @@ model User {
   // Audit
   auditLogs    AuditLog[]
 
+  // Kanban
+  kanbanResponsibleFor KanbanStageProgress[] @relation("KanbanResponsible")
+  kanbanUploaded       KanbanAttachment[]    @relation("KanbanUploader")
+
+  // Partner requests
+  partnerRequestsCreated   PartnerRequest[] @relation("PartnerRequestedBy")
+  partnerRequestsResolved  PartnerRequest[] @relation("PartnerResolvedBy")
+
   @@index([role])
   @@index([officeName])
   @@map("users")
@@ -78,6 +86,8 @@ model Cliente {
 
   movimentacoes       Movimentacao[]
   user                User?    @relation("ClienteUser")
+  kanbanCard          KanbanCard?
+  partnerRequests     PartnerRequest[]
 
   @@index([escritorio])
   @@index([nome])
@@ -165,4 +175,144 @@ model Message {
   @@index([conversationId, createdAt])
   @@index([toUserId, readAt])
   @@map("messages")
+}
+
+// ============================================================
+//   KANBAN DE HABILITAÇÃO
+// ============================================================
+// Cada Cliente tem 1 KanbanCard (1-1). O card percorre 5 etapas
+// fixas. Para cada etapa há um KanbanStageProgress com SLA,
+// responsável, checklist e anexos.
+
+enum KanbanStage {
+  ONBOARDING
+  CONTRATACAO_SALA
+  ABERTURA_FILIAL
+  REATIVACAO_IE
+  ABERTURA_CONTA_GRAFICA
+  CONCLUIDO
+}
+
+enum KanbanStageStatus {
+  PENDING       // ainda não chegou nessa etapa
+  IN_PROGRESS   // etapa atual
+  COMPLETED     // concluída
+  BLOCKED       // bloqueada (algum impedimento)
+}
+
+model KanbanCard {
+  id           String      @id @default(uuid())
+  clienteId    Int         @unique
+  cliente      Cliente     @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  currentStage KanbanStage @default(ONBOARDING)
+  startedAt    DateTime    @default(now())
+  completedAt  DateTime?
+  notes        String?     @db.Text
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  stages       KanbanStageProgress[]
+  attachments  KanbanAttachment[]
+
+  @@index([currentStage])
+  @@map("kanban_cards")
+}
+
+model KanbanStageProgress {
+  id                 String       @id @default(uuid())
+  cardId             String
+  card               KanbanCard   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  stage              KanbanStage
+  status             KanbanStageStatus @default(PENDING)
+
+  // SLA: horas previstas pra concluir essa etapa
+  slaHours           Int          @default(72)
+  // calculado: previsto = startedAt + slaHours; realizado = completedAt - startedAt
+  startedAt          DateTime?
+  completedAt        DateTime?
+
+  // Responsável pela etapa: pode ser um user específico (Cliente, Parceiro ou Saygo)
+  responsibleUserId  String?
+  responsibleUser    User?        @relation("KanbanResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  // Ou apenas o tipo (caso ainda não tenha definido o user específico)
+  responsibleRole    Role?
+
+  // Checklist de itens a marcar antes de concluir a etapa.
+  // Formato: [{"label":"Documento X assinado","done":true}, {...}]
+  checklist          Json         @default("[]")
+  notes              String?      @db.Text
+
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  attachments        KanbanAttachment[]
+
+  @@unique([cardId, stage])
+  @@index([status])
+  @@index([responsibleUserId])
+  @@map("kanban_stage_progress")
+}
+
+model KanbanAttachment {
+  id           String     @id @default(uuid())
+  cardId       String
+  card         KanbanCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  // anexo pode estar atrelado a uma etapa específica (ou ao card como um todo)
+  stageProgressId String?
+  stageProgress   KanbanStageProgress? @relation(fields: [stageProgressId], references: [id], onDelete: SetNull)
+
+  filename     String
+  mimeType     String
+  size         Int
+  content      Bytes      // bytea - arquivo armazenado no banco
+
+  uploadedById String?
+  uploadedBy   User?      @relation("KanbanUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+
+  @@index([cardId])
+  @@index([stageProgressId])
+  @@map("kanban_attachments")
+}
+
+// ============================================================
+//   ACIONAMENTO DO PARCEIRO (alimentação de conta gráfica, etc)
+// ============================================================
+enum PartnerRequestType {
+  ALIMENTACAO_CONTA_GRAFICA
+  // outros tipos podem ser adicionados depois
+}
+
+enum PartnerRequestStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELED
+}
+
+model PartnerRequest {
+  id           String                @id @default(uuid())
+  clienteId    Int
+  cliente      Cliente               @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  type         PartnerRequestType
+  status       PartnerRequestStatus  @default(OPEN)
+
+  // payload livre — para alimentação irá conter os parâmetros de cálculo
+  payload      Json                  @default("{}")
+  message      String?               @db.Text
+
+  // quem solicitou (cliente ou Saygo) e quem é o parceiro alvo
+  requestedById String
+  requestedBy   User                 @relation("PartnerRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
+  partnerOfficeName String           // = cliente.escritorio (snapshot)
+  resolvedById  String?
+  resolvedBy    User?                @relation("PartnerResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime              @default(now())
+  resolvedAt   DateTime?
+
+  @@index([clienteId])
+  @@index([partnerOfficeName, status])
+  @@index([status])
+  @@map("partner_requests")
 }

@@ -2,6 +2,8 @@
 window.APP = (() => {
   const TITLES = {
     dashboard: 'Painel',
+    kanban: 'Kanban de Habilitação',
+    acionamentos: 'Acionamentos',
     clientes: 'Clientes',
     movimentacoes: 'Movimentações',
     saldos: 'Saldos',
@@ -10,6 +12,7 @@ window.APP = (() => {
     alertas: 'Alertas',
     usuarios: 'Usuários',
     auditoria: 'Auditoria',
+    admin: 'Migração de Dados',
   };
 
   function showScreen(which) {

@@ -8,6 +8,9 @@ import relatorios from './relatorios.routes.js';
 import importR from './import.routes.js';
 import audit from './audit.routes.js';
 import chat from './chat.routes.js';
+import kanban from './kanban.routes.js';
+import partnerRequest from './partnerRequest.routes.js';
+import admin from './admin.routes.js';
 
 const router = Router();
 
@@ -22,5 +25,8 @@ router.use(                   relatorios);  // /relatorio, /relatorio/excel, /re
 router.use(                   importR);     // /import
 router.use('/audit',           audit);
 router.use('/chat',            chat);
+router.use('/kanban',          kanban);
+router.use('/partner-requests', partnerRequest);
+router.use('/admin',           admin);
 
 export default router;

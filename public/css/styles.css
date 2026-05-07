@@ -114,6 +114,29 @@ a{color:inherit;text-decoration:none}
 .chat-input{display:flex;gap:6px;padding:.5rem;border-top:1px solid var(--bd)}
 .chat-input input{flex:1;padding:8px 10px;background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r);outline:none}
 
+/* ── Kanban ── */
+.kb-board{display:flex;gap:.6rem;overflow-x:auto;padding-bottom:1rem}
+.kb-col{min-width:240px;max-width:240px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r);display:flex;flex-direction:column;max-height:calc(100vh - 180px)}
+.kb-col-head{padding:.6rem .8rem;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;background:var(--s3);border-radius:var(--r) var(--r) 0 0}
+.kb-col-body{padding:.5rem;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:6px}
+.kb-card{background:var(--s1);border:1px solid var(--bd2);border-radius:6px;padding:.5rem .65rem;cursor:pointer;transition:.15s}
+.kb-card:hover{border-color:var(--green);transform:translateY(-1px)}
+
+/* Detalhe / modal */
+.kb-detail{display:flex;flex-direction:column;gap:.75rem}
+.kb-stage{background:var(--s2);border:1px solid var(--bd);border-radius:var(--r);padding:.75rem .9rem}
+.kb-stage.current{border-color:var(--green)}
+.kb-stage-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem}
+.kb-checklist{list-style:none;padding:0;margin:.5rem 0}
+.kb-checklist li{display:flex;align-items:center;gap:.4rem;padding:3px 0;font-size:13px}
+.kb-check{background:transparent;border:1px solid var(--bd2);width:20px;height:20px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--t2)}
+.kb-check.done{background:var(--green);color:#000;border-color:var(--green)}
+.kb-checklist .done{text-decoration:line-through;color:var(--t3)}
+.kb-attachments{list-style:none;padding:0;margin:.4rem 0}
+.kb-attachments li{padding:3px 0;font-size:12px}
+.kb-attachments a{color:var(--green);text-decoration:underline}
+.kb-stage-actions{display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap}
+
 /* ── responsivo ── */
 @media (max-width:780px){
   .sidebar{width:64px}.sidebar nav a{font-size:0;padding:10px}.sidebar nav a::before{content:'•';font-size:14px}

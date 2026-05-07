@@ -31,6 +31,8 @@
     <div class="brand">Conta Gráfica</div>
     <nav>
       <a href="#" data-view="dashboard"     class="active">Painel</a>
+      <a href="#" data-view="kanban">Kanban</a>
+      <a href="#" data-view="acionamentos">Acionamentos</a>
       <a href="#" data-view="clientes">Clientes</a>
       <a href="#" data-view="movimentacoes">Movimentações</a>
       <a href="#" data-view="saldos">Saldos</a>
@@ -39,6 +41,7 @@
       <a href="#" data-view="alertas">Alertas</a>
       <a href="#" data-view="usuarios" data-admin-only>Usuários</a>
       <a href="#" data-view="auditoria" data-admin-only>Auditoria</a>
+      <a href="#" data-view="admin"     data-admin-only>Migração</a>
     </nav>
     <div class="user-box">
       <div id="me-name">—</div>
@@ -54,6 +57,8 @@
     </header>
 
     <section id="view-dashboard"     class="view"></section>
+    <section id="view-kanban"        class="view hidden"></section>
+    <section id="view-acionamentos"  class="view hidden"></section>
     <section id="view-clientes"      class="view hidden"></section>
     <section id="view-movimentacoes" class="view hidden"></section>
     <section id="view-saldos"        class="view hidden"></section>
@@ -62,6 +67,7 @@
     <section id="view-alertas"       class="view hidden"></section>
     <section id="view-usuarios"      class="view hidden"></section>
     <section id="view-auditoria"     class="view hidden"></section>
+    <section id="view-admin"         class="view hidden"></section>
   </main>
 
   <!-- chat lateral -->
@@ -108,6 +114,9 @@
 <script src="/js/alertas.js"></script>
 <script src="/js/usuarios.js"></script>
 <script src="/js/auditoria.js"></script>
+<script src="/js/kanban.js"></script>
+<script src="/js/acionamentos.js"></script>
+<script src="/js/admin.js"></script>
 <script src="/js/chat.js"></script>
 <script src="/js/app.js"></script>
 </body>
