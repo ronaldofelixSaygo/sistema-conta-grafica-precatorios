@@ -1,0 +1,44 @@
+{
+  "name": "sistema-conta-grafica",
+  "version": "2.0.0",
+  "description": "Sistema Conta Gráfica — Saygo Group (Node.js + Express + Prisma + Neon + Socket.IO)",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": { "node": ">=18.0.0" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "seed": "node prisma/seed.js",
+    "migrate:from-sqlite": "node scripts/migrate-from-sqlite.js",
+    "postinstall": "prisma generate",
+    "render:build": "npm install && prisma generate && prisma migrate deploy"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "pdfkit": "^0.15.0",
+    "socket.io": "^4.8.1",
+    "sql.js": "^1.11.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  },
+  "prisma": { "seed": "node prisma/seed.js" }
+}

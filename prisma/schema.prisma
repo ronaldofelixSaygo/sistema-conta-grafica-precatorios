@@ -1,0 +1,168 @@
+// =====================================================================
+// Sistema Conta Gráfica — Prisma schema
+// Banco: Neon (PostgreSQL serverless)
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Roles ───────────────────────────────────────────────────────────
+enum Role {
+  ADM       // Administrador: enxerga e edita tudo (incl. usuários, audit)
+  SAYGO     // Usuário Saygo: opera o sistema, vê dados de todos os clientes
+  PARTNER   // Parceiro/Escritório: vê só clientes vinculados ao seu escritório
+  CLIENT    // Cliente: vê só os próprios dados
+}
+
+// ─── Usuários da plataforma ──────────────────────────────────────────
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role      @default(CLIENT)
+
+  // Para PARTNER: nome do escritório (deve bater com Cliente.escritorio)
+  officeName   String?
+
+  // Para CLIENT: id do Cliente vinculado (1-1, vê só ele)
+  clienteId    Int?      @unique
+  cliente      Cliente?  @relation("ClienteUser", fields: [clienteId], references: [id], onDelete: SetNull)
+
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Chat
+  sentMessages     Message[]      @relation("SentMessages")
+  receivedMessages Message[]      @relation("ReceivedMessages")
+  conversationsA   Conversation[] @relation("ConvUserA")
+  conversationsB   Conversation[] @relation("ConvUserB")
+
+  // Audit
+  auditLogs    AuditLog[]
+
+  @@index([role])
+  @@index([officeName])
+  @@map("users")
+}
+
+// ─── Clientes (empresas atendidas) ──────────────────────────────────
+model Cliente {
+  id                  Int      @id @default(autoincrement())
+  nome                String
+  cnpj                String?
+  cnpjFilial          String?
+  escritorio          String?  // ⬅︎ vínculo do Parceiro (campo-chave do role PARTNER)
+  locacaoSala         String?
+  aberturaFilial      String?
+  reativacaoIe        String?
+  contaGrafica        String?
+  clienteCertificado  String?
+  parceiroSala        String?
+  parceiroFilial      String?
+  parceiroIe          String?
+  observacoes         String?  @db.Text
+  percentualComissao  Float    @default(0)
+  diaFechamento       Int      @default(1)
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  movimentacoes       Movimentacao[]
+  user                User?    @relation("ClienteUser")
+
+  @@index([escritorio])
+  @@index([nome])
+  @@map("clientes")
+}
+
+// ─── Movimentações (lançamentos) ────────────────────────────────────
+model Movimentacao {
+  id                Int      @id @default(autoincrement())
+  clienteId         Int
+  tipoMovimento     String   // 'Créditos Reconhecidos e Cedidos' | 'Débitos de Liquidações' | 'Débitos de Transferências'
+  dataNf            DateTime?
+  duimpDiProcesso   String?
+  parceiro          String?  // copiado do escritorio do cliente no momento do lançamento
+  dataExoneracao    DateTime?
+  percentual        Float    @default(0)
+  valor             Float    @default(0)
+  valorAjustado     Float    @default(0)  // calculado: positivo p/ crédito, negativo p/ débito
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  cliente           Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@index([clienteId])
+  @@index([tipoMovimento])
+  @@index([dataNf])
+  @@index([parceiro])
+  @@map("movimentacoes")
+}
+
+// ─── Audit log ──────────────────────────────────────────────────────
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    String?
+  userName  String?
+  action    String   // CREATE | UPDATE | DELETE | LOGIN | etc
+  entity    String?  // 'cliente' | 'movimentacao' | 'user' | etc
+  entityId  String?
+  details   String?  @db.Text
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@map("audit_log")
+}
+
+// ─── Chat: conversa entre dois usuários ─────────────────────────────
+model Conversation {
+  id          String    @id @default(uuid())
+  userAId     String
+  userBId     String
+  lastMessage String?
+  lastAt      DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  userA       User      @relation("ConvUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB       User      @relation("ConvUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages    Message[]
+
+  @@unique([userAId, userBId])
+  @@index([lastAt])
+  @@map("conversations")
+}
+
+// ─── Chat: mensagem ─────────────────────────────────────────────────
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  fromUserId     String
+  toUserId       String
+  content        String       @db.Text
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  from           User         @relation("SentMessages",     fields: [fromUserId], references: [id], onDelete: Cascade)
+  to             User         @relation("ReceivedMessages", fields: [toUserId],   references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([toUserId, readAt])
+  @@map("messages")
+}

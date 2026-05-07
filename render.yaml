@@ -1,0 +1,31 @@
+# Render Blueprint — Sistema Conta Gráfica
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: sistema-conta-grafica
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy
+    startCommand: node src/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 12h
+      - key: DATABASE_URL
+        sync: false  # cole no painel a string do Neon
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_ADMIN_NAME
+        sync: false
+      - key: CORS_ORIGIN
+        value: "*"

@@ -1,0 +1,123 @@
+:root{
+  --bg:#0c0c0e; --s1:#131316; --s2:#1a1a1e; --s3:#222228; --s4:#2a2a32;
+  --bd:rgba(255,255,255,.07); --bd2:rgba(255,255,255,.13);
+  --t1:#eceae3; --t2:#9a9890; --t3:#5a5856;
+  --green:#00d49a; --red:#f04848; --amber:#f0a020; --blue:#4888f0; --purple:#9860f0;
+  --r:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--t1);font-family:-apple-system,'Segoe UI',sans-serif;font-size:14px;height:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+
+.hidden{display:none !important}
+.muted{color:var(--t2)}.small{font-size:12px}
+
+/* ── botões ── */
+.btn{padding:8px 14px;border:1px solid var(--bd2);background:var(--s2);color:var(--t1);border-radius:var(--r);cursor:pointer;transition:.15s}
+.btn:hover{background:var(--s3)}
+.btn.primary{background:var(--green);color:#000;border-color:var(--green)}
+.btn.primary:hover{filter:brightness(.95)}
+.btn.danger{background:var(--red);color:#fff;border-color:var(--red)}
+.btn.ghost{background:transparent}
+.btn.icon{padding:4px 8px}
+.btn.block{display:block;width:100%;margin-top:1rem}
+.btn.small{padding:5px 10px;font-size:12px}
+
+/* ── login ── */
+.screen{min-height:100vh;display:flex}
+#screen-login{align-items:center;justify-content:center}
+.login-card{background:var(--s1);border:1px solid var(--bd2);border-radius:14px;padding:2.2rem 2rem;width:360px}
+.login-card h1{font-size:1.25rem;margin-bottom:.2rem}
+.login-card p{margin-bottom:1.4rem}
+.login-card label{display:block;font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin:1rem 0 6px}
+.login-card input{width:100%;padding:10px 12px;background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r);outline:none}
+.login-card input:focus{border-color:var(--green)}
+.err{color:var(--red);margin-top:.5rem;font-size:13px;min-height:18px}
+
+/* ── app shell ── */
+#screen-app{display:flex;height:100vh}
+.sidebar{width:230px;background:var(--s1);border-right:1px solid var(--bd);display:flex;flex-direction:column;padding:1rem .8rem}
+.brand{font-weight:800;letter-spacing:-.03em;margin-bottom:1.2rem;font-size:1rem}
+.sidebar nav{display:flex;flex-direction:column;gap:2px;flex:1}
+.sidebar nav a{padding:8px 12px;border-radius:6px;color:var(--t2);font-size:13px}
+.sidebar nav a:hover{background:var(--s2);color:var(--t1)}
+.sidebar nav a.active{background:var(--s3);color:var(--t1)}
+.user-box{margin-top:1rem;padding-top:1rem;border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:6px}
+.user-box .badge{display:inline-block;background:var(--red);color:#fff;border-radius:10px;padding:0 6px;font-size:10px;margin-left:4px}
+
+.content{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{padding:1rem 1.5rem;border-bottom:1px solid var(--bd);background:var(--s1)}
+.topbar h2{font-size:1.05rem;font-weight:700}
+.view{padding:1.25rem 1.5rem;overflow:auto;flex:1}
+
+/* ── tabela ── */
+.table{width:100%;border-collapse:collapse;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden}
+.table th,.table td{padding:8px 10px;border-bottom:1px solid var(--bd);text-align:left;font-size:13px;vertical-align:middle}
+.table th{background:var(--s2);color:var(--t2);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.table tr:last-child td{border-bottom:none}
+.table tr:hover td{background:var(--s2)}
+.table .actions{text-align:right;white-space:nowrap}
+.table .num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* ── KPIs ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.75rem;margin-bottom:1.25rem}
+.kpi{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;border-top:2px solid var(--green)}
+.kpi .l{font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.kpi .v{font-size:1.6rem;font-weight:800;letter-spacing:-.03em;margin-top:6px}
+.kpi.r{border-top-color:var(--red)}.kpi.b{border-top-color:var(--blue)}
+.kpi.a{border-top-color:var(--amber)}.kpi.p{border-top-color:var(--purple)}
+
+/* ── cards/painéis ── */
+.panel{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:1rem 1.25rem;margin-bottom:1rem}
+.panel h3{font-size:13px;margin-bottom:.75rem;color:var(--t2);text-transform:uppercase;letter-spacing:.06em}
+
+/* ── filtros ── */
+.filters{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem}
+.filters input,.filters select{background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r);padding:7px 10px;color:var(--t1);min-width:140px}
+.filters input:focus,.filters select:focus{outline:none;border-color:var(--green)}
+
+/* ── modal ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50}
+.modal{background:var(--s1);border:1px solid var(--bd2);border-radius:12px;width:min(640px,90vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+.modal header{padding:.9rem 1.1rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
+.modal #modal-body{padding:1rem 1.1rem;overflow:auto}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem 1rem}
+.form-grid label{font-size:11px;color:var(--t3);text-transform:uppercase;display:block;margin-bottom:4px}
+.form-grid input,.form-grid select,.form-grid textarea{
+  width:100%;background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r);padding:8px 10px}
+.form-grid .full{grid-column:1/-1}
+.form-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem}
+
+/* ── toast ── */
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r);padding:.7rem 1rem;font-size:13px;opacity:0;transform:translateY(8px);transition:all .2s;z-index:60;pointer-events:none;max-width:340px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.ok{border-color:var(--green)}.toast.err{border-color:var(--red)}
+
+/* ── chat ── */
+.chat-panel{position:fixed;right:0;top:0;height:100vh;width:380px;background:var(--s1);border-left:1px solid var(--bd2);display:flex;flex-direction:column;z-index:40;box-shadow:-6px 0 30px rgba(0,0,0,.35)}
+.chat-panel header{padding:.8rem 1rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
+.chat-body{flex:1;display:flex;overflow:hidden}
+.chat-contacts{width:140px;border-right:1px solid var(--bd);overflow:auto}
+.chat-contact{padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--bd);font-size:12px}
+.chat-contact:hover{background:var(--s2)}
+.chat-contact.active{background:var(--s3)}
+.chat-contact .role{display:block;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+.chat-contact .un{background:var(--red);color:#fff;border-radius:10px;padding:0 5px;font-size:10px;margin-left:4px}
+.chat-thread{flex:1;display:flex;flex-direction:column}
+.chat-thread-header{padding:8px 10px;border-bottom:1px solid var(--bd);font-size:13px;color:var(--t2)}
+.chat-messages{flex:1;overflow:auto;padding:.6rem;display:flex;flex-direction:column;gap:6px}
+.msg{max-width:80%;padding:6px 10px;border-radius:10px;font-size:13px;line-height:1.4;word-wrap:break-word}
+.msg.me{align-self:flex-end;background:var(--green);color:#000}
+.msg.them{align-self:flex-start;background:var(--s3)}
+.msg .ts{display:block;font-size:9px;opacity:.7;margin-top:2px}
+.chat-input{display:flex;gap:6px;padding:.5rem;border-top:1px solid var(--bd)}
+.chat-input input{flex:1;padding:8px 10px;background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r);outline:none}
+
+/* ── responsivo ── */
+@media (max-width:780px){
+  .sidebar{width:64px}.sidebar nav a{font-size:0;padding:10px}.sidebar nav a::before{content:'•';font-size:14px}
+  .brand,.user-box>:not(button){display:none}
+  .form-grid{grid-template-columns:1fr}
+  .chat-panel{width:100vw}
+}

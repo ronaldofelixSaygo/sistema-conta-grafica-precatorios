@@ -1,0 +1,71 @@
+// Bootstrap e roteamento de views.
+window.APP = (() => {
+  const TITLES = {
+    dashboard: 'Painel',
+    clientes: 'Clientes',
+    movimentacoes: 'Movimentações',
+    saldos: 'Saldos',
+    comissoes: 'Comissões',
+    relatorios: 'Relatórios',
+    alertas: 'Alertas',
+    usuarios: 'Usuários',
+    auditoria: 'Auditoria',
+  };
+
+  function showScreen(which) {
+    document.getElementById('screen-login').classList.toggle('hidden', which !== 'login');
+    document.getElementById('screen-app').classList.toggle('hidden',   which !== 'app');
+  }
+
+  function showView(name) {
+    document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+    document.getElementById('view-' + name)?.classList.remove('hidden');
+    document.getElementById('view-title').textContent = TITLES[name] || name;
+    document.querySelectorAll('.sidebar nav a').forEach(a => {
+      a.classList.toggle('active', a.dataset.view === name);
+    });
+    const fn = window['VIEW_' + name]?.render;
+    if (fn) fn();
+  }
+
+  function applyRoleVisibility() {
+    const isAdm = AUTH.isAdm();
+    document.querySelectorAll('[data-admin-only]').forEach(el => {
+      el.style.display = isAdm ? '' : 'none';
+    });
+  }
+
+  async function bootAfterLogin() {
+    const me = AUTH.user();
+    document.getElementById('me-name').textContent = me.name;
+    document.getElementById('me-role').textContent = roleLabel(me.role) + (me.officeName ? ` · ${me.officeName}` : '');
+    showScreen('app');
+    applyRoleVisibility();
+    showView('dashboard');
+    CHAT.init();
+  }
+
+  function roleLabel(r) {
+    return ({ ADM: 'Administrador', SAYGO: 'Usuário Saygo', PARTNER: 'Parceiro', CLIENT: 'Cliente' })[r] || r;
+  }
+
+  // sidebar nav
+  document.querySelectorAll('.sidebar nav a').forEach(a => {
+    a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const v = a.dataset.view;
+      if (v) showView(v);
+    });
+  });
+
+  async function start() {
+    const me = await AUTH.tryRestore();
+    if (me) await bootAfterLogin();
+    else    showScreen('login');
+  }
+
+  return { start, bootAfterLogin, showView };
+})();
+
+// kick off
+window.addEventListener('DOMContentLoaded', () => APP.start());

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sistema Conta Gráfica — Saygo</title>
+<link rel="stylesheet" href="/css/styles.css" />
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+
+<!-- ─── LOGIN ────────────────────────────────────────────────────── -->
+<div id="screen-login" class="screen">
+  <div class="login-card">
+    <h1>Sistema Conta Gráfica</h1>
+    <p class="muted">Saygo Group</p>
+    <form id="form-login">
+      <label>E-mail</label>
+      <input type="email" id="li-email" required autocomplete="username" />
+      <label>Senha</label>
+      <input type="password" id="li-pwd" required autocomplete="current-password" />
+      <button type="submit" class="btn primary block">Entrar</button>
+      <div id="li-err" class="err"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ─── APP ──────────────────────────────────────────────────────── -->
+<div id="screen-app" class="screen hidden">
+  <aside class="sidebar">
+    <div class="brand">Conta Gráfica</div>
+    <nav>
+      <a href="#" data-view="dashboard"     class="active">Painel</a>
+      <a href="#" data-view="clientes">Clientes</a>
+      <a href="#" data-view="movimentacoes">Movimentações</a>
+      <a href="#" data-view="saldos">Saldos</a>
+      <a href="#" data-view="comissoes">Comissões</a>
+      <a href="#" data-view="relatorios">Relatórios</a>
+      <a href="#" data-view="alertas">Alertas</a>
+      <a href="#" data-view="usuarios" data-admin-only>Usuários</a>
+      <a href="#" data-view="auditoria" data-admin-only>Auditoria</a>
+    </nav>
+    <div class="user-box">
+      <div id="me-name">—</div>
+      <div class="muted small" id="me-role">—</div>
+      <button id="btn-chat-toggle" class="btn ghost small">💬 Chat <span id="chat-badge" class="badge hidden">0</span></button>
+      <button id="btn-logout" class="btn ghost small">Sair</button>
+    </div>
+  </aside>
+
+  <main class="content">
+    <header class="topbar">
+      <h2 id="view-title">Painel</h2>
+    </header>
+
+    <section id="view-dashboard"     class="view"></section>
+    <section id="view-clientes"      class="view hidden"></section>
+    <section id="view-movimentacoes" class="view hidden"></section>
+    <section id="view-saldos"        class="view hidden"></section>
+    <section id="view-comissoes"     class="view hidden"></section>
+    <section id="view-relatorios"    class="view hidden"></section>
+    <section id="view-alertas"       class="view hidden"></section>
+    <section id="view-usuarios"      class="view hidden"></section>
+    <section id="view-auditoria"     class="view hidden"></section>
+  </main>
+
+  <!-- chat lateral -->
+  <aside id="chat-panel" class="chat-panel hidden">
+    <header>
+      <strong>Chat</strong>
+      <button id="chat-close" class="btn ghost icon">✕</button>
+    </header>
+    <div class="chat-body">
+      <div class="chat-contacts" id="chat-contacts"></div>
+      <div class="chat-thread">
+        <div class="chat-thread-header" id="chat-thread-header">Selecione um contato</div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <form id="chat-form" class="chat-input hidden">
+          <input id="chat-input" placeholder="Digite uma mensagem…" autocomplete="off" maxlength="5000" />
+          <button class="btn primary" type="submit">Enviar</button>
+        </form>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- modal genérico -->
+<div id="modal-bg" class="modal-bg hidden">
+  <div class="modal" id="modal">
+    <header><strong id="modal-title">Modal</strong>
+      <button class="btn ghost icon" id="modal-close">✕</button></header>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- toast -->
+<div id="toast" class="toast"></div>
+
+<script src="/js/api.js"></script>
+<script src="/js/ui.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/dashboard.js"></script>
+<script src="/js/clientes.js"></script>
+<script src="/js/movimentacoes.js"></script>
+<script src="/js/saldos.js"></script>
+<script src="/js/comissoes.js"></script>
+<script src="/js/relatorios.js"></script>
+<script src="/js/alertas.js"></script>
+<script src="/js/usuarios.js"></script>
+<script src="/js/auditoria.js"></script>
+<script src="/js/chat.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
