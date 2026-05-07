@@ -1,10 +1,9 @@
 import { prisma } from '../config/prisma.js';
 
-const STAGES = ['ONBOARDING','CONTRATACAO_SALA','ABERTURA_FILIAL','REATIVACAO_IE','ABERTURA_CONTA_GRAFICA','CONCLUIDO'];
-
+// stages agora sao keys dinamicas de KanbanStageDef. Validamos minimamente:
 function sanitizeStages(arr) {
   if (!Array.isArray(arr)) return [];
-  return arr.filter(s => STAGES.includes(s));
+  return arr.filter(s => typeof s === 'string' && /^[A-Z0-9_]+$/.test(s));
 }
 
 export async function listParceiros({ stage } = {}) {

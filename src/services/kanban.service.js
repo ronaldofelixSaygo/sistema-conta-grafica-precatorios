@@ -1,30 +1,38 @@
 import { prisma } from '../config/prisma.js';
 import { clienteScope } from '../utils/scope.js';
-import { STAGES_ORDER, MAX_UPLOAD_BYTES, nextStage } from '../utils/kanban.constants.js';
-import { getEffectiveConfig } from './stageConfig.service.js';
+import { MAX_UPLOAD_BYTES } from '../utils/kanban.constants.js';
+import * as stageDef from './stageDef.service.js';
 
-// Cria todas as etapas do card a partir da configuracao editavel.
-// stageParceiros: { ONBOARDING: 'parceiroId', CONTRATACAO_SALA: 'parceiroId', ... }
+// Cria todas as etapas do card lendo da configuracao dinamica.
+// stageParceiros: { 'ONBOARDING': 'parceiroId', ... }
 async function ensureStages(cardId, stageParceiros = {}) {
-  for (let i = 0; i < STAGES_ORDER.length; i++) {
-    const stage = STAGES_ORDER[i];
-    const cfg = await getEffectiveConfig(stage);
+  const stages = await stageDef.getStagesOrdered();
+  for (let i = 0; i < stages.length; i++) {
+    const s = stages[i];
     const exists = await prisma.kanbanStageProgress.findUnique({
-      where: { cardId_stage: { cardId, stage } },
+      where: { cardId_stage: { cardId, stage: s.key } },
     });
     if (exists) continue;
+    const checklist = (s.activities || []).map(a => ({
+      id: a.id, label: a.label, done: false,
+    }));
     await prisma.kanbanStageProgress.create({
       data: {
-        cardId, stage,
+        cardId, stage: s.key,
         status: i === 0 ? 'IN_PROGRESS' : 'PENDING',
         startedAt: i === 0 ? new Date() : null,
-        slaHours: cfg.slaHours,
-        responsibleRole: cfg.defaultResponsibleRole || null,
-        parceiroId: stageParceiros[stage] || null,
-        checklist: (cfg.checklist || []).map(label =>
-          (typeof label === 'string' ? { label, done: false } : label)
-        ),
+        slaHours: s.slaHours,
+        responsibleRole: s.defaultResponsibleRole || null,
+        parceiroId: stageParceiros[s.key] || null,
+        checklist,
       },
+    });
+  }
+  // Garante que o currentStage corresponde a uma etapa ativa.
+  if (stages.length > 0) {
+    await prisma.kanbanCard.update({
+      where: { id: cardId },
+      data: { currentStage: stages[0].key },
     });
   }
 }
@@ -76,8 +84,14 @@ export async function createCard(user, { clienteId, notes, stageParceiros }) {
   const exists = await prisma.kanbanCard.findUnique({ where: { clienteId: cli.id } });
   if (exists) { const e = new Error('Cliente ja tem um card no Kanban'); e.status = 409; throw e; }
 
+  const stages = await stageDef.getStagesOrdered();
+  if (!stages.length) {
+    const e = new Error('Nenhuma etapa cadastrada. Cadastre etapas em Parametros antes de criar cards.');
+    e.status = 400; throw e;
+  }
+
   const card = await prisma.kanbanCard.create({
-    data: { clienteId: cli.id, notes: notes || null },
+    data: { clienteId: cli.id, currentStage: stages[0].key, notes: notes || null },
   });
   await ensureStages(card.id, stageParceiros || {});
   return card;
@@ -135,6 +149,7 @@ export async function updateStage(user, cardId, stage, payload) {
       const e = new Error('checklist deve ser um array'); e.status = 400; throw e;
     }
     data.checklist = payload.checklist.map(it => ({
+      id: it.id || null,
       label: String(it.label || ''),
       done:  !!it.done,
     }));
@@ -143,8 +158,7 @@ export async function updateStage(user, cardId, stage, payload) {
     const e = new Error('Nada a atualizar (sem permissao ou payload vazio)'); e.status = 400; throw e;
   }
 
-  const updated = await prisma.kanbanStageProgress.update({ where: { id: sp.id }, data });
-  return updated;
+  return prisma.kanbanStageProgress.update({ where: { id: sp.id }, data });
 }
 
 export async function completeStage(user, cardId, stage, { force = false } = {}) {
@@ -171,15 +185,17 @@ export async function completeStage(user, cardId, stage, { force = false } = {})
     data: { status: 'COMPLETED', completedAt: new Date() },
   });
 
-  const nx = nextStage(stage);
+  const nx = await stageDef.nextActiveStageKey(stage);
   if (nx) {
     await prisma.kanbanStageProgress.updateMany({
       where: { cardId, stage: nx },
       data: { status: 'IN_PROGRESS', startedAt: new Date() },
     });
+    // Detecta se nx e final
+    const nxDef = await prisma.kanbanStageDef.findUnique({ where: { key: nx } });
     await prisma.kanbanCard.update({
       where: { id: cardId },
-      data: { currentStage: nx, ...(nx === 'CONCLUIDO' ? { completedAt: new Date() } : {}) },
+      data: { currentStage: nx, ...(nxDef?.isFinal ? { completedAt: new Date() } : {}) },
     });
   }
   return { ok: true, nextStage: nx };
@@ -189,27 +205,29 @@ export async function moveCard(user, cardId, toStage) {
   if (!(user.role === 'ADM' || user.role === 'SAYGO')) {
     const e = new Error('Apenas Saygo pode mover manualmente'); e.status = 403; throw e;
   }
-  if (!STAGES_ORDER.includes(toStage)) {
+  const stages = await stageDef.getStagesOrdered();
+  const keys = stages.map(s => s.key);
+  if (!keys.includes(toStage)) {
     const e = new Error('Etapa invalida'); e.status = 400; throw e;
   }
   const card = await prisma.kanbanCard.findUnique({ where: { id: cardId } });
   if (!card) { const e = new Error('Card nao encontrado'); e.status = 404; throw e; }
+  const tIdx = keys.indexOf(toStage);
 
-  for (const stage of STAGES_ORDER) {
-    const idx  = STAGES_ORDER.indexOf(stage);
-    const tIdx = STAGES_ORDER.indexOf(toStage);
+  for (let i = 0; i < keys.length; i++) {
+    const stage = keys[i];
     let data = {};
-    if (idx <  tIdx) data = { status: 'COMPLETED',  completedAt: new Date(), startedAt: new Date() };
-    if (idx === tIdx) data = { status: 'IN_PROGRESS', startedAt: new Date(), completedAt: null };
-    if (idx >  tIdx) data = { status: 'PENDING',     startedAt: null,        completedAt: null };
+    if (i <  tIdx) data = { status: 'COMPLETED',   completedAt: new Date(), startedAt: new Date() };
+    if (i === tIdx) data = { status: 'IN_PROGRESS', startedAt: new Date(), completedAt: null };
+    if (i >  tIdx) data = { status: 'PENDING',      startedAt: null,        completedAt: null };
     await prisma.kanbanStageProgress.updateMany({ where: { cardId, stage }, data });
   }
-
+  const toDef = stages[tIdx];
   await prisma.kanbanCard.update({
     where: { id: cardId },
     data: {
       currentStage: toStage,
-      completedAt:  toStage === 'CONCLUIDO' ? new Date() : null,
+      completedAt:  toDef?.isFinal ? new Date() : null,
     },
   });
   return { ok: true };
@@ -258,5 +276,3 @@ export async function deleteAttachment(user, attachmentId) {
   await prisma.kanbanAttachment.delete({ where: { id: attachmentId } });
   return { ok: true };
 }
-
-export const KANBAN = { STAGES_ORDER };

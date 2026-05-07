@@ -1,41 +1,77 @@
 import * as svc from '../services/kanban.service.js';
-import * as stageCfg from '../services/stageConfig.service.js';
+import * as stageDef from '../services/stageDef.service.js';
 import { logAction } from '../services/audit.service.js';
-import { STAGES_ORDER } from '../utils/kanban.constants.js';
 
+// META: lista etapas ATIVAS (para o board) com formato amigavel ao frontend
 export async function meta(req, res, next) {
   try {
-    const configs = await stageCfg.listConfigs();
+    const stages = await stageDef.listActive();
+    const stagesOrder = stages.map(s => s.key);
     const stageMeta = {};
-    for (const c of configs) {
-      stageMeta[c.stage] = {
-        label: c.label, slaHours: c.slaHours,
-        responsibleRole: c.defaultResponsibleRole,
-        defaultChecklist: (c.checklist || []).map(s =>
-          typeof s === 'string' ? { label: s, done: false } : s
-        ),
+    for (const s of stages) {
+      stageMeta[s.key] = {
+        label: s.label, slaHours: s.slaHours,
+        responsibleRole: s.defaultResponsibleRole,
+        isFinal: s.isFinal,
       };
     }
-    res.json({ stagesOrder: STAGES_ORDER, stageMeta });
+    res.json({ stagesOrder, stageMeta });
   } catch (e) { next(e); }
 }
 
-export async function listStageConfigs(req, res, next) {
-  try { res.json(await stageCfg.listConfigs()); } catch (e) { next(e); }
+// === ETAPAS (CRUD) ===
+export async function listStages(req, res, next) {
+  try { res.json(await stageDef.listAll()); } catch (e) { next(e); }
 }
-
-export async function updateStageConfig(req, res, next) {
+export async function createStageCfg(req, res, next) {
   try {
-    const r = await stageCfg.updateConfig(req.params.stage, req.body || {});
-    await logAction({ user: req.user, action: 'UPDATE', entity: 'kanban_stage_config', entityId: r.id, ip: req.ip });
+    const r = await stageDef.createStage(req.body || {});
+    await logAction({ user: req.user, action: 'CREATE', entity: 'kanban_stage_def', entityId: r.id, ip: req.ip });
+    res.status(201).json(r);
+  } catch (e) { next(e); }
+}
+export async function updateStageCfg(req, res, next) {
+  try {
+    const r = await stageDef.updateStage(req.params.id, req.body || {});
+    await logAction({ user: req.user, action: 'UPDATE', entity: 'kanban_stage_def', entityId: r.id, ip: req.ip });
     res.json(r);
   } catch (e) { next(e); }
 }
+export async function deleteStageCfg(req, res, next) {
+  try {
+    await stageDef.deleteStage(req.params.id);
+    await logAction({ user: req.user, action: 'DELETE', entity: 'kanban_stage_def', entityId: req.params.id, ip: req.ip });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+}
 
+// === ATIVIDADES ===
+export async function createActivity(req, res, next) {
+  try {
+    const r = await stageDef.createActivity(req.params.stageId, req.body || {});
+    await logAction({ user: req.user, action: 'CREATE', entity: 'kanban_activity_def', entityId: r.id, ip: req.ip });
+    res.status(201).json(r);
+  } catch (e) { next(e); }
+}
+export async function updateActivity(req, res, next) {
+  try {
+    const r = await stageDef.updateActivity(req.params.id, req.body || {});
+    await logAction({ user: req.user, action: 'UPDATE', entity: 'kanban_activity_def', entityId: r.id, ip: req.ip });
+    res.json(r);
+  } catch (e) { next(e); }
+}
+export async function deleteActivity(req, res, next) {
+  try {
+    await stageDef.deleteActivity(req.params.id);
+    await logAction({ user: req.user, action: 'DELETE', entity: 'kanban_activity_def', entityId: req.params.id, ip: req.ip });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+}
+
+// === CARDS ===
 export async function listCards(req, res, next) {
   try { res.json(await svc.listCards(req.user)); } catch (e) { next(e); }
 }
-
 export async function createCard(req, res, next) {
   try {
     const c = await svc.createCard(req.user, req.body || {});
@@ -43,19 +79,16 @@ export async function createCard(req, res, next) {
     res.status(201).json(c);
   } catch (e) { next(e); }
 }
-
 export async function getCard(req, res, next) {
   try { res.json(await svc.getCard(req.user, req.params.id)); } catch (e) { next(e); }
 }
-
-export async function updateStage(req, res, next) {
+export async function updateStageProgress(req, res, next) {
   try {
     const sp = await svc.updateStage(req.user, req.params.id, req.params.stage, req.body || {});
-    await logAction({ user: req.user, action: 'UPDATE', entity: 'kanban_stage', entityId: sp.id, ip: req.ip });
+    await logAction({ user: req.user, action: 'UPDATE', entity: 'kanban_stage_progress', entityId: sp.id, ip: req.ip });
     res.json(sp);
   } catch (e) { next(e); }
 }
-
 export async function completeStage(req, res, next) {
   try {
     const force = req.body?.force === true || req.query?.force === 'true';
@@ -65,7 +98,6 @@ export async function completeStage(req, res, next) {
     res.json(r);
   } catch (e) { next(e); }
 }
-
 export async function moveCard(req, res, next) {
   try {
     const r = await svc.moveCard(req.user, req.params.id, req.body?.toStage);
@@ -74,7 +106,6 @@ export async function moveCard(req, res, next) {
     res.json(r);
   } catch (e) { next(e); }
 }
-
 export async function uploadAttachment(req, res, next) {
   try {
     const a = await svc.uploadAttachment(req.user, req.params.id, req.file, {
@@ -84,7 +115,6 @@ export async function uploadAttachment(req, res, next) {
     res.status(201).json(a);
   } catch (e) { next(e); }
 }
-
 export async function downloadAttachment(req, res, next) {
   try {
     const att = await svc.downloadAttachment(req.user, req.params.attId);
@@ -94,7 +124,6 @@ export async function downloadAttachment(req, res, next) {
     res.end(Buffer.from(att.content));
   } catch (e) { next(e); }
 }
-
 export async function deleteAttachment(req, res, next) {
   try {
     const r = await svc.deleteAttachment(req.user, req.params.attId);

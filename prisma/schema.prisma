@@ -185,38 +185,63 @@ model Message {
 }
 
 // ============================================================
-//   KANBAN DE HABILITAÇÃO
+//   KANBAN DE HABILITAÇÃO (etapas e atividades dinâmicas)
 // ============================================================
-// Cada Cliente tem 1 KanbanCard (1-1). O card percorre 5 etapas
-// fixas. Para cada etapa há um KanbanStageProgress com SLA,
-// responsável, checklist e anexos.
-
-enum KanbanStage {
-  ONBOARDING
-  CONTRATACAO_SALA
-  ABERTURA_FILIAL
-  REATIVACAO_IE
-  ABERTURA_CONTA_GRAFICA
-  CONCLUIDO
-}
+// As etapas e atividades são totalmente configuráveis pelo Adm.
+// KanbanStageDef + KanbanActivityDef são fonte da verdade.
+// stage em KanbanCard / KanbanStageProgress = key da etapa (string).
 
 enum KanbanStageStatus {
-  PENDING       // ainda não chegou nessa etapa
-  IN_PROGRESS   // etapa atual
-  COMPLETED     // concluída
-  BLOCKED       // bloqueada (algum impedimento)
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
+// ─── Definição da etapa (cadastro pelo Adm) ──────────────────────────
+model KanbanStageDef {
+  id                     String  @id @default(uuid())
+  key                    String  @unique  // identificador estável, ex "ONBOARDING", "CONCLUIDO"
+  label                  String
+  order                  Int     @default(0)
+  slaHours               Int     @default(72)
+  defaultResponsibleRole Role?
+  active                 Boolean @default(true)
+  isFinal                Boolean @default(false) // marca a etapa de "Concluído"
+
+  activities             KanbanActivityDef[]
+  updatedAt              DateTime @updatedAt
+  createdAt              DateTime @default(now())
+
+  @@map("kanban_stage_defs")
+}
+
+// ─── Atividade configurada para uma etapa ────────────────────────────
+model KanbanActivityDef {
+  id        String         @id @default(uuid())
+  stageId   String
+  stage     KanbanStageDef @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  label     String
+  order     Int            @default(0)
+  active    Boolean        @default(true)
+  updatedAt DateTime       @updatedAt
+  createdAt DateTime       @default(now())
+
+  @@index([stageId])
+  @@map("kanban_activity_defs")
 }
 
 model KanbanCard {
-  id           String      @id @default(uuid())
-  clienteId    Int         @unique
-  cliente      Cliente     @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  currentStage KanbanStage @default(ONBOARDING)
-  startedAt    DateTime    @default(now())
+  id           String   @id @default(uuid())
+  clienteId    Int      @unique
+  cliente      Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  // currentStage = key da etapa atual (referencia KanbanStageDef.key)
+  currentStage String
+  startedAt    DateTime @default(now())
   completedAt  DateTime?
-  notes        String?     @db.Text
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   stages       KanbanStageProgress[]
   attachments  KanbanAttachment[]
@@ -229,7 +254,8 @@ model KanbanStageProgress {
   id                 String       @id @default(uuid())
   cardId             String
   card               KanbanCard   @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  stage              KanbanStage
+  // key da etapa (KanbanStageDef.key)
+  stage              String
   status             KanbanStageStatus @default(PENDING)
 
   // SLA: horas previstas pra concluir essa etapa
@@ -337,8 +363,8 @@ model Parceiro {
   cnpj      String?
   telefone  String?
   email     String?
-  // Etapas do Kanban em que esse parceiro atua. Ex: ["CONTRATACAO_SALA","ABERTURA_FILIAL"]
-  stages    KanbanStage[]
+  // Etapas do Kanban em que esse parceiro atua (keys de KanbanStageDef)
+  stages    String[]
   // Se este parceiro é a própria Saygo (flag)
   isSaygo   Boolean  @default(false)
   active    Boolean  @default(true)
@@ -357,20 +383,7 @@ model Parceiro {
 // ============================================================
 //   CONFIG DE ETAPAS DO KANBAN (editável pelo Adm)
 // ============================================================
-model KanbanStageConfig {
-  id                     String       @id @default(uuid())
-  stage                  KanbanStage  @unique
-  label                  String
-  order                  Int          @default(0)
-  slaHours               Int          @default(72)
-  defaultResponsibleRole Role?
-  // Lista de itens do checklist: ["Item 1", "Item 2", ...]
-  checklist              Json         @default("[]")
-  active                 Boolean      @default(true)
-  updatedAt              DateTime     @updatedAt
-
-  @@map("kanban_stage_configs")
-}
+// (KanbanStageConfig foi removido — agora usamos KanbanStageDef + KanbanActivityDef)
 
 // ============================================================
 //   PERMISSÕES POR PERFIL (parâmetros)

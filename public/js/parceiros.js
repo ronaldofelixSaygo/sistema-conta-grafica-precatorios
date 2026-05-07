@@ -1,19 +1,14 @@
 window.VIEW_parceiros = (() => {
-  const STAGES = [
-    ['ONBOARDING','Onboarding'],
-    ['CONTRATACAO_SALA','Contratação Sala'],
-    ['ABERTURA_FILIAL','Abertura da Filial'],
-    ['REATIVACAO_IE','Reativação da IE'],
-    ['ABERTURA_CONTA_GRAFICA','Abertura Conta Gráfica'],
-    ['CONCLUIDO','Concluído'],
-  ];
-  let cache = [];
+  let cache = [], stagesMeta = null;
 
   async function render() {
     const el = document.getElementById('view-parceiros');
-    el.innerHTML = '<div class="muted">Carregando…</div>';
+    el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
-      cache = await API.get('/api/parceiros');
+      [cache, stagesMeta] = await Promise.all([
+        API.get('/api/parceiros'),
+        API.get('/api/kanban/meta'),
+      ]);
       el.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
           <div class="muted small">${cache.length} parceiro(s)</div>
@@ -25,7 +20,7 @@ window.VIEW_parceiros = (() => {
     } catch (e) { el.innerHTML = `<div class="err">${e.message}</div>`; }
   }
 
-  function stageLabel(s) { return (STAGES.find(x => x[0]===s)||[])[1] || s; }
+  function stageLabel(k) { return stagesMeta?.stageMeta?.[k]?.label || k; }
 
   function drawTable() {
     document.getElementById('pa-table').innerHTML = UI.table({
@@ -35,12 +30,12 @@ window.VIEW_parceiros = (() => {
         { label: 'Telefone', key: 'telefone' },
         { label: 'E-mail', key: 'email' },
         { label: 'Etapas', html: true, get: r =>
-          (r.stages||[]).map(s => `<span style="background:var(--s3);padding:1px 6px;border-radius:10px;font-size:10px;margin-right:3px">${stageLabel(s)}</span>`).join('') || '<span class="muted small">—</span>'
+          (r.stages||[]).map(s => `<span style="background:var(--s3);padding:1px 6px;border-radius:10px;font-size:10px;margin-right:3px">${UI.escapeHtml(stageLabel(s))}</span>`).join('') || '<span class="muted small">--</span>'
         },
         { label: '', html: true, get: r =>
           `<div class="actions">
-            <button class="btn small" data-edit="${r.id}">✎</button>
-            <button class="btn small danger" data-del="${r.id}">×</button>
+            <button class="btn small" data-edit="${r.id}">Editar</button>
+            <button class="btn small danger" data-del="${r.id}">x</button>
           </div>` },
       ],
       rows: cache, empty: 'Nenhum parceiro cadastrado.',
@@ -56,9 +51,11 @@ window.VIEW_parceiros = (() => {
 
   function openForm(p = {}) {
     const isNew = !p.id;
-    const stagesChecks = STAGES.map(([v,l]) => `
-      <label style="display:flex;align-items:center;gap:.4rem;padding:4px;background:var(--s2);border-radius:6px;border:1px solid var(--bd);cursor:pointer">
-        <input type="checkbox" name="stages" value="${v}" ${p.stages?.includes(v)?'checked':''}> ${l}
+    const stagesList = stagesMeta?.stagesOrder || [];
+    const stagesChecks = stagesList.map(k => `
+      <label style="display:flex;align-items:center;gap:.4rem;padding:4px 8px;background:var(--s2);border-radius:6px;border:1px solid var(--bd);cursor:pointer">
+        <input type="checkbox" name="stages" value="${k}" ${p.stages?.includes(k)?'checked':''}>
+        <span>${UI.escapeHtml(stageLabel(k))}</span>
       </label>`).join('');
     UI.openModal(isNew?'Novo parceiro':`Editar parceiro`, `
       <form id="form-pa" class="form-grid">
@@ -67,10 +64,10 @@ window.VIEW_parceiros = (() => {
         <div><label>Telefone</label><input name="telefone" data-mask="phone" maxlength="15" value="${UI.escapeHtml(p.telefone||'')}"></div>
         <div class="full"><label>E-mail</label><input type="email" name="email" value="${UI.escapeHtml(p.email||'')}"></div>
         <div class="full"><label style="margin-bottom:.4rem">Etapas em que atua</label>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px">${stagesChecks}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">${stagesChecks || '<div class="muted small">Cadastre etapas em Parametros antes.</div>'}</div>
         </div>
-        <div class="full"><label><input type="checkbox" name="isSaygo" ${p.isSaygo?'checked':''}> É a própria Saygo</label></div>
-        <div class="full"><label>Observações</label><textarea name="notes" rows="2">${UI.escapeHtml(p.notes||'')}</textarea></div>
+        <div class="full"><label><input type="checkbox" name="isSaygo" ${p.isSaygo?'checked':''}> E a propria Saygo</label></div>
+        <div class="full"><label>Observacoes</label><textarea name="notes" rows="2">${UI.escapeHtml(p.notes||'')}</textarea></div>
         <div class="full form-actions">
           <button type="button" class="btn" id="pa-cancel">Cancelar</button>
           <button type="submit" class="btn primary">Salvar</button>
@@ -96,7 +93,7 @@ window.VIEW_parceiros = (() => {
 
   async function remove(id) {
     if (!confirm('Excluir parceiro?')) return;
-    try { await API.del(`/api/parceiros/${id}`); UI.toast('Excluído'); render(); }
+    try { await API.del(`/api/parceiros/${id}`); UI.toast('Excluido'); render(); }
     catch (e) { UI.toast(e.message, 'err'); }
   }
 

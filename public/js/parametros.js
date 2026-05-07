@@ -1,14 +1,14 @@
 window.VIEW_parametros = (() => {
   let perms = [], permsMeta = null;
-  let stageConfigs = [];
+  let stages = [];
   let activeTab = 'permissoes';
 
   async function render() {
     const el = document.getElementById('view-parametros');
     el.innerHTML = `
-      <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--bd)">
-        <button class="btn ghost ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissoes</button>
-        <button class="btn ghost ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas do Kanban</button>
+      <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem">
+        <button class="btn ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissoes</button>
+        <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
       </div>
       <div id="param-content"></div>`;
     el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { activeTab = b.dataset.tab; render(); });
@@ -39,9 +39,7 @@ window.VIEW_parametros = (() => {
     c.innerHTML = `
       <div class="panel">
         <h3>Matriz de permissoes por perfil</h3>
-        <p class="muted small" style="margin-bottom:1rem">
-          Marque o que cada perfil pode fazer em cada modulo. ADM sempre tem acesso completo.
-        </p>
+        <p class="muted small" style="margin-bottom:1rem">Marque o que cada perfil pode fazer em cada modulo.</p>
         <div style="overflow-x:auto">
           <table class="table">
             <thead>
@@ -103,12 +101,12 @@ window.VIEW_parametros = (() => {
     UI.toast(`${ok} salvo${fail?`, ${fail} falha(s)`:''}`, fail?'err':'ok');
   }
 
-  // ===== ETAPAS DO KANBAN =====
+  // ===== ETAPAS E ATIVIDADES =====
   async function loadStages() {
     const c = document.getElementById('param-content');
     c.innerHTML = '<div class="muted">Carregando...</div>';
     try {
-      stageConfigs = await API.get('/api/kanban/stage-configs');
+      stages = await API.get('/api/kanban/stages');
       drawStages();
     } catch (e) { c.innerHTML = `<div class="err">${e.message}</div>`; }
   }
@@ -116,88 +114,137 @@ window.VIEW_parametros = (() => {
     const c = document.getElementById('param-content');
     c.innerHTML = `
       <div class="panel">
-        <h3>Configuracao das etapas do Kanban</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+          <h3>Etapas e atividades do Kanban</h3>
+          <button class="btn primary" id="add-stage">+ Nova etapa</button>
+        </div>
         <p class="muted small" style="margin-bottom:1rem">
-          Edite o rotulo, SLA (em horas), responsavel padrao e checklist de cada etapa.
-          As alteracoes valem para novos cards. Cards ja criados mantem o checklist atual --
-          edite-os manualmente no card se precisar.
+          Etapas inativas nao aparecem no Kanban. Atividades inativas tambem ficam ocultas em novos cards.
+          Excluir uma etapa so e possivel se nao houver cards usando ela.
         </p>
-        ${stageConfigs.map(stageCard).join('')}
+        ${stages.map(stageCard).join('')}
       </div>`;
+    document.getElementById('add-stage').onclick = () => openStageForm();
     c.addEventListener('click', stageHandler);
   }
   function stageCard(s) {
-    const checklist = Array.isArray(s.checklist) ? s.checklist : [];
-    const items = checklist.map((item, idx) => {
-      const lbl = typeof item === 'string' ? item : (item.label || '');
-      return `
-        <li style="display:flex;gap:.4rem;align-items:center;margin-bottom:4px">
-          <input type="text" data-cl-stage="${s.stage}" data-cl-idx="${idx}" value="${UI.escapeHtml(lbl)}" style="flex:1">
-          <button class="btn small ghost" data-action="rm-item" data-stage="${s.stage}" data-idx="${idx}">x</button>
-        </li>`;
-    }).join('');
+    const acts = (s.activities || []).map(a => `
+      <li class="param-act ${a.active?'':'inactive'}">
+        <input type="text" data-act-edit="${a.id}" value="${UI.escapeHtml(a.label)}">
+        <button class="btn small" data-act-save="${a.id}">Salvar</button>
+        <button class="btn small ${a.active?'':'primary'}" data-act-toggle="${a.id}" data-active="${a.active}">${a.active?'Desativar':'Ativar'}</button>
+        <button class="btn small danger" data-act-del="${a.id}">x</button>
+      </li>`).join('');
     return `
-      <div style="border:1px solid var(--bd);border-radius:var(--r);padding:.8rem 1rem;margin-bottom:.7rem">
-        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:.5rem">
-          <div><label class="muted small">Rotulo</label>
-            <input type="text" data-stage="${s.stage}" data-k="label" value="${UI.escapeHtml(s.label)}"></div>
-          <div><label class="muted small">SLA (horas)</label>
-            <input type="number" min="0" data-stage="${s.stage}" data-k="slaHours" value="${s.slaHours}"></div>
-          <div><label class="muted small">Responsavel padrao</label>
-            <select data-stage="${s.stage}" data-k="defaultResponsibleRole">
-              <option value="" ${!s.defaultResponsibleRole?'selected':''}>--</option>
-              <option value="SAYGO"   ${s.defaultResponsibleRole==='SAYGO'?'selected':''}>Saygo</option>
-              <option value="PARTNER" ${s.defaultResponsibleRole==='PARTNER'?'selected':''}>Parceiro</option>
-              <option value="CLIENT"  ${s.defaultResponsibleRole==='CLIENT'?'selected':''}>Cliente</option>
-              <option value="ADM"     ${s.defaultResponsibleRole==='ADM'?'selected':''}>Adm</option>
-            </select>
+      <div class="param-stage ${s.active?'':'inactive'}">
+        <div class="param-stage-head">
+          <div>
+            <span class="param-stage-order">${s.order}</span>
+            <strong>${UI.escapeHtml(s.label)}</strong>
+            <span class="muted small" style="margin-left:.4rem">[${s.key}]</span>
+            ${s.isFinal?'<span class="badge-final">FINAL</span>':''}
+            ${s.active?'':'<span class="badge-inactive">INATIVA</span>'}
+          </div>
+          <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+            <button class="btn small" data-stage-edit="${s.id}">Editar</button>
+            <button class="btn small ${s.active?'':'primary'}" data-stage-toggle="${s.id}" data-active="${s.active}">${s.active?'Desativar':'Ativar'}</button>
+            <button class="btn small danger" data-stage-del="${s.id}">Excluir</button>
           </div>
         </div>
-        <div style="margin-top:.6rem">
-          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Checklist</strong>
-          <ul style="list-style:none;padding:0;margin:.4rem 0">${items}</ul>
-          <div style="display:flex;gap:.4rem;align-items:center">
-            <input type="text" id="add-${s.stage}" placeholder="Nova atividade..." style="flex:1">
-            <button class="btn small" data-action="add-item" data-stage="${s.stage}">+ Adicionar</button>
-          </div>
+        <div class="muted small" style="margin:.3rem 0 .6rem">
+          SLA: ${s.slaHours}h * Responsavel padrao: ${s.defaultResponsibleRole || '--'}
         </div>
-        <div style="margin-top:.6rem">
-          <button class="btn small primary" data-action="save-stage" data-stage="${s.stage}">Salvar etapa</button>
+        <ul class="param-act-list">${acts}</ul>
+        <div class="param-act-add">
+          <input type="text" id="add-act-${s.id}" placeholder="Nova atividade...">
+          <button class="btn small primary" data-act-add="${s.id}">+ Adicionar atividade</button>
         </div>
       </div>`;
   }
-  async function stageHandler(ev) {
-    const a = ev.target.dataset.action;
-    if (!a) return;
-    const stage = ev.target.dataset.stage;
-    const cfg   = stageConfigs.find(s => s.stage === stage);
-    if (!cfg) return;
-    if (a === 'rm-item') {
-      const idx = parseInt(ev.target.dataset.idx, 10);
-      cfg.checklist = (cfg.checklist || []).filter((_, i) => i !== idx);
-      drawStages();
-    } else if (a === 'add-item') {
-      const inp = document.getElementById('add-' + stage);
-      const v = inp.value.trim();
-      if (!v) return;
-      cfg.checklist = [...(cfg.checklist || []), v];
-      inp.value = '';
-      drawStages();
-    } else if (a === 'save-stage') {
-      // coleta valores dos campos da etapa
-      const labelEl  = document.querySelector(`[data-stage="${stage}"][data-k="label"]`);
-      const slaEl    = document.querySelector(`[data-stage="${stage}"][data-k="slaHours"]`);
-      const respEl   = document.querySelector(`[data-stage="${stage}"][data-k="defaultResponsibleRole"]`);
-      const itemEls  = document.querySelectorAll(`[data-cl-stage="${stage}"]`);
-      const checklist = Array.from(itemEls).map(i => i.value.trim()).filter(Boolean);
+  function openStageForm(stage = null) {
+    const isNew = !stage;
+    UI.openModal(isNew ? 'Nova etapa' : `Editar etapa "${stage.label}"`, `
+      <form id="form-stg" class="form-grid">
+        <div class="full"><label>Nome (label) *</label><input name="label" required value="${UI.escapeHtml(stage?.label||'')}"></div>
+        ${isNew ? '<div class="full"><label>Chave (auto, opcional)</label><input name="key" placeholder="Ex: ONBOARDING (deixar vazio gera automaticamente)"></div>' : ''}
+        <div><label>Ordem</label><input type="number" name="order" value="${stage?.order ?? 0}"></div>
+        <div><label>SLA (horas)</label><input type="number" min="0" name="slaHours" value="${stage?.slaHours ?? 72}"></div>
+        <div class="full"><label>Responsavel padrao</label>
+          <select name="defaultResponsibleRole">
+            <option value=""        ${!stage?.defaultResponsibleRole?'selected':''}>--</option>
+            <option value="SAYGO"   ${stage?.defaultResponsibleRole==='SAYGO'?'selected':''}>Saygo</option>
+            <option value="PARTNER" ${stage?.defaultResponsibleRole==='PARTNER'?'selected':''}>Parceiro</option>
+            <option value="CLIENT"  ${stage?.defaultResponsibleRole==='CLIENT'?'selected':''}>Cliente</option>
+            <option value="ADM"     ${stage?.defaultResponsibleRole==='ADM'?'selected':''}>Adm</option>
+          </select>
+        </div>
+        <div class="full"><label><input type="checkbox" name="isFinal" ${stage?.isFinal?'checked':''}> Etapa final (Concluido)</label></div>
+        <div class="full"><label><input type="checkbox" name="active" ${stage===null||stage.active?'checked':''}> Ativa</label></div>
+        <div class="full form-actions">
+          <button type="button" class="btn" id="stg-cancel">Cancelar</button>
+          <button type="submit" class="btn primary">Salvar</button>
+        </div>
+      </form>`);
+    document.getElementById('stg-cancel').onclick = UI.closeModal;
+    document.getElementById('form-stg').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const data = {
+        label: fd.get('label'),
+        key:   fd.get('key') || undefined,
+        order: Number(fd.get('order')) || 0,
+        slaHours: Number(fd.get('slaHours')) || 72,
+        defaultResponsibleRole: fd.get('defaultResponsibleRole') || null,
+        isFinal: !!fd.get('isFinal'),
+        active:  !!fd.get('active'),
+      };
       try {
-        await API.put(`/api/kanban/stage-configs/${stage}`, {
-          label: labelEl.value, slaHours: Number(slaEl.value)||0,
-          defaultResponsibleRole: respEl.value || null,
-          checklist,
-        });
-        UI.toast('Etapa salva');
-        loadStages();
+        if (isNew) await API.post('/api/kanban/stages', data);
+        else       await API.put(`/api/kanban/stages/${stage.id}`, data);
+        UI.toast('Etapa salva'); UI.closeModal(); loadStages();
+      } catch (e) { UI.toast(e.message, 'err'); }
+    };
+  }
+  async function stageHandler(ev) {
+    const t = ev.target;
+    const id = t.dataset.stageEdit || t.dataset.stageDel || t.dataset.stageToggle
+            || t.dataset.actAdd || t.dataset.actSave || t.dataset.actDel || t.dataset.actToggle;
+    if (!id) return;
+    if (t.dataset.stageEdit) {
+      const s = stages.find(x => x.id === id);
+      openStageForm(s);
+    } else if (t.dataset.stageDel) {
+      if (!confirm('Excluir essa etapa? So funciona se nao houver cards usando.')) return;
+      try { await API.del(`/api/kanban/stages/${id}`); UI.toast('Etapa excluida'); loadStages(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    } else if (t.dataset.stageToggle) {
+      const isActive = t.dataset.active === 'true';
+      try {
+        await API.put(`/api/kanban/stages/${id}`, { active: !isActive });
+        UI.toast(isActive ? 'Inativada' : 'Ativada'); loadStages();
+      } catch (e) { UI.toast(e.message, 'err'); }
+    } else if (t.dataset.actAdd) {
+      const inp = document.getElementById('add-act-' + id);
+      const label = inp.value.trim();
+      if (!label) return;
+      try {
+        await API.post(`/api/kanban/stages/${id}/activities`, { label });
+        UI.toast('Atividade adicionada'); loadStages();
+      } catch (e) { UI.toast(e.message, 'err'); }
+    } else if (t.dataset.actSave) {
+      const inp = document.querySelector(`[data-act-edit="${id}"]`);
+      const label = inp.value.trim();
+      try { await API.put(`/api/kanban/activities/${id}`, { label }); UI.toast('Atividade atualizada'); loadStages(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    } else if (t.dataset.actDel) {
+      if (!confirm('Excluir essa atividade?')) return;
+      try { await API.del(`/api/kanban/activities/${id}`); UI.toast('Atividade excluida'); loadStages(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    } else if (t.dataset.actToggle) {
+      const isActive = t.dataset.active === 'true';
+      try {
+        await API.put(`/api/kanban/activities/${id}`, { active: !isActive });
+        UI.toast(isActive ? 'Inativada' : 'Ativada'); loadStages();
       } catch (e) { UI.toast(e.message, 'err'); }
     }
   }
