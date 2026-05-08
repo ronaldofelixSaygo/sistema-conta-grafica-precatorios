@@ -19,8 +19,15 @@ window.CHAT = (() => {
   close.addEventListener('click', () => panel.classList.add('hidden'));
 
   async function init() {
-    socket = io('/', { withCredentials: true });
-    socket.on('connect_error', e => console.warn('socket err:', e?.message));
+    const token = AUTH.getToken?.();
+    socket = io('/', {
+      withCredentials: true,
+      auth: token ? { token } : {},
+      transports: ['websocket', 'polling'],
+    });
+    socket.on('connect',       ()=> console.log('[chat] socket conectado'));
+    socket.on('disconnect',    r => console.log('[chat] socket desconectado:', r));
+    socket.on('connect_error', e => console.error('[chat] connect_error:', e?.message));
 
     socket.on('chat:message', (msg) => {
       const me = AUTH.user();

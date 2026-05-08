@@ -1,26 +1,31 @@
 window.AUTH = (() => {
   let me = null;
-  let perms = { modules: [] };
+  let perms = { modules: [], byModule: {} };
+  let token = null;
 
   async function tryRestore() {
     try {
       const r = await API.get('/api/auth/me');
-      me = r.user; perms = r.perms || { modules: [] };
+      me = r.user; perms = r.perms || { modules: [], byModule: {} };
+      // Para socket: tenta recuperar token previamente salvo (login)
+      try { token = sessionStorage.getItem('jwt') || null; } catch {}
       return me;
-    } catch { me = null; perms = { modules: [] }; return null; }
+    } catch { me = null; perms = { modules: [], byModule: {} }; token = null; return null; }
   }
 
   async function login(email, password) {
     const r = await API.post('/api/auth/login', { email, password });
     me = r.user;
-    // recarrega permissoes
-    try { const m = await API.get('/api/auth/me'); perms = m.perms || { modules: [] }; } catch {}
+    token = r.token || null;
+    try { if (token) sessionStorage.setItem('jwt', token); } catch {}
+    try { const m = await API.get('/api/auth/me'); perms = m.perms || { modules: [], byModule: {} }; } catch {}
     return me;
   }
 
   async function logout() {
     try { await API.post('/api/auth/logout'); } catch {}
-    me = null; perms = { modules: [] };
+    me = null; perms = { modules: [], byModule: {} }; token = null;
+    try { sessionStorage.removeItem('jwt'); } catch {}
     location.reload();
   }
 
@@ -31,17 +36,19 @@ window.AUTH = (() => {
   function isStaff()  { return role() === 'ADM' || role() === 'SAYGO'; }
   function isPartner(){ return role() === 'PARTNER'; }
   function isPartnerEscritorio() { return isPartner() && partnerType() === 'ESCRITORIO'; }
+
   function canView(mod)   { return perms?.byModule?.[mod]?.canView   ?? false; }
   function canCreate(mod) { return perms?.byModule?.[mod]?.canCreate ?? false; }
   function canEdit(mod)   { return perms?.byModule?.[mod]?.canEdit   ?? false; }
   function canDelete(mod) { return perms?.byModule?.[mod]?.canDelete ?? false; }
   function canMutate(mod) { return canCreate(mod) || canEdit(mod) || canDelete(mod); }
   function getModules() { return perms?.modules || []; }
+  function getToken() { return token; }
 
   return {
     tryRestore, login, logout, user, role, partnerType,
     isAdm, isStaff, isPartner, isPartnerEscritorio,
-    canView, canCreate, canEdit, canDelete, canMutate, getModules,
+    canView, canCreate, canEdit, canDelete, canMutate, getModules, getToken,
   };
 })();
 
