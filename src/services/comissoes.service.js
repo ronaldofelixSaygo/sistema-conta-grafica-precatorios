@@ -6,9 +6,31 @@ import { clienteScope } from '../utils/scope.js';
 // Replica a regra do sistema antigo: periodo entre (dia_fechamento+1)
 // do mes anterior e dia_fechamento do mes corrente.
 // =====================================================================
-export async function simulate(user, { parceiro, mes, ano } = {}) {
+export async function simulate(user, { parceiro, parceiroId, mes, ano } = {}) {
+  // Para PARTNER, sempre força o filtro pelo próprio parceiro
+  // Para STAFF/ADM, opcionalmente filtra por parceiroId selecionado
+  let parceiroFiltroNome = null;
+  if (user.role === 'PARTNER') {
+    if (user.parceiroId) {
+      const p = await prisma.parceiro.findUnique({
+        where: { id: user.parceiroId }, select: { nome: true },
+      });
+      parceiroFiltroNome = p?.nome || null;
+    }
+  } else if (parceiroId) {
+    const p = await prisma.parceiro.findUnique({
+      where: { id: parceiroId }, select: { nome: true },
+    });
+    parceiroFiltroNome = p?.nome || null;
+  } else if (parceiro) {
+    parceiroFiltroNome = parceiro;
+  }
+
+  const where = { AND: [clienteScope(user), { percentualComissao: { gt: 0 } }] };
+  if (parceiroFiltroNome) where.AND.push({ escritorio: parceiroFiltroNome });
+
   const clientes = await prisma.cliente.findMany({
-    where: { AND: [clienteScope(user), { percentualComissao: { gt: 0 } }] },
+    where,
     select: {
       id: true, nome: true, escritorio: true,
       percentualComissao: true, diaFechamento: true,
@@ -52,7 +74,7 @@ export async function simulate(user, { parceiro, mes, ano } = {}) {
       if (totalCred > 0) {
         const valorComissao = totalCred * (pct / 100);
         const mesAno = `${String(m + 1).padStart(2, '0')}/${y}`;
-        if (!parceiro || partner === parceiro) {
+        if (!parceiroFiltroNome || partner === parceiroFiltroNome) {
           const key = `${partner}|${mesAno}`;
           if (!acc[key]) acc[key] = {
             parceiro: partner, mes_ano: mesAno, total_comissao: 0, detalhes: [],
@@ -117,8 +139,18 @@ export async function listCommissions(user) {
 
 // Gera (cria/atualiza) a apuracao para o mes-ref e parceiro do user logado.
 // Calcula o total_base com base nos clientes deste escritorio.
-export async function generateCommission(user, { monthRef }) {
-  const parceiroId = ensurePartnerEscritorio(user);
+export async function generateCommission(user, { monthRef, parceiroId: bodyParceiroId } = {}) {
+  // STAFF/ADM podem gerar para qualquer parceiro (precisa enviar parceiroId)
+  // PARTNER ESCRITORIO sempre gera o seu
+  let parceiroId;
+  if (user.role === 'ADM' || user.role === 'SAYGO') {
+    if (!bodyParceiroId) {
+      const e = new Error('Selecione o parceiro para gerar a apuração'); e.status = 400; throw e;
+    }
+    parceiroId = bodyParceiroId;
+  } else {
+    parceiroId = ensurePartnerEscritorio(user);
+  }
   if (!monthRef || !/^\d{4}-\d{2}$/.test(monthRef)) {
     const e = new Error('monthRef inválido (use YYYY-MM)'); e.status = 400; throw e;
   }

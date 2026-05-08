@@ -1,5 +1,16 @@
 window.VIEW_comissoes = (() => {
   let activeTab = 'simulacao';
+  let parceirosCache = null;
+
+  async function loadParceiros() {
+    if (parceirosCache) return parceirosCache;
+    try {
+      const list = await API.get('/api/parceiros');
+      // só os do tipo ESCRITORIO podem ter comissão (são os que têm clientes vinculados)
+      parceirosCache = (list || []).filter(p => !p.isSaygo && (p.type === 'ESCRITORIO' || !p.type));
+      return parceirosCache;
+    } catch { parceirosCache = []; return []; }
+  }
 
   async function render() {
     const el = document.getElementById('view-comissoes');
@@ -20,9 +31,22 @@ window.VIEW_comissoes = (() => {
   // ===== SIMULAÇÃO =====
   async function loadSim() {
     const c = document.getElementById('com-content');
+    const isStaff = AUTH.isStaff();
+
+    // Para PARTNER, o parceiro é ele mesmo — não exibe campo
+    let parcInput = '';
+    if (isStaff) {
+      const ps = await loadParceiros();
+      parcInput = `
+        <select id="sim-parc">
+          <option value="">Todos os parceiros</option>
+          ${ps.map(p => `<option value="${p.id}">${UI.escapeHtml(p.nome)}</option>`).join('')}
+        </select>`;
+    }
+
     c.innerHTML = `
       <div class="page-toolbar">
-        <input id="sim-parc" placeholder="Parceiro" />
+        ${parcInput}
         <input id="sim-mes"  placeholder="MM" maxlength="2" style="max-width:80px" />
         <input id="sim-ano"  placeholder="AAAA" maxlength="4" style="max-width:100px" />
         <button class="btn primary" id="sim-go">Simular Comissões</button>
@@ -31,9 +55,14 @@ window.VIEW_comissoes = (() => {
     document.getElementById('sim-go').onclick = simulate;
   }
   async function simulate() {
+    const isStaff = AUTH.isStaff();
     const q = {
-      parceiro: val('sim-parc'), mes: val('sim-mes'), ano: val('sim-ano'),
+      mes: val('sim-mes'), ano: val('sim-ano'),
     };
+    if (isStaff) {
+      const pid = val('sim-parc');
+      if (pid) q.parceiroId = pid;
+    }
     const out = document.getElementById('sim-list');
     out.innerHTML = '<div class="muted">Calculando...</div>';
     try {
@@ -71,7 +100,8 @@ window.VIEW_comissoes = (() => {
       const isStaff = AUTH.isStaff();
       const isPartnerEsc = AUTH.isPartnerEscritorio();
 
-      const action = isPartnerEsc
+      const canCreate = isPartnerEsc || isStaff;
+      const action = canCreate
         ? `<button class="btn primary" id="ap-new">+ Nova apuração</button>`
         : '';
       c.innerHTML = `
@@ -82,7 +112,7 @@ window.VIEW_comissoes = (() => {
         </div>
         <div id="ap-list"></div>`;
       drawApuList(list);
-      if (isPartnerEsc) document.getElementById('ap-new').onclick = openNewApu;
+      if (canCreate) document.getElementById('ap-new').onclick = openNewApu;
     } catch (e) { c.innerHTML = `<div class="err">${e.message}</div>`; }
   }
 
@@ -114,14 +144,35 @@ window.VIEW_comissoes = (() => {
     });
   }
 
-  function openNewApu() {
+  async function openNewApu() {
+    const isStaff = AUTH.isStaff();
+    let parcField = '';
+    if (isStaff) {
+      const ps = await loadParceiros();
+      parcField = `
+        <div class="full"><label>Parceiro *</label>
+          <select name="parceiroId" required>
+            <option value="">Selecione...</option>
+            ${ps.map(p => `<option value="${p.id}">${UI.escapeHtml(p.nome)}</option>`).join('')}
+          </select>
+        </div>`;
+    } else {
+      // PARTNER ESCRITORIO — usa o próprio parceiro (informativo)
+      const me = AUTH.user();
+      parcField = `
+        <div class="full"><label>Parceiro</label>
+          <input value="${UI.escapeHtml(me?.parceiroNome || '— seu parceiro vinculado —')}" readonly>
+        </div>`;
+    }
+
     UI.openModal('Nova apuração de comissão', `
       <form id="form-apu" class="form-grid">
+        ${parcField}
         <div class="full"><label>Mês de referência (YYYY-MM) *</label>
           <input name="monthRef" required placeholder="2026-05" pattern="\\d{4}-\\d{2}">
         </div>
         <div class="full muted small">
-          O sistema calcula a comissão dos seus clientes para esse mês baseado na regra de fechamento.
+          O sistema calcula a comissão dos clientes desse parceiro para esse mês baseado na regra de fechamento.
           Você pode reprocessar enquanto a apuração não estiver fechada.
         </div>
         <div class="full form-actions">
@@ -133,8 +184,14 @@ window.VIEW_comissoes = (() => {
     document.getElementById('form-apu').onsubmit = async ev => {
       ev.preventDefault();
       const monthRef = ev.target.monthRef.value;
+      const payload = { monthRef };
+      if (isStaff) {
+        const pid = ev.target.parceiroId?.value;
+        if (!pid) return UI.toast('Selecione o parceiro', 'err');
+        payload.parceiroId = pid;
+      }
       try {
-        await API.post('/api/comissoes', { monthRef });
+        await API.post('/api/comissoes', payload);
         UI.toast('Apuração gerada'); UI.closeModal(); render();
       } catch (e) { UI.toast(e.message, 'err'); }
     };
