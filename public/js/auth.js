@@ -32,8 +32,20 @@ window.AUTH = (() => {
   function isPartner(){ return role() === 'PARTNER'; }
   function isPartnerEscritorio() { return isPartner() && partnerType() === 'ESCRITORIO'; }
   function canView(mod) { return perms.modules?.includes(mod) ?? false; }
+  // Igual ao backend canMutate: ADM, SAYGO ou PARTNER ESCRITORIO podem mutar nas areas onde tem acesso.
+  function canMutate(mod) {
+    if (!me) return false;
+    if (me.role === 'ADM') return true;
+    if (me.role === 'SAYGO') return ['clientes','movimentacoes','kanban','acionamentos','parceiros','comissoes'].includes(mod);
+    if (me.role === 'PARTNER') {
+      if (partnerType() === 'ESCRITORIO') return ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(mod);
+      return ['kanban'].includes(mod);
+    }
+    if (me.role === 'CLIENT') return ['acionamentos'].includes(mod);
+    return false;
+  }
 
-  return { tryRestore, login, logout, user, role, partnerType, isAdm, isStaff, isPartner, isPartnerEscritorio, canView };
+  return { tryRestore, login, logout, user, role, partnerType, isAdm, isStaff, isPartner, isPartnerEscritorio, canView, canMutate };
 })();
 
 // Login form

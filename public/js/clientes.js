@@ -18,7 +18,7 @@ window.VIEW_clientes = (() => {
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
       cache = await API.get('/api/clientes');
-      const canMutate = AUTH.isStaff();
+      const canMutate = AUTH.canMutate('clientes');
       const escritorios = [...new Set(cache.map(c => c.escritorio).filter(Boolean))].sort();
       el.innerHTML = `
         <div class="page-toolbar">

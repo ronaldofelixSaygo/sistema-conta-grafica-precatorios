@@ -15,7 +15,7 @@ window.VIEW_movimentacoes = (() => {
 
   async function render() {
     const el = document.getElementById('view-movimentacoes');
-    const canMutate = AUTH.isStaff();
+    const canMutate = AUTH.canMutate('movimentacoes');
     el.innerHTML = `
       <div class="page-toolbar">
         <input id="m-search"   placeholder="Buscar (cliente / DUIMP)" />
@@ -67,7 +67,7 @@ window.VIEW_movimentacoes = (() => {
     };
     try {
       const r = await API.get('/api/movimentacoes', q);
-      const canMutate = AUTH.isStaff();
+      const canMutate = AUTH.canMutate('movimentacoes');
       document.getElementById('m-table').innerHTML = UI.table({
         cols: [
           { label: 'Cliente', key: 'cliente_nome' },

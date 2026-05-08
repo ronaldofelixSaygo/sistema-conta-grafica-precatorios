@@ -41,14 +41,21 @@ export function movimentacaoScope(user) {
   }
 }
 
-// Pode editar/criar/deletar clientes? Apenas ADM e SAYGO.
+// Pode editar/criar/deletar clientes? ADM, SAYGO ou PARTNER do tipo ESCRITORIO.
+// O escopo (clienteScope) ja garante que parceiro so mexe nos clientes dele.
 export function canMutateCliente(user) {
-  return user && (user.role === 'ADM' || user.role === 'SAYGO');
+  if (!user) return false;
+  if (user.role === 'ADM' || user.role === 'SAYGO') return true;
+  if (user.role === 'PARTNER' && user.partnerType === 'ESCRITORIO') return true;
+  return false;
 }
 
-// Pode editar/criar/deletar movimentações? ADM, SAYGO. Parceiros e Clientes apenas leem.
+// Pode editar/criar/deletar movimentacoes? Mesma regra acima.
 export function canMutateMovimentacao(user) {
-  return user && (user.role === 'ADM' || user.role === 'SAYGO');
+  if (!user) return false;
+  if (user.role === 'ADM' || user.role === 'SAYGO') return true;
+  if (user.role === 'PARTNER' && user.partnerType === 'ESCRITORIO') return true;
+  return false;
 }
 
 // Lista de roles que podem ver tela de admin de usuários

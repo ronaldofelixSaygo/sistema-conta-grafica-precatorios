@@ -43,7 +43,11 @@ export function canMutate(user, mod) {
   }
   if (user.role === 'PARTNER') {
     const t = user.partnerType || 'OUTRO';
-    if (t === 'ESCRITORIO') return ['kanban','acionamentos','comissoes'].includes(mod);
+    if (t === 'ESCRITORIO') {
+      // Escritorio tem as mesmas mutacoes que SAYGO, mas o escopo
+      // (clienteScope) ja restringe aos clientes vinculados ao seu escritorio.
+      return ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(mod);
+    }
     return ['kanban'].includes(mod);
   }
   if (user.role === 'CLIENT') return ['acionamentos'].includes(mod);
