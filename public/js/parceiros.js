@@ -11,8 +11,8 @@ window.VIEW_parceiros = (() => {
       ]);
       el.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-          <div class="muted small">${cache.length} parceiro(s)</div>
-          <button class="btn primary" id="pa-new">+ Novo parceiro</button>
+          <div class="muted small">${cache.length} interveniente(s)</div>
+          <button class="btn primary" id="pa-new">+ Novo interveniente aduaneiro</button>
         </div>
         <div id="pa-table"></div>`;
       drawTable();
@@ -42,7 +42,7 @@ window.VIEW_parceiros = (() => {
             <button class="btn small danger" data-del="${r.id}">x</button>
           </div>` },
       ],
-      rows: cache, empty: 'Nenhum parceiro cadastrado.',
+      rows: cache, empty: 'Nenhum interveniente cadastrado.',
     });
     const t = document.getElementById('pa-table');
     t.addEventListener('click', e => {
@@ -61,13 +61,13 @@ window.VIEW_parceiros = (() => {
         <input type="checkbox" name="stages" value="${k}" ${p.stages?.includes(k)?'checked':''}>
         <span>${UI.escapeHtml(stageLabel(k))}</span>
       </label>`).join('');
-    UI.openModal(isNew?'Novo parceiro':`Editar parceiro`, `
+    UI.openModal(isNew?'Novo interveniente aduaneiro':`Editar interveniente aduaneiro`, `
       <form id="form-pa" class="form-grid">
         <div class="full"><label>Nome *</label><input name="nome" required value="${UI.escapeHtml(p.nome||'')}"></div>
         <div><label>CNPJ</label><input name="cnpj" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(p.cnpj||'')}"></div>
         <div><label>Telefone</label><input name="telefone" data-mask="phone" maxlength="15" value="${UI.escapeHtml(p.telefone||'')}"></div>
         <div class="full"><label>E-mail</label><input type="email" name="email" value="${UI.escapeHtml(p.email||'')}"></div>
-        <div class="full"><label>Tipo de Parceiro *</label>
+        <div class="full"><label>Tipo de Interveniente *</label>
           <select name="type" required>
             <option value="OUTRO"             ${(p.type||'OUTRO')==='OUTRO'?'selected':''}>Outro</option>
             <option value="ESCRITORIO"        ${p.type==='ESCRITORIO'?'selected':''}>Escritório (acessa clientes, movs, comissões)</option>
@@ -98,13 +98,13 @@ window.VIEW_parceiros = (() => {
       try {
         if (isNew) await API.post('/api/parceiros', data);
         else       await API.put(`/api/parceiros/${p.id}`, data);
-        UI.toast('Parceiro salvo'); UI.closeModal(); render();
+        UI.toast('Interveniente salvo'); UI.closeModal(); render();
       } catch (e) { UI.toast(e.message, 'err'); }
     };
   }
 
   async function remove(id) {
-    if (!confirm('Excluir parceiro?')) return;
+    if (!confirm('Excluir interveniente?')) return;
     try { await API.del(`/api/parceiros/${id}`); UI.toast('Excluido'); render(); }
     catch (e) { UI.toast(e.message, 'err'); }
   }

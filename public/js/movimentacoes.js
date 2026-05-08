@@ -94,7 +94,7 @@ window.VIEW_movimentacoes = (() => {
           { label: 'Tipo Movimento', html: true, get: r => tipoPill(r.tipo_movimento) },
           { label: 'Data NF', get: r => UI.fmtDate(r.data_nf) },
           { label: 'DUIMP/DI/Proc.', key: 'duimp_di_processo' },
-          { label: 'Parceiro', key: 'parceiro' },
+          { label: 'Interveniente', key: 'parceiro' },
           { label: '%', align: 'right', get: r => (r.percentual ?? 0) + '%' },
           { label: 'Valor', align: 'right', html: true, get: r => {
             const v = r.valor_ajustado;

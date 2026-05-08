@@ -3,7 +3,7 @@ window.VIEW_usuarios = (() => {
   const ROLES = [
     { v: 'ADM',     l: 'Administrador (Adm)' },
     { v: 'SAYGO',   l: 'Usuário Saygo' },
-    { v: 'PARTNER', l: 'Parceiro / Escritório' },
+    { v: 'PARTNER', l: 'Interveniente Aduaneiro' },
     { v: 'CLIENT',  l: 'Cliente' },
   ];
   const TYPE_LABEL = { ESCRITORIO:'Escritório', ARMADOR_LOGISTICO:'Armador', OUTRO:'Outro' };
@@ -35,7 +35,7 @@ window.VIEW_usuarios = (() => {
         { label: 'Nome',  key: 'name' },
         { label: 'Email', key: 'email' },
         { label: 'Perfil', html: true, get: r => `<strong>${r.role}</strong>` },
-        { label: 'Parceiro/Tipo', html: true, get: r =>
+        { label: 'Interveniente/Tipo', html: true, get: r =>
           r.parceiro
             ? `${UI.escapeHtml(r.parceiro.nome)} <span class="pill ${r.parceiro.type||'OUTRO'}">${TYPE_LABEL[r.parceiro.type||'OUTRO']}</span>`
             : (r.officeName ? UI.escapeHtml(r.officeName) : '—')
@@ -76,12 +76,12 @@ window.VIEW_usuarios = (() => {
         <div><label>Senha ${isNew?'*':'(deixe em branco p/ manter)'}</label><input type="password" name="password" ${isNew?'required':''} minlength="6"></div>
 
         <div class="full" id="row-parceiro" style="${u.role==='PARTNER'?'':'display:none'}">
-          <label>Parceiro vinculado * <span class="muted small">(define o tipo: Escritório/Armador/Outro)</span></label>
+          <label>Interveniente vinculado * <span class="muted small">(define o tipo: Escritório/Armador/Outro)</span></label>
           <select name="parceiroId">
             <option value="">— selecione —</option>
             ${parcOpts}
           </select>
-          ${parceiros.length===0 ? '<div class="muted small" style="margin-top:.3rem">⚠ Nenhum parceiro cadastrado. Cadastre em "Parceiros" antes.</div>' : ''}
+          ${parceiros.length===0 ? '<div class="muted small" style="margin-top:.3rem">⚠ Nenhum interveniente cadastrado. Cadastre em "Intervenientes Aduaneiros" antes.</div>' : ''}
         </div>
 
         <div class="full" id="row-office" style="${u.role==='PARTNER'?'':'display:none'}">

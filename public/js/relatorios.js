@@ -66,7 +66,7 @@ window.VIEW_relatorios = (() => {
             }},
             { label: 'Data NF', get: r => UI.fmtDate(r.data_nf) },
             { label: 'DUIMP/DI/Proc.', key: 'duimp_di_processo' },
-            { label: 'Parceiro', key: 'parceiro' },
+            { label: 'Interveniente', key: 'parceiro' },
             { label: '%', align: 'right', get: r => (r.percentual ?? 0) + '%' },
             { label: 'Valor', align: 'right', get: r => UI.fmtMoney(r.valor) },
             { label: 'Ajustado', align: 'right', html: true, get: r =>

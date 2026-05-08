@@ -12,11 +12,11 @@ window.VIEW_parametros = (() => {
       { key: 'percentualComissao',  label: '% Comissão' },
       { key: 'diaFechamento',       label: 'Dia fechamento' },
       { key: 'observacoes',         label: 'Observações' },
-      { key: 'parceiroSala',        label: 'Parceiro sala' },
-      { key: 'parceiroFilial',      label: 'Parceiro filial' },
-      { key: 'parceiroIe',          label: 'Parceiro IE' },
+      { key: 'parceiroSala',        label: 'Interveniente sala' },
+      { key: 'parceiroFilial',      label: 'Interveniente filial' },
+      { key: 'parceiroIe',          label: 'Interveniente IE' },
       { key: 'locacaoSala',         label: 'Status locação sala' },
-      { key: 'aberturaFilial',      label: 'Status abertura filial' },
+      { key: 'aberturaFilial',      label: 'Status filial/empresa' },
       { key: 'reativacaoIe',        label: 'Status reativação IE' },
       { key: 'contaGrafica',        label: 'Status conta gráfica' },
       { key: 'clienteCertificado',  label: 'Cliente certificado' },
@@ -25,7 +25,7 @@ window.VIEW_parametros = (() => {
       { key: 'percentual',     label: '%' },
       { key: 'valor',          label: 'Valor bruto' },
       { key: 'valorAjustado',  label: 'Valor ajustado' },
-      { key: 'parceiro',       label: 'Parceiro' },
+      { key: 'parceiro',       label: 'Interveniente' },
     ],
   };
 
@@ -155,15 +155,15 @@ window.VIEW_parametros = (() => {
       dashboard:'Painel', clientes:'Clientes', movimentacoes:'Movimentações',
       saldos:'Saldos', comissoes:'Comissões', relatorios:'Relatórios',
       alertas:'Alertas', kanban:'Kanban', acionamentos:'Acionamentos',
-      parceiros:'Parceiros', usuarios:'Usuários', auditoria:'Auditoria',
+      parceiros:'Intervenientes Aduaneiros', usuarios:'Usuários', auditoria:'Auditoria',
       chat:'Chat', parametros:'Parâmetros',
     };
     const profileLabels = {
       ADM: 'Administrador',
       SAYGO: 'Saygo',
-      PARTNER_ESCRITORIO: 'Parceiro<br><small>Escritório</small>',
-      PARTNER_ARMADOR:    'Parceiro<br><small>Armador Logístico</small>',
-      PARTNER_OUTRO:      'Parceiro<br><small>Outro</small>',
+      PARTNER_ESCRITORIO: 'Interveniente<br><small>Escritório</small>',
+      PARTNER_ARMADOR:    'Interveniente<br><small>Armador Logístico</small>',
+      PARTNER_OUTRO:      'Interveniente<br><small>Outro</small>',
       CLIENT: 'Cliente',
     };
     const profiles = permsMeta.PROFILES || [];
@@ -283,9 +283,9 @@ window.VIEW_parametros = (() => {
     const profiles = permsMeta.PROFILES || [];
     const profileLabels = {
       ADM:'Administrador', SAYGO:'Saygo',
-      PARTNER_ESCRITORIO:'Parceiro Escritório',
-      PARTNER_ARMADOR:'Parceiro Armador',
-      PARTNER_OUTRO:'Parceiro Outro',
+      PARTNER_ESCRITORIO:'Interveniente Escritório',
+      PARTNER_ARMADOR:'Interveniente Armador',
+      PARTNER_OUTRO:'Interveniente Outro',
       CLIENT:'Cliente',
     };
     const rows = fields.map(f => {
@@ -415,7 +415,7 @@ window.VIEW_parametros = (() => {
           <select name="defaultResponsibleRole">
             <option value=""        ${!stage?.defaultResponsibleRole?'selected':''}>--</option>
             <option value="SAYGO"   ${stage?.defaultResponsibleRole==='SAYGO'?'selected':''}>Saygo</option>
-            <option value="PARTNER" ${stage?.defaultResponsibleRole==='PARTNER'?'selected':''}>Parceiro</option>
+            <option value="PARTNER" ${stage?.defaultResponsibleRole==='PARTNER'?'selected':''}>Interveniente</option>
             <option value="CLIENT"  ${stage?.defaultResponsibleRole==='CLIENT'?'selected':''}>Cliente</option>
             <option value="ADM"     ${stage?.defaultResponsibleRole==='ADM'?'selected':''}>Adm</option>
           </select>

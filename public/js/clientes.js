@@ -55,7 +55,7 @@ window.VIEW_clientes = (() => {
         <h3>Status dos serviços</h3>
         <div class="client-grid">
           ${c.locacaoSala         !== undefined ? fieldHtml('Locação Sala',     c.locacaoSala,     { pill: true }) : ''}
-          ${c.aberturaFilial      !== undefined ? fieldHtml('Abertura Filial',   c.aberturaFilial,  { pill: true }) : ''}
+          ${c.aberturaFilial      !== undefined ? fieldHtml('Filial/Empresa',   c.aberturaFilial,  { pill: true }) : ''}
           ${c.reativacaoIe        !== undefined ? fieldHtml('Reativação IE',     c.reativacaoIe,    { pill: true }) : ''}
           ${c.contaGrafica        !== undefined ? fieldHtml('Conta Gráfica',     c.contaGrafica,    { pill: true }) : ''}
           ${c.clienteCertificado  !== undefined ? fieldHtml('Cliente Certificado', c.clienteCertificado, { pill: true }) : ''}
@@ -100,7 +100,7 @@ window.VIEW_clientes = (() => {
         { label: 'Nome', key: 'nome' },
         { label: 'Escritório', key: 'escritorio' },
         sample.locacaoSala         !== undefined && { label: 'Sala',          html: true, get: r => pill(r.locacaoSala) },
-        sample.aberturaFilial      !== undefined && { label: 'Filial',        html: true, get: r => pill(r.aberturaFilial) },
+        sample.aberturaFilial      !== undefined && { label: 'Filial/Empresa', html: true, get: r => pill(r.aberturaFilial) },
         sample.reativacaoIe        !== undefined && { label: 'IE',            html: true, get: r => pill(r.reativacaoIe) },
         sample.contaGrafica        !== undefined && { label: 'Conta Gráfica', html: true, get: r => pill(r.contaGrafica) },
         sample.clienteCertificado  !== undefined && { label: 'Crédito Cert.', html: true, get: r => pill(r.clienteCertificado) },
@@ -143,19 +143,19 @@ window.VIEW_clientes = (() => {
         <div class="full"><label>Nome *</label><input name="nome" required value="${UI.escapeHtml(cli.nome||'')}"></div>
         <div><label>CNPJ</label><input name="cnpj" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(cli.cnpj||'')}"></div>
         <div><label>CNPJ filial</label><input name="cnpj_filial" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(cli.cnpjFilial||'')}"></div>
-        <div class="full"><label>Escritório (Parceiro principal)</label><input name="escritorio" value="${UI.escapeHtml(cli.escritorio||'')}"></div>
+        <div class="full"><label>Escritório (Interveniente principal)</label><input name="escritorio" value="${UI.escapeHtml(cli.escritorio||'')}"></div>
 
         <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Status dos serviços</strong></div>
         <div><label>Locação Sala</label>${selYesNo('locacao_sala',     cli.locacaoSala)}</div>
-        <div><label>Abertura Filial</label>${selYesNo('abertura_filial',cli.aberturaFilial)}</div>
+        <div><label>Filial/Empresa</label>${selYesNo('abertura_filial',cli.aberturaFilial)}</div>
         <div><label>Reativação IE</label>${selYesNo('reativacao_ie',    cli.reativacaoIe)}</div>
         <div><label>Conta gráfica</label>${selYesNo('conta_grafica',    cli.contaGrafica)}</div>
         <div><label>Cliente certificado</label>${selYesNo('cliente_certificado', cli.clienteCertificado)}</div>
 
-        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Parceiros responsáveis</strong></div>
-        <div><label>Parceiro Sala</label><input name="parceiro_sala" value="${UI.escapeHtml(cli.parceiroSala||'')}"></div>
-        <div><label>Parceiro Filial</label><input name="parceiro_filial" value="${UI.escapeHtml(cli.parceiroFilial||'')}"></div>
-        <div><label>Parceiro IE</label><input name="parceiro_ie" value="${UI.escapeHtml(cli.parceiroIe||'')}"></div>
+        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Intervenientes responsáveis</strong></div>
+        <div><label>Interveniente Sala</label><input name="parceiro_sala" value="${UI.escapeHtml(cli.parceiroSala||'')}"></div>
+        <div><label>Interveniente Filial</label><input name="parceiro_filial" value="${UI.escapeHtml(cli.parceiroFilial||'')}"></div>
+        <div><label>Interveniente IE</label><input name="parceiro_ie" value="${UI.escapeHtml(cli.parceiroIe||'')}"></div>
 
         <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Comissão</strong></div>
         <div><label>% Comissão</label><input type="number" step="0.01" name="percentual_comissao" value="${cli.percentualComissao ?? 0}"></div>

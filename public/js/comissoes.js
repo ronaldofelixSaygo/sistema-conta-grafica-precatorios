@@ -129,7 +129,7 @@ window.VIEW_comissoes = (() => {
     out.innerHTML = UI.table({
       cols: [
         { label: 'Mês/Ref', key: 'monthRef' },
-        { label: 'Parceiro', get: r => r.parceiro?.nome },
+        { label: 'Interveniente', get: r => r.parceiro?.nome },
         { label: 'Base', align:'right', get: r => UI.fmtMoney(r.totalBase) },
         { label: 'Extras', align:'right', get: r => UI.fmtMoney(r.totalExtras) },
         { label: 'Total', align:'right', html: true, get: r => `<strong>${UI.fmtMoney(r.totalFinal)}</strong>` },
@@ -150,7 +150,7 @@ window.VIEW_comissoes = (() => {
 
     UI.openModal('Nova apuração de comissão', `
       <form id="form-apu" class="form-grid">
-        <div class="full"><label>Parceiro / Escritório</label>
+        <div class="full"><label>Interveniente / Escritório</label>
           <input value="${UI.escapeHtml(esc)}" readonly>
         </div>
         <div class="full"><label>Mês de referência (YYYY-MM) *</label>

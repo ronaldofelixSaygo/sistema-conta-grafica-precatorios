@@ -10,7 +10,7 @@ window.APP = (() => {
     comissoes: 'Comissões',
     relatorios: 'Relatórios',
     alertas: 'Alertas',
-    parceiros: 'Parceiros',
+    parceiros: 'Intervenientes Aduaneiros',
     usuarios: 'Usuários',
     auditoria: 'Auditoria',
     parametros: 'Parâmetros',
@@ -69,7 +69,7 @@ window.APP = (() => {
   }
 
   function roleLabel(r) {
-    return ({ ADM: 'Administrador', SAYGO: 'Usuário Saygo', PARTNER: 'Parceiro', CLIENT: 'Cliente' })[r] || r;
+    return ({ ADM: 'Administrador', SAYGO: 'Usuário Saygo', PARTNER: 'Interveniente', CLIENT: 'Cliente' })[r] || r;
   }
 
   document.querySelectorAll('.sidebar nav a').forEach(a => {

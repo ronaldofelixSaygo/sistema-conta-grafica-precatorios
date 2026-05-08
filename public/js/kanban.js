@@ -89,11 +89,11 @@ window.VIEW_kanban = (() => {
       const opts = ps.map(p =>
         `<option value="${p.id}">${UI.escapeHtml(p.nome)}${p.isSaygo?' (Saygo)':''}</option>`).join('');
       return `
-        <div class="full"><label>${UI.escapeHtml(m.label)} -- parceiro responsavel</label>
+        <div class="full"><label>${UI.escapeHtml(m.label)} -- interveniente responsavel</label>
           <select name="stage_${stage}">
             <option value="">-- nao definido --</option>${opts}
           </select>
-          ${ps.length===0?'<div class="muted small" style="margin-top:2px">Nenhum parceiro cadastrado para esta etapa.</div>':''}
+          ${ps.length===0?'<div class="muted small" style="margin-top:2px">Nenhum interveniente cadastrado para esta etapa.</div>':''}
         </div>`;
     }).join('');
 
@@ -108,7 +108,7 @@ window.VIEW_kanban = (() => {
           <textarea name="notes" rows="2"></textarea>
         </div>
         <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.4rem">
-          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Parceiros responsaveis (definir agora)</strong>
+          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Intervenientes responsaveis (definir agora)</strong>
         </div>
         ${stageRows}
         <div class="full form-actions">
@@ -324,8 +324,22 @@ window.VIEW_kanban = (() => {
       const parceiroId = document.getElementById('pp-select').value || null;
       try {
         await API.put(`/api/kanban/cards/${openCard.id}/stages/${stage}`, { parceiroId });
-        UI.toast('Parceiro definido');
-        await refreshCardSilent();
+        UI.toast('Interveniente definido');
+        // Atualiza imediatamente em memória pra UI refletir mesmo se o GET falhar
+        const stageObj = openCard.stages.find(x => x.stage === stage);
+        if (stageObj) {
+          if (parceiroId) {
+            const p = parceirosCache.find(x => x.id === parceiroId);
+            stageObj.parceiroId = parceiroId;
+            stageObj.parceiro = p ? { id: p.id, nome: p.nome, isSaygo: !!p.isSaygo } : null;
+          } else {
+            stageObj.parceiroId = null;
+            stageObj.parceiro = null;
+          }
+        }
+        // Re-busca completa do card pra trazer relações fresh do banco
+        try { openCard = await API.get(`/api/kanban/cards/${openCard.id}`); }
+        catch (err) { console.warn('refresh card falhou:', err); }
         renderCardModal();
       } catch (e) { UI.toast(e.message, 'err'); }
     };
@@ -368,7 +382,7 @@ window.VIEW_kanban = (() => {
           </div>
         </div>
         <div class="muted small" style="margin:4px 0">
-          Parceiro: ${parceiroLine}
+          Interveniente: ${parceiroLine}
           ${isStaff ? `<button class="btn small ghost" data-action="set-parceiro" data-stage="${sp.stage}" style="margin-left:.4rem">Selecionar...</button>` : ''}
         </div>
         <div class="muted small" style="margin:4px 0">

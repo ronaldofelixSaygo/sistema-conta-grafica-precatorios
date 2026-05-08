@@ -15,7 +15,7 @@ window.VIEW_acionamentos = (() => {
       el.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
           <div class="muted small">${reqs.length} solicitação(ões)</div>
-          ${canCreate ? '<button class="btn primary" id="ac-new">+ Acionar parceiro</button>' : ''}
+          ${canCreate ? '<button class="btn primary" id="ac-new">+ Acionar interveniente</button>' : ''}
         </div>
         <div id="ac-list"></div>`;
       drawList(reqs);
@@ -62,7 +62,7 @@ window.VIEW_acionamentos = (() => {
       cliOpts = clientesCache.filter(c => c.escritorio).map(c =>
         `<option value="${c.id}">${UI.escapeHtml(c.nome)} — ${UI.escapeHtml(c.escritorio)}</option>`).join('');
     }
-    UI.openModal('Acionar parceiro', `
+    UI.openModal('Acionar interveniente aduaneiro', `
       <form id="form-ac" class="form-grid">
         <div class="full"><label>Cliente *</label>
           <select name="clienteId" required ${me.role==='CLIENT'?'disabled':''}>

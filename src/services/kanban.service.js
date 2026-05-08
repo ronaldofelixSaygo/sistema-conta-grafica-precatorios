@@ -4,6 +4,26 @@ import { MAX_UPLOAD_BYTES } from '../utils/kanban.constants.js';
 import * as stageDef from './stageDef.service.js';
 import * as email from './email.service.js';
 
+// Atualiza campos de status do Cliente quando uma etapa é concluída.
+// O mapeamento é por LABEL da etapa (case-insensitive) pra ser robusto a mudanças de key.
+async function autoUpdateClienteFromStage(cardId, stageKey) {
+  const card = await prisma.kanbanCard.findUnique({
+    where: { id: cardId }, select: { clienteId: true },
+  });
+  if (!card?.clienteId) return;
+  const def = await prisma.kanbanStageDef.findUnique({ where: { key: stageKey } });
+  const label = (def?.label || stageKey || '').toLowerCase();
+
+  const upd = {};
+  if (/sala/.test(label))                        upd.locacaoSala     = 'Sim';
+  if (/filial|matriz|empresa/.test(label))       upd.aberturaFilial  = 'Sim';
+  if (/\bie\b|inscri/.test(label))               upd.reativacaoIe    = 'Sim';
+  if (/conta\s*gr[áa]fica/.test(label))          upd.contaGrafica    = 'Sim';
+
+  if (Object.keys(upd).length === 0) return;
+  await prisma.cliente.update({ where: { id: card.clienteId }, data: upd });
+}
+
 // Cria todas as etapas do card lendo da configuracao dinamica.
 // stageParceiros: { 'ONBOARDING': 'parceiroId', ... }
 async function ensureStages(cardId, stageParceiros = {}) {
@@ -187,6 +207,9 @@ export async function completeStage(user, cardId, stage, { force = false } = {})
     where: { id: sp.id },
     data: { status: 'COMPLETED', completedAt: new Date() },
   });
+
+  // Auto-update dos campos do Cliente baseado no label da etapa concluída
+  await autoUpdateClienteFromStage(cardId, stage).catch(err => console.warn('autoUpdateCliente falhou:', err.message));
 
   // Notifica e-mail: etapa concluida
   email.notifyStageDone({ cardId, stageKey: stage, byUser: user }).catch(()=>{});
