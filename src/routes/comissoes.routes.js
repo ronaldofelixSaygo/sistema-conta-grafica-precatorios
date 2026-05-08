@@ -4,6 +4,8 @@ import { requireAuth } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 router.use(requireAuth);
+// dropdown de escritórios (distinct cliente.escritorio dentro do escopo do user)
+router.get ('/escritorios',             ctrl.listEscritorios);
 // simulacao on-the-fly (todos podem ver — escopo aplicado dentro do service)
 router.get ('/simulate',                ctrl.simulate);
 // crud da apuracao persistida

@@ -11,13 +11,19 @@ window.VIEW_saldos = (() => {
     try {
       const rows = await API.get('/api/saldos');
       const escritorios = [...new Set(rows.map(r => r.escritorio).filter(Boolean))].sort();
+      const clientes = [...new Set(rows.map(r => r.nome).filter(Boolean))].sort();
+      const isStaff = AUTH.isStaff();
       el.innerHTML = `
         <div class="page-toolbar">
-          <input id="sl-search" placeholder="Buscar cliente..." />
+          <select id="sl-search">
+            <option value="">Todos os clientes</option>
+            ${clientes.map(c => `<option value="${UI.escapeHtml(c)}">${UI.escapeHtml(c)}</option>`).join('')}
+          </select>
+          ${isStaff ? `
           <select id="sl-esc">
             <option value="">Todos os escritórios</option>
             ${escritorios.map(e => `<option value="${UI.escapeHtml(e)}">${UI.escapeHtml(e)}</option>`).join('')}
-          </select>
+          </select>` : ''}
           <select id="sl-sit">
             <option value="">Todas as situações</option>
             <option value="Normal">Normal</option>
@@ -30,14 +36,14 @@ window.VIEW_saldos = (() => {
           <div id="sl-table"></div>
         </div>`;
       const draw = () => {
-        const f = (document.getElementById('sl-search')?.value || '').toLowerCase();
+        const f = document.getElementById('sl-search')?.value || '';
         const esc = document.getElementById('sl-esc')?.value || '';
         const sit = document.getElementById('sl-sit')?.value || '';
         const list = rows.filter(r => {
           if (esc && r.escritorio !== esc) return false;
           if (sit && !(r.situacao||'').includes(sit)) return false;
-          if (!f) return true;
-          return (r.nome||'').toLowerCase().includes(f);
+          if (f && r.nome !== f) return false;
+          return true;
         });
         document.getElementById('sl-table').innerHTML = UI.table({
           cols: [
@@ -57,8 +63,10 @@ window.VIEW_saldos = (() => {
         });
       };
       draw();
-      ['sl-search','sl-esc','sl-sit'].forEach(id =>
-        document.getElementById(id).addEventListener('input', draw));
+      ['sl-search','sl-esc','sl-sit'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', draw);
+      });
     } catch (e) { el.innerHTML = `<div class="err">${e.message}</div>`; }
   }
   return { render };

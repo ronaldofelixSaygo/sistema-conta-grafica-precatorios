@@ -4,6 +4,9 @@ import { logAction } from '../services/audit.service.js';
 export async function simulate(req, res, next) {
   try { res.json(await svc.simulate(req.user, req.query)); } catch (e) { next(e); }
 }
+export async function listEscritorios(req, res, next) {
+  try { res.json(await svc.listEscritorios(req.user)); } catch (e) { next(e); }
+}
 export async function listCommissions(req, res, next) {
   try { res.json(await svc.listCommissions(req.user)); } catch (e) { next(e); }
 }

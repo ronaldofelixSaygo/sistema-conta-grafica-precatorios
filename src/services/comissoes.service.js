@@ -2,32 +2,55 @@ import { prisma } from '../config/prisma.js';
 import { clienteScope } from '../utils/scope.js';
 
 // =====================================================================
+// LISTA de "escritorios" únicos derivados dos cadastros de Cliente.
+// É o que vai popular os dropdowns de Simulação e Apuração.
+// =====================================================================
+export async function listEscritorios(user) {
+  const rows = await prisma.cliente.findMany({
+    where: { AND: [clienteScope(user), { escritorio: { not: null } }] },
+    select: { escritorio: true },
+    distinct: ['escritorio'],
+    orderBy: { escritorio: 'asc' },
+  });
+  return rows.map(r => r.escritorio).filter(Boolean);
+}
+
+// Garante que existe um Parceiro tipo ESCRITORIO com o nome informado.
+// Necessário pra manter o vínculo Commission.parceiroId no schema.
+async function ensureParceiroByEscritorio(nome) {
+  const found = await prisma.parceiro.findFirst({ where: { nome } });
+  if (found) return found;
+  return prisma.parceiro.create({
+    data: { nome, type: 'ESCRITORIO', active: true, isSaygo: false, stages: [] },
+  });
+}
+
+// =====================================================================
 // SIMULACAO de comissoes (calculo on-the-fly, sem persistir)
 // Replica a regra do sistema antigo: periodo entre (dia_fechamento+1)
 // do mes anterior e dia_fechamento do mes corrente.
 // =====================================================================
-export async function simulate(user, { parceiro, parceiroId, mes, ano } = {}) {
-  // Para PARTNER, sempre força o filtro pelo próprio parceiro
-  // Para STAFF/ADM, opcionalmente filtra por parceiroId selecionado
-  let parceiroFiltroNome = null;
+export async function simulate(user, { escritorio, parceiro, parceiroId, mes, ano } = {}) {
+  // Filtro principal agora é "escritorio" (string que aparece no cadastro do cliente)
+  // Para PARTNER, sempre força o próprio escritório (officeName / parceiroNome)
+  // Para STAFF/ADM, usa o que veio na query
+  let escFiltro = null;
   if (user.role === 'PARTNER') {
-    if (user.parceiroId) {
-      const p = await prisma.parceiro.findUnique({
-        where: { id: user.parceiroId }, select: { nome: true },
-      });
-      parceiroFiltroNome = p?.nome || null;
-    }
+    escFiltro = user.officeName || user.parceiroNome || null;
+  } else if (escritorio) {
+    escFiltro = escritorio;
   } else if (parceiroId) {
+    // legacy: aceita parceiroId pra não quebrar callers antigos
     const p = await prisma.parceiro.findUnique({
       where: { id: parceiroId }, select: { nome: true },
     });
-    parceiroFiltroNome = p?.nome || null;
+    escFiltro = p?.nome || null;
   } else if (parceiro) {
-    parceiroFiltroNome = parceiro;
+    escFiltro = parceiro;
   }
 
   const where = { AND: [clienteScope(user), { percentualComissao: { gt: 0 } }] };
-  if (parceiroFiltroNome) where.AND.push({ escritorio: parceiroFiltroNome });
+  if (escFiltro) where.AND.push({ escritorio: escFiltro });
 
   const clientes = await prisma.cliente.findMany({
     where,
@@ -74,7 +97,7 @@ export async function simulate(user, { parceiro, parceiroId, mes, ano } = {}) {
       if (totalCred > 0) {
         const valorComissao = totalCred * (pct / 100);
         const mesAno = `${String(m + 1).padStart(2, '0')}/${y}`;
-        if (!parceiroFiltroNome || partner === parceiroFiltroNome) {
+        if (!escFiltro || partner === escFiltro) {
           const key = `${partner}|${mesAno}`;
           if (!acc[key]) acc[key] = {
             parceiro: partner, mes_ano: mesAno, total_comissao: 0, detalhes: [],
@@ -121,10 +144,32 @@ function ensurePartnerEscritorio(user) {
   return user.parceiroId;
 }
 
-// Lista de comissoes persistidas. Saygo/Adm vê todas, Parceiro só as suas.
+// Verifica se a comissão pertence ao escritório do usuário PARTNER
+async function commissionPertenceAoUser(commission, user) {
+  if (user.role !== 'PARTNER') return true; // STAFF/ADM têm acesso geral
+  if (commission.parceiroId === user.parceiroId) return true;
+  // pode ser um parceiro auto-criado com mesmo nome do escritório do user
+  const parc = await prisma.parceiro.findUnique({
+    where: { id: commission.parceiroId }, select: { nome: true },
+  });
+  const escUser = user.officeName || user.parceiroNome;
+  return !!(parc && escUser && parc.nome === escUser);
+}
+
+// Lista de comissoes persistidas. Saygo/Adm vê todas, Parceiro só as do seu escritório.
 export async function listCommissions(user) {
   const where = {};
-  if (user.role === 'PARTNER') where.parceiroId = user.parceiroId || '__none__';
+  if (user.role === 'PARTNER') {
+    const escritorioName = user.officeName || user.parceiroNome;
+    if (!escritorioName) return [];
+    // pega todos os parceiros que tenham aquele nome (caso tenham sido auto-criados)
+    const parcs = await prisma.parceiro.findMany({
+      where: { nome: escritorioName }, select: { id: true },
+    });
+    const ids = parcs.map(p => p.id);
+    if (user.parceiroId && !ids.includes(user.parceiroId)) ids.push(user.parceiroId);
+    where.parceiroId = { in: ids.length ? ids : ['__none__'] };
+  }
   return prisma.commission.findMany({
     where,
     include: {
@@ -137,28 +182,40 @@ export async function listCommissions(user) {
   });
 }
 
-// Gera (cria/atualiza) a apuracao para o mes-ref e parceiro do user logado.
-// Calcula o total_base com base nos clientes deste escritorio.
-export async function generateCommission(user, { monthRef, parceiroId: bodyParceiroId } = {}) {
-  // STAFF/ADM podem gerar para qualquer parceiro (precisa enviar parceiroId)
-  // PARTNER ESCRITORIO sempre gera o seu
-  let parceiroId;
+// Gera (cria/atualiza) a apuracao para o mes-ref e escritorio.
+// Calcula o total_base com base nos clientes vinculados a esse escritorio.
+export async function generateCommission(user, { monthRef, escritorio: bodyEscritorio, parceiroId: bodyParceiroId } = {}) {
+  // STAFF/ADM precisam enviar o nome do escritório (campo cliente.escritorio)
+  // PARTNER ESCRITORIO usa sempre o próprio (officeName / parceiroNome)
+  let escritorioName;
   if (user.role === 'ADM' || user.role === 'SAYGO') {
-    if (!bodyParceiroId) {
-      const e = new Error('Selecione o parceiro para gerar a apuração'); e.status = 400; throw e;
+    if (bodyEscritorio) {
+      escritorioName = bodyEscritorio;
+    } else if (bodyParceiroId) {
+      const p = await prisma.parceiro.findUnique({ where: { id: bodyParceiroId } });
+      escritorioName = p?.nome || null;
     }
-    parceiroId = bodyParceiroId;
+    if (!escritorioName) {
+      const e = new Error('Selecione o escritório para gerar a apuração'); e.status = 400; throw e;
+    }
   } else {
-    parceiroId = ensurePartnerEscritorio(user);
+    if (!(user.role === 'PARTNER' && user.partnerType === 'ESCRITORIO')) {
+      const e = new Error('Apenas parceiros do tipo Escritório podem gerar apuração'); e.status = 403; throw e;
+    }
+    escritorioName = user.officeName || user.parceiroNome;
+    if (!escritorioName) { const e = new Error('Usuário sem escritório definido'); e.status = 400; throw e; }
   }
+
   if (!monthRef || !/^\d{4}-\d{2}$/.test(monthRef)) {
     const e = new Error('monthRef inválido (use YYYY-MM)'); e.status = 400; throw e;
   }
 
-  // pega clientes vinculados ao escritório do parceiro
-  const parc = await prisma.parceiro.findUnique({ where: { id: parceiroId } });
+  // garante que existe um Parceiro com esse nome (pra manter o FK no schema)
+  const parc = await ensureParceiroByEscritorio(escritorioName);
+  const parceiroId = parc.id;
+
   const clientes = await prisma.cliente.findMany({
-    where: { escritorio: parc?.nome || '__none__', percentualComissao: { gt: 0 } },
+    where: { escritorio: escritorioName, percentualComissao: { gt: 0 } },
     select: { id: true, nome: true, percentualComissao: true, diaFechamento: true },
   });
   const [yy, mm] = monthRef.split('-').map(Number);
@@ -232,7 +289,7 @@ export async function generateCommission(user, { monthRef, parceiroId: bodyParce
 export async function submitCommission(user, id) {
   const c = await prisma.commission.findUnique({ where: { id } });
   if (!c) { const e = new Error('Comissão não encontrada'); e.status = 404; throw e; }
-  if (user.role === 'PARTNER' && c.parceiroId !== user.parceiroId) {
+  if (!(await commissionPertenceAoUser(c, user))) {
     const e = new Error('Sem permissão'); e.status = 403; throw e;
   }
   if (c.status === 'CLOSED' || c.status === 'APPROVED') {
@@ -281,7 +338,7 @@ export async function addExtra(user, commissionId, { description, amount }) {
   if (c.status === 'CLOSED' || c.status === 'APPROVED') {
     const e = new Error('Não pode adicionar extras nesse estado'); e.status = 400; throw e;
   }
-  if (user.role === 'PARTNER' && c.parceiroId !== user.parceiroId) {
+  if (!(await commissionPertenceAoUser(c, user))) {
     const e = new Error('Sem permissão'); e.status = 403; throw e;
   }
   if (!description) { const e = new Error('Descrição obrigatória'); e.status = 400; throw e; }
@@ -296,7 +353,7 @@ export async function removeExtra(user, extraId) {
   if (!ext) { const e = new Error('Não encontrado'); e.status = 404; throw e; }
   const c = await prisma.commission.findUnique({ where: { id: ext.commissionId } });
   if (c.status === 'CLOSED') { const e = new Error('Comissão fechada'); e.status = 400; throw e; }
-  if (user.role === 'PARTNER' && c.parceiroId !== user.parceiroId) {
+  if (!(await commissionPertenceAoUser(c, user))) {
     const e = new Error('Sem permissão'); e.status = 403; throw e;
   }
   await prisma.commissionExtra.delete({ where: { id: extraId } });

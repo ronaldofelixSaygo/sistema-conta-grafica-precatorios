@@ -1,15 +1,14 @@
 window.VIEW_comissoes = (() => {
   let activeTab = 'simulacao';
-  let parceirosCache = null;
+  let escritoriosCache = null;
 
-  async function loadParceiros() {
-    if (parceirosCache) return parceirosCache;
+  async function loadEscritorios() {
+    if (escritoriosCache) return escritoriosCache;
     try {
-      const list = await API.get('/api/parceiros');
-      // só os do tipo ESCRITORIO podem ter comissão (são os que têm clientes vinculados)
-      parceirosCache = (list || []).filter(p => !p.isSaygo && (p.type === 'ESCRITORIO' || !p.type));
-      return parceirosCache;
-    } catch { parceirosCache = []; return []; }
+      const list = await API.get('/api/comissoes/escritorios');
+      escritoriosCache = (list || []).filter(Boolean);
+      return escritoriosCache;
+    } catch { escritoriosCache = []; return []; }
   }
 
   async function render() {
@@ -36,11 +35,11 @@ window.VIEW_comissoes = (() => {
     // Para PARTNER, o parceiro é ele mesmo — não exibe campo
     let parcInput = '';
     if (isStaff) {
-      const ps = await loadParceiros();
+      const ps = await loadEscritorios();
       parcInput = `
         <select id="sim-parc">
           <option value="">Todos os parceiros</option>
-          ${ps.map(p => `<option value="${p.id}">${UI.escapeHtml(p.nome)}</option>`).join('')}
+          ${ps.map(p => `<option value="${UI.escapeHtml(p)}">${UI.escapeHtml(p)}</option>`).join('')}
         </select>`;
     }
 
@@ -60,8 +59,8 @@ window.VIEW_comissoes = (() => {
       mes: val('sim-mes'), ano: val('sim-ano'),
     };
     if (isStaff) {
-      const pid = val('sim-parc');
-      if (pid) q.parceiroId = pid;
+      const esc = val('sim-parc');
+      if (esc) q.escritorio = esc;
     }
     const out = document.getElementById('sim-list');
     out.innerHTML = '<div class="muted">Calculando...</div>';
@@ -148,20 +147,21 @@ window.VIEW_comissoes = (() => {
     const isStaff = AUTH.isStaff();
     let parcField = '';
     if (isStaff) {
-      const ps = await loadParceiros();
+      const ps = await loadEscritorios();
       parcField = `
-        <div class="full"><label>Parceiro *</label>
-          <select name="parceiroId" required>
+        <div class="full"><label>Parceiro / Escritório *</label>
+          <select name="escritorio" required>
             <option value="">Selecione...</option>
-            ${ps.map(p => `<option value="${p.id}">${UI.escapeHtml(p.nome)}</option>`).join('')}
+            ${ps.map(p => `<option value="${UI.escapeHtml(p)}">${UI.escapeHtml(p)}</option>`).join('')}
           </select>
         </div>`;
     } else {
-      // PARTNER ESCRITORIO — usa o próprio parceiro (informativo)
+      // PARTNER ESCRITORIO — usa o próprio escritório (informativo)
       const me = AUTH.user();
+      const esc = me?.officeName || me?.parceiroNome || '— seu escritório vinculado —';
       parcField = `
-        <div class="full"><label>Parceiro</label>
-          <input value="${UI.escapeHtml(me?.parceiroNome || '— seu parceiro vinculado —')}" readonly>
+        <div class="full"><label>Parceiro / Escritório</label>
+          <input value="${UI.escapeHtml(esc)}" readonly>
         </div>`;
     }
 
@@ -186,9 +186,9 @@ window.VIEW_comissoes = (() => {
       const monthRef = ev.target.monthRef.value;
       const payload = { monthRef };
       if (isStaff) {
-        const pid = ev.target.parceiroId?.value;
-        if (!pid) return UI.toast('Selecione o parceiro', 'err');
-        payload.parceiroId = pid;
+        const esc = ev.target.escritorio?.value;
+        if (!esc) return UI.toast('Selecione o parceiro/escritório', 'err');
+        payload.escritorio = esc;
       }
       try {
         await API.post('/api/comissoes', payload);

@@ -6,6 +6,16 @@ window.VIEW_movimentacoes = (() => {
     'Débitos de Transferências',
   ];
   let clientesCache = [];
+  let escritoriosCache = null;
+
+  async function loadEscritorios() {
+    if (escritoriosCache) return escritoriosCache;
+    try {
+      const list = await API.get('/api/comissoes/escritorios');
+      escritoriosCache = (list || []).filter(Boolean);
+    } catch { escritoriosCache = []; }
+    return escritoriosCache;
+  }
 
   function tipoPill(t) {
     if (!t) return '';
@@ -16,12 +26,23 @@ window.VIEW_movimentacoes = (() => {
   async function render() {
     const el = document.getElementById('view-movimentacoes');
     const canMutate = AUTH.canMutate('movimentacoes');
+    const isStaff = AUTH.isStaff();
+
+    if (!clientesCache.length) {
+      try { clientesCache = await API.get('/api/clientes'); } catch {}
+    }
+    const escs = isStaff ? await loadEscritorios() : [];
+    const cliFilterOpts = clientesCache.map(c =>
+      `<option value="${c.id}">${UI.escapeHtml(c.nome)}${c.escritorio?` — ${UI.escapeHtml(c.escritorio)}`:''}</option>`).join('');
+    const escOpts = escs.map(e =>
+      `<option value="${UI.escapeHtml(e)}">${UI.escapeHtml(e)}</option>`).join('');
+
     el.innerHTML = `
       <div class="page-toolbar">
         <input id="m-search"   placeholder="Buscar (cliente / DUIMP)" />
-        <input id="m-cliente"  placeholder="Filtrar cliente" />
+        <select id="m-cliente"><option value="">Todos os clientes</option>${cliFilterOpts}</select>
         <select id="m-tipo"><option value="">Todos os tipos</option>${TIPOS.map(t => `<option>${t}</option>`).join('')}</select>
-        <input id="m-parceiro" placeholder="Parceiro" />
+        ${isStaff ? `<select id="m-parceiro"><option value="">Todos os parceiros</option>${escOpts}</select>` : ''}
         <input id="m-ini" type="date" /> <input id="m-fim" type="date" />
         <input id="m-vmin" type="number" step="0.01" placeholder="Valor mín" />
         <input id="m-vmax" type="number" step="0.01" placeholder="Valor máx" />
@@ -35,10 +56,6 @@ window.VIEW_movimentacoes = (() => {
       </div>
       <div id="m-table"></div>
       <div id="m-pager" style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center"></div>`;
-
-    if (!clientesCache.length) {
-      try { clientesCache = await API.get('/api/clientes'); } catch {}
-    }
 
     const apply = () => { page = 1; load(); };
     document.getElementById('m-apply').onclick = apply;
@@ -60,8 +77,11 @@ window.VIEW_movimentacoes = (() => {
 
   async function load() {
     const q = {
-      search: val('m-search'), f_cliente: val('m-cliente'), f_tipo: val('m-tipo'),
-      f_parceiro: val('m-parceiro'), f_data_ini: val('m-ini'), f_data_fim: val('m-fim'),
+      search: val('m-search'),
+      cliente_id: val('m-cliente'),
+      f_tipo: val('m-tipo'),
+      f_parceiro: val('m-parceiro'),
+      f_data_ini: val('m-ini'), f_data_fim: val('m-fim'),
       f_valor_min: val('m-vmin'), f_valor_max: val('m-vmax'),
       page, limit: 50,
     };
