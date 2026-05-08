@@ -177,8 +177,14 @@ window.VIEW_comissoes = (() => {
 
   function openDetail(c) {
     const isStaff = AUTH.isStaff();
-    const isOwner = AUTH.isPartnerEscritorio() && AUTH.user()?.parceiroId === c.parceiroId;
-    const editable = (c.status === 'DRAFT' || c.status === 'REJECTED') && (isStaff || isOwner);
+    const me = AUTH.user();
+    // Owner = PARTNER ESCRITORIO cujo parceiro vinculado tem o mesmo nome do parceiro da Commission
+    // (cobre o caso onde o auto-create gerou um Parceiro novo com mesmo nome)
+    const isOwner = AUTH.isPartnerEscritorio() && (
+      me?.parceiroId === c.parceiroId ||
+      (c.parceiro?.nome && (me?.officeName === c.parceiro.nome || me?.parceiroNome === c.parceiro.nome))
+    );
+    const editable = (c.status === 'DRAFT' || c.status === 'REJECTED') && isOwner;
     const detalhes = Array.isArray(c.detalhes) ? c.detalhes : [];
 
     let html = `
