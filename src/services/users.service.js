@@ -5,8 +5,9 @@ const VALID_ROLES = ['ADM', 'SAYGO', 'PARTNER', 'CLIENT'];
 
 const userPublicSelect = {
   id: true, email: true, name: true, role: true, active: true,
-  officeName: true, clienteId: true, lastLoginAt: true, createdAt: true,
+  officeName: true, clienteId: true, parceiroId: true, lastLoginAt: true, createdAt: true,
   cliente: { select: { id: true, nome: true, escritorio: true } },
+  parceiro: { select: { id: true, nome: true, type: true } },
 };
 
 export async function listUsers() {
@@ -17,7 +18,7 @@ export async function listUsers() {
 }
 
 export async function createUser(input) {
-  const { email, password, name, role, officeName, clienteId } = input;
+  const { email, password, name, role, officeName, clienteId, parceiroId } = input;
   if (!email || !password || !name || !role) {
     const e = new Error('Campos obrigatórios: email, password, name, role'); e.status = 400; throw e;
   }
@@ -27,11 +28,19 @@ export async function createUser(input) {
   if (password.length < 6) {
     const e = new Error('Senha mínima 6 caracteres'); e.status = 400; throw e;
   }
-  if (role === 'PARTNER' && !officeName) {
-    const e = new Error('Para PARTNER, informe officeName (escritório)'); e.status = 400; throw e;
+  if (role === 'PARTNER' && !parceiroId) {
+    const e = new Error('Para PARTNER, vincule um Parceiro (cadastro)'); e.status = 400; throw e;
   }
   if (role === 'CLIENT' && !clienteId) {
     const e = new Error('Para CLIENT, informe clienteId'); e.status = 400; throw e;
+  }
+
+  // Se PARTNER, deriva officeName do nome do parceiro (se nao fornecido)
+  let finalOfficeName = officeName || null;
+  if (role === 'PARTNER' && parceiroId) {
+    const parc = await prisma.parceiro.findUnique({ where: { id: parceiroId } });
+    if (!parc) { const e = new Error('Parceiro nao encontrado'); e.status = 400; throw e; }
+    if (!finalOfficeName) finalOfficeName = parc.nome;
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
@@ -39,8 +48,9 @@ export async function createUser(input) {
     data: {
       email: email.trim().toLowerCase(),
       passwordHash, name, role,
-      officeName: officeName || null,
+      officeName: finalOfficeName,
       clienteId: clienteId ? Number(clienteId) : null,
+      parceiroId: parceiroId || null,
     },
     select: userPublicSelect,
   });
@@ -55,6 +65,7 @@ export async function updateUser(id, input) {
   }
   if (input.officeName !== undefined)  data.officeName  = input.officeName || null;
   if (input.clienteId  !== undefined)  data.clienteId   = input.clienteId  ? Number(input.clienteId) : null;
+  if (input.parceiroId !== undefined)  data.parceiroId  = input.parceiroId || null;
   if (input.active     !== undefined)  data.active      = !!input.active;
   if (input.password) {
     if (input.password.length < 6) { const e=new Error('Senha mínima 6 caracteres'); e.status=400; throw e; }
