@@ -17,6 +17,13 @@ export async function generate(req, res, next) {
     res.status(201).json(c);
   } catch (e) { next(e); }
 }
+export async function remove(req, res, next) {
+  try {
+    const r = await svc.deleteCommission(req.user, req.params.id);
+    await logAction({ user: req.user, action: 'DELETE', entity: 'commission', entityId: req.params.id, ip: req.ip });
+    res.json(r);
+  } catch (e) { next(e); }
+}
 export async function submit(req, res, next) {
   try {
     const c = await svc.submitCommission(req.user, req.params.id);

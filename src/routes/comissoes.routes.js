@@ -11,6 +11,7 @@ router.get ('/simulate',                ctrl.simulate);
 // crud da apuracao persistida
 router.get ('/',                        ctrl.listCommissions);
 router.post('/',                        ctrl.generate);
+router.delete('/:id',                   ctrl.remove);
 router.post('/:id/submit',              ctrl.submit);
 router.post('/:id/approve',             ctrl.approve);
 router.post('/:id/reject',              ctrl.reject);

@@ -183,28 +183,13 @@ export async function listCommissions(user) {
 }
 
 // Gera (cria/atualiza) a apuracao para o mes-ref e escritorio.
-// Calcula o total_base com base nos clientes vinculados a esse escritorio.
-export async function generateCommission(user, { monthRef, escritorio: bodyEscritorio, parceiroId: bodyParceiroId } = {}) {
-  // STAFF/ADM precisam enviar o nome do escritório (campo cliente.escritorio)
-  // PARTNER ESCRITORIO usa sempre o próprio (officeName / parceiroNome)
-  let escritorioName;
-  if (user.role === 'ADM' || user.role === 'SAYGO') {
-    if (bodyEscritorio) {
-      escritorioName = bodyEscritorio;
-    } else if (bodyParceiroId) {
-      const p = await prisma.parceiro.findUnique({ where: { id: bodyParceiroId } });
-      escritorioName = p?.nome || null;
-    }
-    if (!escritorioName) {
-      const e = new Error('Selecione o escritório para gerar a apuração'); e.status = 400; throw e;
-    }
-  } else {
-    if (!(user.role === 'PARTNER' && user.partnerType === 'ESCRITORIO')) {
-      const e = new Error('Apenas parceiros do tipo Escritório podem gerar apuração'); e.status = 403; throw e;
-    }
-    escritorioName = user.officeName || user.parceiroNome;
-    if (!escritorioName) { const e = new Error('Usuário sem escritório definido'); e.status = 400; throw e; }
+// SOMENTE PARTNER ESCRITORIO pode gerar. Saygo/Adm apenas visualiza/aprova.
+export async function generateCommission(user, { monthRef } = {}) {
+  if (!(user.role === 'PARTNER' && user.partnerType === 'ESCRITORIO')) {
+    const e = new Error('Apenas parceiros do tipo Escritório podem gerar apuração'); e.status = 403; throw e;
   }
+  const escritorioName = user.officeName || user.parceiroNome;
+  if (!escritorioName) { const e = new Error('Usuário sem escritório definido'); e.status = 400; throw e; }
 
   if (!monthRef || !/^\d{4}-\d{2}$/.test(monthRef)) {
     const e = new Error('monthRef inválido (use YYYY-MM)'); e.status = 400; throw e;
@@ -250,12 +235,23 @@ export async function generateCommission(user, { monthRef, escritorio: bodyEscri
   }
 
   // upsert (cria ou atualiza enquanto nao fechada)
-  const existing = await prisma.commission.findUnique({
-    where: { parceiroId_monthRef: { parceiroId, monthRef } },
+  // Considera TODOS os Parceiros com mesmo nome — evita duplicar se o nome bater
+  const parcsMesmoNome = await prisma.parceiro.findMany({
+    where: { nome: escritorioName }, select: { id: true },
+  });
+  const parcIds = parcsMesmoNome.map(p => p.id);
+  const existing = await prisma.commission.findFirst({
+    where: { parceiroId: { in: parcIds }, monthRef },
     include: { extras: true },
   });
   if (existing && existing.status === 'CLOSED') {
     const e = new Error('Comissão já fechada — não pode ser reprocessada'); e.status = 409; throw e;
+  }
+  if (existing && existing.status === 'APPROVED') {
+    const e = new Error('Comissão já aprovada — não pode ser reprocessada'); e.status = 409; throw e;
+  }
+  if (existing && existing.status === 'SUBMITTED') {
+    const e = new Error('Comissão já enviada para revisão. Cancele e refaça se quiser recalcular.'); e.status = 409; throw e;
   }
   const totalExtras = (existing?.extras || []).reduce((s, x) => s + Number(x.amount || 0), 0);
   const totalFinal = totalBase + totalExtras;
@@ -283,6 +279,20 @@ export async function generateCommission(user, { monthRef, escritorio: bodyEscri
     },
     include: { extras: true, parceiro: { select: { nome: true } } },
   });
+}
+
+// Excluir apuração (apenas owner enquanto DRAFT/REJECTED)
+export async function deleteCommission(user, id) {
+  const c = await prisma.commission.findUnique({ where: { id } });
+  if (!c) { const e = new Error('Comissão não encontrada'); e.status = 404; throw e; }
+  if (!(await commissionPertenceAoUser(c, user))) {
+    const e = new Error('Sem permissão'); e.status = 403; throw e;
+  }
+  if (!(c.status === 'DRAFT' || c.status === 'REJECTED')) {
+    const e = new Error('Só pode excluir enquanto a apuração está em rascunho ou rejeitada'); e.status = 400; throw e;
+  }
+  await prisma.commission.delete({ where: { id } });
+  return { ok: true };
 }
 
 // Submeter para revisão Saygo

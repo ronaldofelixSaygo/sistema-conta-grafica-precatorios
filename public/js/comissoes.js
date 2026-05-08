@@ -99,7 +99,8 @@ window.VIEW_comissoes = (() => {
       const isStaff = AUTH.isStaff();
       const isPartnerEsc = AUTH.isPartnerEscritorio();
 
-      const canCreate = isPartnerEsc || isStaff;
+      // Apenas PARTNER ESCRITORIO cria apurações. Saygo/Adm apenas revisa/aprova.
+      const canCreate = isPartnerEsc;
       const action = canCreate
         ? `<button class="btn primary" id="ap-new">+ Nova apuração</button>`
         : '';
@@ -137,43 +138,26 @@ window.VIEW_comissoes = (() => {
       ],
       rows: list,
     });
-    out.addEventListener('click', e => {
+    out.onclick = e => {
       const id = e.target.getAttribute('data-open');
       if (id) openDetail(list.find(x => x.id===id));
-    });
+    };
   }
 
   async function openNewApu() {
-    const isStaff = AUTH.isStaff();
-    let parcField = '';
-    if (isStaff) {
-      const ps = await loadEscritorios();
-      parcField = `
-        <div class="full"><label>Parceiro / Escritório *</label>
-          <select name="escritorio" required>
-            <option value="">Selecione...</option>
-            ${ps.map(p => `<option value="${UI.escapeHtml(p)}">${UI.escapeHtml(p)}</option>`).join('')}
-          </select>
-        </div>`;
-    } else {
-      // PARTNER ESCRITORIO — usa o próprio escritório (informativo)
-      const me = AUTH.user();
-      const esc = me?.officeName || me?.parceiroNome || '— seu escritório vinculado —';
-      parcField = `
-        <div class="full"><label>Parceiro / Escritório</label>
-          <input value="${UI.escapeHtml(esc)}" readonly>
-        </div>`;
-    }
+    const me = AUTH.user();
+    const esc = me?.officeName || me?.parceiroNome || '— seu escritório vinculado —';
 
     UI.openModal('Nova apuração de comissão', `
       <form id="form-apu" class="form-grid">
-        ${parcField}
+        <div class="full"><label>Parceiro / Escritório</label>
+          <input value="${UI.escapeHtml(esc)}" readonly>
+        </div>
         <div class="full"><label>Mês de referência (YYYY-MM) *</label>
           <input name="monthRef" required placeholder="2026-05" pattern="\\d{4}-\\d{2}">
         </div>
         <div class="full muted small">
-          O sistema calcula a comissão dos clientes desse parceiro para esse mês baseado na regra de fechamento.
-          Você pode reprocessar enquanto a apuração não estiver fechada.
+          Não é possível gerar mais de uma apuração para o mesmo mês/ano. Para refazer, exclua a anterior enquanto ela estiver em rascunho ou rejeitada.
         </div>
         <div class="full form-actions">
           <button type="button" class="btn" id="apu-cancel">Cancelar</button>
@@ -184,14 +168,8 @@ window.VIEW_comissoes = (() => {
     document.getElementById('form-apu').onsubmit = async ev => {
       ev.preventDefault();
       const monthRef = ev.target.monthRef.value;
-      const payload = { monthRef };
-      if (isStaff) {
-        const esc = ev.target.escritorio?.value;
-        if (!esc) return UI.toast('Selecione o parceiro/escritório', 'err');
-        payload.escritorio = esc;
-      }
       try {
-        await API.post('/api/comissoes', payload);
+        await API.post('/api/comissoes', { monthRef });
         UI.toast('Apuração gerada'); UI.closeModal(); render();
       } catch (e) { UI.toast(e.message, 'err'); }
     };
@@ -251,6 +229,7 @@ window.VIEW_comissoes = (() => {
     const btns = [];
     if (isOwner && editable) {
       btns.push(`<button class="btn" id="apu-recalc" data-id="${c.id}">Recalcular</button>`);
+      btns.push(`<button class="btn danger" id="apu-delete" data-id="${c.id}">Excluir apuração</button>`);
       if (c.status === 'DRAFT' || c.status === 'REJECTED') {
         btns.push(`<button class="btn primary" id="apu-submit" data-id="${c.id}">Enviar para revisão</button>`);
       }
@@ -267,38 +246,62 @@ window.VIEW_comissoes = (() => {
     UI.openModal(`Apuração ${c.monthRef}`, html);
 
     // Bind events
+    // IMPORTANTE: usar onclick (sobrescreve) em vez de addEventListener (empilha) —
+    // assim ao reabrir o modal não criamos handlers duplicados que multiplicavam o "ext-add"
     const body = document.getElementById('modal-body');
-    body.addEventListener('click', async ev => {
+    let busy = false;
+    body.onclick = async ev => {
+      if (busy) return;
       const t = ev.target;
-      if (t.dataset.rmExt) {
-        if (!confirm('Excluir extra?')) return;
-        try { await API.del(`/api/comissoes/extras/${t.dataset.rmExt}`); reopen(c.id); } catch (e) { UI.toast(e.message,'err'); }
-      } else if (t.id === 'ext-add') {
-        const desc = document.getElementById('ext-desc').value.trim();
-        const val  = Number(document.getElementById('ext-val').value);
-        if (!desc) return UI.toast('Informe a descrição','err');
-        try { await API.post(`/api/comissoes/${c.id}/extras`, { description: desc, amount: val }); reopen(c.id); }
-        catch (e) { UI.toast(e.message, 'err'); }
-      } else if (t.id === 'apu-recalc') {
-        try { await API.post('/api/comissoes', { monthRef: c.monthRef }); UI.toast('Recalculado'); reopen(c.id); }
-        catch (e) { UI.toast(e.message, 'err'); }
-      } else if (t.id === 'apu-submit') {
-        try { await API.post(`/api/comissoes/${c.id}/submit`); UI.toast('Enviada'); UI.closeModal(); render(); }
-        catch (e) { UI.toast(e.message, 'err'); }
-      } else if (t.id === 'apu-approve') {
-        try { await API.post(`/api/comissoes/${c.id}/approve`); UI.toast('Aceita'); UI.closeModal(); render(); }
-        catch (e) { UI.toast(e.message, 'err'); }
-      } else if (t.id === 'apu-reject') {
-        const reason = prompt('Motivo da rejeição:');
-        if (!reason) return;
-        try { await API.post(`/api/comissoes/${c.id}/reject`, { reason }); UI.toast('Rejeitada'); UI.closeModal(); render(); }
-        catch (e) { UI.toast(e.message, 'err'); }
-      } else if (t.id === 'apu-close') {
-        if (!confirm('Fechar definitivamente? Não poderá mais ser alterada.')) return;
-        try { await API.post(`/api/comissoes/${c.id}/close`); UI.toast('Fechada'); UI.closeModal(); render(); }
-        catch (e) { UI.toast(e.message, 'err'); }
+      try {
+        if (t.dataset.rmExt) {
+          if (!confirm('Excluir extra?')) return;
+          busy = true;
+          await API.del(`/api/comissoes/extras/${t.dataset.rmExt}`);
+          reopen(c.id);
+        } else if (t.id === 'ext-add') {
+          const desc = document.getElementById('ext-desc').value.trim();
+          const val  = Number(document.getElementById('ext-val').value);
+          if (!desc) return UI.toast('Informe a descrição','err');
+          busy = true;
+          await API.post(`/api/comissoes/${c.id}/extras`, { description: desc, amount: val });
+          reopen(c.id);
+        } else if (t.id === 'apu-recalc') {
+          busy = true;
+          await API.post('/api/comissoes', { monthRef: c.monthRef });
+          UI.toast('Recalculado');
+          reopen(c.id);
+        } else if (t.id === 'apu-delete') {
+          if (!confirm('Excluir esta apuração? Você poderá gerar uma nova depois.')) return;
+          busy = true;
+          await API.del(`/api/comissoes/${c.id}`);
+          UI.toast('Apuração excluída'); UI.closeModal(); render();
+        } else if (t.id === 'apu-submit') {
+          busy = true;
+          await API.post(`/api/comissoes/${c.id}/submit`);
+          UI.toast('Enviada'); UI.closeModal(); render();
+        } else if (t.id === 'apu-approve') {
+          busy = true;
+          await API.post(`/api/comissoes/${c.id}/approve`);
+          UI.toast('Aceita'); UI.closeModal(); render();
+        } else if (t.id === 'apu-reject') {
+          const reason = prompt('Motivo da rejeição:');
+          if (!reason) return;
+          busy = true;
+          await API.post(`/api/comissoes/${c.id}/reject`, { reason });
+          UI.toast('Rejeitada'); UI.closeModal(); render();
+        } else if (t.id === 'apu-close') {
+          if (!confirm('Fechar definitivamente? Não poderá mais ser alterada.')) return;
+          busy = true;
+          await API.post(`/api/comissoes/${c.id}/close`);
+          UI.toast('Fechada'); UI.closeModal(); render();
+        }
+      } catch (e) {
+        UI.toast(e.message, 'err');
+      } finally {
+        busy = false;
       }
-    });
+    };
   }
   async function reopen(id) {
     try {
