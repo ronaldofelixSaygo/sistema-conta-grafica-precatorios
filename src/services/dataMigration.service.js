@@ -14,6 +14,18 @@ function calcAjustado(tipo, valor) {
   return 0;
 }
 
+// Converte com segurança em Date — retorna null para datas inválidas/strings ruins
+function safeDate(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) {
+    return isNaN(v.getTime()) ? null : v;
+  }
+  const s = String(v).trim();
+  if (!s || s.toLowerCase() === 'invalid date' || s === '0000-00-00') return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false, wipeMovs = false }) {
   if (!oldDatabaseUrl) {
     const e = new Error('oldDatabaseUrl é obrigatório'); e.status = 400; throw e;
@@ -106,7 +118,19 @@ export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false, wipeM
           const r = await prisma.movimentacao.createMany({ data: buffer, skipDuplicates: true });
           summary.movimentacoes.created += r.count;
         } catch (e) {
-          summary.movimentacoes.errors.push(`batch: ${e.message}`);
+          // Fallback: tenta linha-a-linha para resgatar o máximo possível
+          summary.movimentacoes.errors.push(`batch falhou (tentando 1x1): ${e.message}`);
+          for (const row of buffer) {
+            try {
+              await prisma.movimentacao.create({ data: row });
+              summary.movimentacoes.created++;
+            } catch (er) {
+              summary.movimentacoes.skipped++;
+              if (summary.movimentacoes.errors.length < 20) {
+                summary.movimentacoes.errors.push(`row: ${er.message}`);
+              }
+            }
+          }
         }
         buffer = [];
       };
@@ -117,10 +141,10 @@ export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false, wipeM
         buffer.push({
           clienteId: novoCliId,
           tipoMovimento: m.tipo_movimento || '',
-          dataNf: m.data_nf ? new Date(m.data_nf) : null,
+          dataNf: safeDate(m.data_nf),
           duimpDiProcesso: m.duimp_di_processo || null,
           parceiro: m.parceiro || null,
-          dataExoneracao: m.data_exoneracao ? new Date(m.data_exoneracao) : null,
+          dataExoneracao: safeDate(m.data_exoneracao),
           percentual: Number(m.percentual) || 0,
           valor: Number(m.valor) || 0,
           valorAjustado: m.valor_ajustado != null
