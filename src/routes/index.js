@@ -13,6 +13,7 @@ import partnerRequest from './partnerRequest.routes.js';
 import admin from './admin.routes.js';
 import parceiros from './parceiros.routes.js';
 import permissions from './permissions.routes.js';
+import comissoes from './comissoes.routes.js';
 
 const router = Router();
 
@@ -32,5 +33,6 @@ router.use('/partner-requests', partnerRequest);
 router.use('/admin',           admin);
 router.use('/parceiros',       parceiros);
 router.use('/permissions',     permissions);
+router.use('/comissoes',       comissoes);
 
 export default router;

@@ -1,4 +1,5 @@
 import * as svc from '../services/movimentacoes.service.js';
+import * as extrato from '../services/extratoPdf.service.js';
 import { logAction } from '../services/audit.service.js';
 
 export async function list(req, res, next) {
@@ -26,5 +27,22 @@ export async function remove(req, res, next) {
     await svc.deleteMovimentacao(req.user, req.params.id);
     await logAction({ user: req.user, action: 'DELETE', entity: 'movimentacao', entityId: req.params.id, ip: req.ip });
     res.json({ ok: true });
+  } catch (e) { next(e); }
+}
+
+export async function importExtratoPreview(req, res, next) {
+  try {
+    if (!req.file) { const e = new Error('Arquivo PDF nao enviado'); e.status = 400; throw e; }
+    const r = await extrato.previewExtrato(req.file.buffer);
+    res.json(r);
+  } catch (e) { next(e); }
+}
+
+export async function importExtratoApply(req, res, next) {
+  try {
+    const { items, cliente_id } = req.body || {};
+    const r = await extrato.applyExtrato(items, cliente_id);
+    await logAction({ user: req.user, action: 'IMPORT_EXTRATO', entity: 'movimentacao', details: `${r.created} criados`, ip: req.ip });
+    res.json(r);
   } catch (e) { next(e); }
 }

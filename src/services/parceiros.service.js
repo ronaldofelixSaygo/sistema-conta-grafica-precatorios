@@ -14,6 +14,8 @@ export async function listParceiros({ stage } = {}) {
   });
 }
 
+const VALID_TYPES = ['ESCRITORIO','ARMADOR_LOGISTICO','OUTRO'];
+
 export async function createParceiro(data) {
   if (!data.nome) { const e=new Error('Nome obrigatório'); e.status=400; throw e; }
   return prisma.parceiro.create({
@@ -22,6 +24,7 @@ export async function createParceiro(data) {
       cnpj: data.cnpj || null,
       telefone: data.telefone || null,
       email: data.email || null,
+      type: VALID_TYPES.includes(data.type) ? data.type : 'OUTRO',
       stages: sanitizeStages(data.stages),
       isSaygo: !!data.isSaygo,
       active:  data.active !== false,
@@ -34,6 +37,7 @@ export async function updateParceiro(id, data) {
   const upd = {};
   if (data.nome     !== undefined) upd.nome = data.nome;
   if (data.cnpj     !== undefined) upd.cnpj = data.cnpj || null;
+  if (data.type     !== undefined) upd.type = VALID_TYPES.includes(data.type) ? data.type : 'OUTRO';
   if (data.telefone !== undefined) upd.telefone = data.telefone || null;
   if (data.email    !== undefined) upd.email = data.email || null;
   if (data.stages   !== undefined) upd.stages = sanitizeStages(data.stages);

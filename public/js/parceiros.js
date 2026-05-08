@@ -26,6 +26,10 @@ window.VIEW_parceiros = (() => {
     document.getElementById('pa-table').innerHTML = UI.table({
       cols: [
         { label: 'Nome', html: true, get: r => `${UI.escapeHtml(r.nome)}${r.isSaygo?' <span class="muted small">(Saygo)</span>':''}` },
+        { label: 'Tipo', html: true, get: r => {
+          const m = { ESCRITORIO:'Escritório', ARMADOR_LOGISTICO:'Armador', OUTRO:'Outro' };
+          return `<span class="pill ${r.type||'OUTRO'}">${m[r.type||'OUTRO']}</span>`;
+        }},
         { label: 'CNPJ', key: 'cnpj' },
         { label: 'Telefone', key: 'telefone' },
         { label: 'E-mail', key: 'email' },
@@ -63,6 +67,13 @@ window.VIEW_parceiros = (() => {
         <div><label>CNPJ</label><input name="cnpj" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(p.cnpj||'')}"></div>
         <div><label>Telefone</label><input name="telefone" data-mask="phone" maxlength="15" value="${UI.escapeHtml(p.telefone||'')}"></div>
         <div class="full"><label>E-mail</label><input type="email" name="email" value="${UI.escapeHtml(p.email||'')}"></div>
+        <div class="full"><label>Tipo de Parceiro *</label>
+          <select name="type" required>
+            <option value="OUTRO"             ${(p.type||'OUTRO')==='OUTRO'?'selected':''}>Outro</option>
+            <option value="ESCRITORIO"        ${p.type==='ESCRITORIO'?'selected':''}>Escritório (acessa clientes, movs, comissões)</option>
+            <option value="ARMADOR_LOGISTICO" ${p.type==='ARMADOR_LOGISTICO'?'selected':''}>Armador Logístico (somente Kanban)</option>
+          </select>
+        </div>
         <div class="full"><label style="margin-bottom:.4rem">Etapas em que atua</label>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">${stagesChecks || '<div class="muted small">Cadastre etapas em Parametros antes.</div>'}</div>
         </div>
@@ -80,6 +91,7 @@ window.VIEW_parceiros = (() => {
       const data = {
         nome: fd.get('nome'), cnpj: fd.get('cnpj'), telefone: fd.get('telefone'),
         email: fd.get('email'), notes: fd.get('notes'),
+        type: fd.get('type') || 'OUTRO',
         isSaygo: !!fd.get('isSaygo'),
         stages: fd.getAll('stages'),
       };

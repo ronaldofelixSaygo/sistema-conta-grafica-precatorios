@@ -1,28 +1,39 @@
 window.AUTH = (() => {
   let me = null;
+  let perms = { modules: [] };
 
   async function tryRestore() {
-    try { const r = await API.get('/api/auth/me'); me = r.user; return me; }
-    catch { me = null; return null; }
+    try {
+      const r = await API.get('/api/auth/me');
+      me = r.user; perms = r.perms || { modules: [] };
+      return me;
+    } catch { me = null; perms = { modules: [] }; return null; }
   }
 
   async function login(email, password) {
     const r = await API.post('/api/auth/login', { email, password });
-    me = r.user; return me;
+    me = r.user;
+    // recarrega permissoes
+    try { const m = await API.get('/api/auth/me'); perms = m.perms || { modules: [] }; } catch {}
+    return me;
   }
 
   async function logout() {
     try { await API.post('/api/auth/logout'); } catch {}
-    me = null;
+    me = null; perms = { modules: [] };
     location.reload();
   }
 
   function user() { return me; }
   function role() { return me?.role || null; }
+  function partnerType() { return me?.partnerType || null; }
   function isAdm()    { return role() === 'ADM'; }
   function isStaff()  { return role() === 'ADM' || role() === 'SAYGO'; }
+  function isPartner(){ return role() === 'PARTNER'; }
+  function isPartnerEscritorio() { return isPartner() && partnerType() === 'ESCRITORIO'; }
+  function canView(mod) { return perms.modules?.includes(mod) ?? false; }
 
-  return { tryRestore, login, logout, user, role, isAdm, isStaff };
+  return { tryRestore, login, logout, user, role, partnerType, isAdm, isStaff, isPartner, isPartnerEscritorio, canView };
 })();
 
 // Login form

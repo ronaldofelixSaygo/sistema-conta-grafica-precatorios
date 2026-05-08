@@ -38,6 +38,14 @@ window.APP = (() => {
     const isStaff = AUTH.isStaff();
     document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = isAdm   ? '' : 'none');
     document.querySelectorAll('[data-staff-only]').forEach(el => el.style.display = isStaff ? '' : 'none');
+    // Esconde itens do menu lateral conforme permissoes efetivas (role + tipo de parceiro)
+    document.querySelectorAll('.sidebar nav a[data-view]').forEach(a => {
+      const v = a.dataset.view;
+      // sempre permite dashboard, parametros (admin only ja filtrado acima)
+      if (a.hasAttribute('data-admin-only') || a.hasAttribute('data-staff-only')) return;
+      if (!AUTH.canView(v)) a.style.display = 'none';
+      else a.style.display = '';
+    });
   }
 
   async function bootAfterLogin() {

@@ -45,7 +45,8 @@ export async function listCards(user) {
     include: {
       cliente: { select: { id: true, nome: true, escritorio: true } },
       stages: {
-        orderBy: { stage: 'asc' },
+        // Ordenacao real e feita no frontend pelo order da KanbanStageDef
+        orderBy: { createdAt: 'asc' },
         include: {
           responsibleUser: { select: { id: true, name: true, role: true } },
           parceiro:        { select: { id: true, nome: true, isSaygo: true } },
@@ -103,7 +104,8 @@ export async function getCard(user, cardId) {
     include: {
       cliente: { select: { id: true, nome: true, escritorio: true } },
       stages: {
-        orderBy: { stage: 'asc' },
+        // Ordenacao real e feita no frontend pelo order da KanbanStageDef
+        orderBy: { createdAt: 'asc' },
         include: {
           responsibleUser: { select: { id: true, name: true, role: true } },
           parceiro:        { select: { id: true, nome: true, isSaygo: true, telefone: true, email: true } },

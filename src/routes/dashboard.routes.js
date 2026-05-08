@@ -6,6 +6,5 @@ const router = Router();
 router.use(requireAuth);
 router.get('/dashboard', ctrl.dashboard);
 router.get('/saldos',    ctrl.saldos);
-router.get('/comissoes', ctrl.comissoes);
 router.get('/alertas',   ctrl.alertas);
 export default router;

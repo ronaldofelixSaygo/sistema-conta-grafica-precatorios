@@ -1,5 +1,6 @@
 import * as authSvc from '../services/auth.service.js';
 import { env } from '../config/env.js';
+import { effectivePerms } from '../utils/rolePerms.js';
 
 export async function login(req, res, next) {
   try {
@@ -22,7 +23,7 @@ export async function logout(req, res) {
 }
 
 export async function me(req, res) {
-  res.json({ user: req.user });
+  res.json({ user: req.user, perms: effectivePerms(req.user) });
 }
 
 export async function changePassword(req, res, next) {

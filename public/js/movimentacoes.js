@@ -7,18 +7,31 @@ window.VIEW_movimentacoes = (() => {
   ];
   let clientesCache = [];
 
+  function tipoPill(t) {
+    if (!t) return '';
+    const cls = t.includes('Débito') ? 'red' : 'green';
+    return `<span class="pill ${cls}">${UI.escapeHtml(t)}</span>`;
+  }
+
   async function render() {
     const el = document.getElementById('view-movimentacoes');
     const canMutate = AUTH.isStaff();
     el.innerHTML = `
-      <div class="filters">
+      <div class="page-toolbar">
         <input id="m-search"   placeholder="Buscar (cliente / DUIMP)" />
-        <input id="m-cliente"  placeholder="Cliente"   />
+        <input id="m-cliente"  placeholder="Filtrar cliente" />
         <select id="m-tipo"><option value="">Todos os tipos</option>${TIPOS.map(t => `<option>${t}</option>`).join('')}</select>
-        <input id="m-parceiro" placeholder="Parceiro"  />
+        <input id="m-parceiro" placeholder="Parceiro" />
         <input id="m-ini" type="date" /> <input id="m-fim" type="date" />
+        <input id="m-vmin" type="number" step="0.01" placeholder="Valor mín" />
+        <input id="m-vmax" type="number" step="0.01" placeholder="Valor máx" />
         <button class="btn" id="m-apply">Filtrar</button>
-        ${canMutate ? '<button class="btn primary" id="m-new">+ Lançamento</button>' : ''}
+        <button class="btn" id="m-clear">Limpar</button>
+        ${canMutate ? `
+          <span style="flex:1"></span>
+          <button class="btn" id="m-import">Importar Extrato PDF</button>
+          <button class="btn primary" id="m-new">+ Novo Lançamento</button>
+        ` : ''}
       </div>
       <div id="m-table"></div>
       <div id="m-pager" style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center"></div>`;
@@ -29,9 +42,19 @@ window.VIEW_movimentacoes = (() => {
 
     const apply = () => { page = 1; load(); };
     document.getElementById('m-apply').onclick = apply;
+    document.getElementById('m-clear').onclick = () => {
+      ['m-search','m-cliente','m-parceiro','m-ini','m-fim','m-vmin','m-vmax'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+      });
+      document.getElementById('m-tipo').value = '';
+      apply();
+    };
     el.querySelectorAll('input,select').forEach(i => i.addEventListener('keydown', e => { if (e.key==='Enter') apply(); }));
-    if (canMutate) document.getElementById('m-new').onclick = () => openForm();
 
+    if (canMutate) {
+      document.getElementById('m-new').onclick = () => openForm();
+      document.getElementById('m-import').onclick = openImport;
+    }
     load();
   }
 
@@ -39,6 +62,7 @@ window.VIEW_movimentacoes = (() => {
     const q = {
       search: val('m-search'), f_cliente: val('m-cliente'), f_tipo: val('m-tipo'),
       f_parceiro: val('m-parceiro'), f_data_ini: val('m-ini'), f_data_fim: val('m-fim'),
+      f_valor_min: val('m-vmin'), f_valor_max: val('m-vmax'),
       page, limit: 50,
     };
     try {
@@ -47,14 +71,19 @@ window.VIEW_movimentacoes = (() => {
       document.getElementById('m-table').innerHTML = UI.table({
         cols: [
           { label: 'Cliente', key: 'cliente_nome' },
-          { label: 'Tipo',    key: 'tipo_movimento' },
-          { label: 'Data',    get: r => UI.fmtDate(r.data_nf) },
+          { label: 'Tipo Movimento', html: true, get: r => tipoPill(r.tipo_movimento) },
+          { label: 'Data NF', get: r => UI.fmtDate(r.data_nf) },
           { label: 'DUIMP/DI/Proc.', key: 'duimp_di_processo' },
           { label: 'Parceiro', key: 'parceiro' },
-          { label: 'Valor',   align: 'right', get: r => UI.fmtMoney(r.valor_ajustado) },
-          { label: '', html: true, get: r => canMutate
-            ? `<div class="actions"><button class="btn small" data-edit="${r.id}">✎</button>
-                <button class="btn small danger" data-del="${r.id}">×</button></div>` : '',
+          { label: '%', align: 'right', get: r => (r.percentual ?? 0) + '%' },
+          { label: 'Valor', align: 'right', html: true, get: r => {
+            const v = r.valor_ajustado;
+            const cls = v < 0 ? 'val-neg' : 'val-pos';
+            return `<span class="${cls}">${UI.fmtMoney(v)}</span>`;
+          }},
+          { label: 'Ações', html: true, get: r => canMutate
+            ? `<div class="actions"><button class="btn small" data-edit="${r.id}">Editar</button>
+                <button class="btn small danger" data-del="${r.id}">Excluir</button></div>` : '',
           },
         ],
         rows: r.items, empty: 'Sem lançamentos.',
@@ -117,6 +146,78 @@ window.VIEW_movimentacoes = (() => {
     if (!confirm('Excluir este lançamento?')) return;
     try { await API.del(`/api/movimentacoes/${id}`); UI.toast('Excluído'); load(); }
     catch (e) { UI.toast(e.message, 'err'); }
+  }
+
+  // ---- Importar Extrato PDF ----
+  function openImport() {
+    const opts = clientesCache.map(c =>
+      `<option value="${c.id}">${UI.escapeHtml(c.nome)}${c.escritorio?` — ${UI.escapeHtml(c.escritorio)}`:''}</option>`).join('');
+    UI.openModal('Importar Extrato PDF', `
+      <div class="form-grid">
+        <div class="full">
+          <label>Cliente alvo (será usado para todos os lançamentos detectados) *</label>
+          <select id="imp-cli"><option value="">—</option>${opts}</select>
+        </div>
+        <div class="full">
+          <label>Arquivo PDF *</label>
+          <input type="file" id="imp-file" accept="application/pdf">
+        </div>
+        <div class="full">
+          <button class="btn primary" id="imp-prev">Pré-visualizar lançamentos</button>
+        </div>
+        <div class="full" id="imp-out"></div>
+      </div>`);
+    document.getElementById('imp-prev').onclick = previewImport;
+  }
+  let lastPreview = null;
+  async function previewImport() {
+    const cli  = document.getElementById('imp-cli').value;
+    const file = document.getElementById('imp-file').files[0];
+    if (!file) { UI.toast('Selecione um PDF', 'err'); return; }
+    if (!cli)  { UI.toast('Selecione um cliente alvo', 'err'); return; }
+    const fd = new FormData(); fd.append('file', file);
+    document.getElementById('imp-out').innerHTML = '<div class="muted">Lendo PDF...</div>';
+    try {
+      const r = await fetch('/api/movimentacoes/import-extrato/preview', {
+        method: 'POST', credentials: 'include', body: fd,
+      });
+      if (!r.ok) throw new Error('Falha ao ler PDF');
+      const j = await r.json();
+      lastPreview = j;
+      const rows = (j.items || []).map((it, idx) => `
+        <tr>
+          <td>${UI.fmtDate(it.data_nf)}</td>
+          <td>${UI.escapeHtml(it.duimp_di_processo || '')}</td>
+          <td>${UI.escapeHtml(it.tipo_movimento)}</td>
+          <td class="num">${UI.fmtMoney(it.valor)}</td>
+          <td><input type="checkbox" data-imp-i="${idx}" checked></td>
+        </tr>`).join('');
+      document.getElementById('imp-out').innerHTML = `
+        <div class="muted small" style="margin-bottom:.5rem">${j.count} lançamento(s) detectado(s).</div>
+        <table class="table"><thead>
+          <tr><th>Data</th><th>DUIMP</th><th>Tipo</th><th>Valor</th><th>Importar?</th></tr>
+        </thead><tbody>${rows}</tbody></table>
+        <div class="form-actions" style="margin-top:.6rem">
+          <button class="btn primary" id="imp-apply">Aplicar selecionados</button>
+        </div>`;
+      document.getElementById('imp-apply').onclick = applyImport;
+    } catch (e) {
+      document.getElementById('imp-out').innerHTML = `<div class="err">${e.message}</div>`;
+    }
+  }
+  async function applyImport() {
+    const cliId = document.getElementById('imp-cli').value;
+    const checks = document.querySelectorAll('[data-imp-i]');
+    const items = [];
+    checks.forEach(c => {
+      if (c.checked) items.push({ ...lastPreview.items[Number(c.dataset.impI)], cliente_id: Number(cliId) });
+    });
+    if (!items.length) return UI.toast('Nada selecionado', 'err');
+    try {
+      const r = await API.post('/api/movimentacoes/import-extrato/apply', { items, cliente_id: Number(cliId) });
+      UI.toast(`${r.created} lançamentos criados`);
+      UI.closeModal(); load();
+    } catch (e) { UI.toast(e.message, 'err'); }
   }
 
   return { render };

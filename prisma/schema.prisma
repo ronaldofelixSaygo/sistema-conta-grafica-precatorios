@@ -64,6 +64,10 @@ model User {
   partnerRequestsCreated   PartnerRequest[] @relation("PartnerRequestedBy")
   partnerRequestsResolved  PartnerRequest[] @relation("PartnerResolvedBy")
 
+  // Comissões
+  commissionsCreated   Commission[] @relation("CommissionCreatedBy")
+  commissionsReviewed  Commission[] @relation("CommissionReviewedBy")
+
   @@index([role])
   @@index([officeName])
   @@map("users")
@@ -357,27 +361,85 @@ model PartnerRequest {
 // ============================================================
 //   PARCEIROS (cadastro de empresas que prestam serviço)
 // ============================================================
+enum PartnerType {
+  ESCRITORIO          // contabilidade/escritório: vê tudo (clientes, movs, comissões)
+  ARMADOR_LOGISTICO   // só Kanban
+  OUTRO               // só Kanban (default seguro)
+}
+
 model Parceiro {
-  id        String   @id @default(uuid())
+  id        String      @id @default(uuid())
   nome      String
   cnpj      String?
   telefone  String?
   email     String?
-  // Etapas do Kanban em que esse parceiro atua (keys de KanbanStageDef)
+  type      PartnerType @default(OUTRO)
   stages    String[]
-  // Se este parceiro é a própria Saygo (flag)
-  isSaygo   Boolean  @default(false)
-  active    Boolean  @default(true)
-  notes     String?  @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isSaygo   Boolean     @default(false)
+  active    Boolean     @default(true)
+  notes     String?     @db.Text
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
 
   users           User[]
   kanbanStages    KanbanStageProgress[]
+  commissions     Commission[] @relation("CommissionParceiro")
 
   @@index([nome])
   @@index([cnpj])
+  @@index([type])
   @@map("parceiros")
+}
+
+// ============================================================
+//   COMISSÕES (apuração persistida + lançamentos extras)
+// ============================================================
+enum CommissionStatus {
+  DRAFT      // parceiro está montando
+  SUBMITTED  // enviada para Saygo aprovar
+  APPROVED   // aceita
+  REJECTED   // rejeitada (com motivo) — parceiro pode editar
+  CLOSED     // fechada (não pode mais editar)
+}
+
+model Commission {
+  id            String           @id @default(uuid())
+  parceiroId    String
+  parceiro      Parceiro         @relation("CommissionParceiro", fields: [parceiroId], references: [id], onDelete: Cascade)
+  // mês de referência: YYYY-MM
+  monthRef      String
+  totalBase     Float            @default(0) // soma calculada das comissões dos clientes
+  totalExtras   Float            @default(0) // soma de adições - reduções
+  totalFinal    Float            @default(0) // base + extras
+  detalhes      Json             @default("[]") // snapshot dos cálculos por cliente
+  status        CommissionStatus @default(DRAFT)
+  rejectReason  String?          @db.Text
+  createdById   String
+  createdBy     User             @relation("CommissionCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  reviewedById  String?
+  reviewedBy    User?            @relation("CommissionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt    DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  extras        CommissionExtra[]
+
+  @@unique([parceiroId, monthRef])
+  @@index([status])
+  @@map("commissions")
+}
+
+model CommissionExtra {
+  id           String     @id @default(uuid())
+  commissionId String
+  commission   Commission @relation(fields: [commissionId], references: [id], onDelete: Cascade)
+  description  String     // o que é o lançamento
+  amount       Float      // positivo = adição, negativo = redução
+  createdAt    DateTime   @default(now())
+
+  @@index([commissionId])
+  @@map("commission_extras")
 }
 
 // ============================================================

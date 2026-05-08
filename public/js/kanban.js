@@ -147,13 +147,19 @@ window.VIEW_kanban = (() => {
 
   function renderCardModal() {
     const card = openCard;
-    UI.openModal(`${card.cliente.nome} -- ${meta.stageMeta[card.currentStage].label}`, `
+    // Ordena as etapas pelo `order` da config (meta.stagesOrder)
+    const orderIdx = (key) => {
+      const i = meta.stagesOrder.indexOf(key);
+      return i < 0 ? 999 : i;
+    };
+    const orderedStages = [...card.stages].sort((a, b) => orderIdx(a.stage) - orderIdx(b.stage));
+    UI.openModal(`${card.cliente.nome} -- ${meta.stageMeta[card.currentStage]?.label || card.currentStage}`, `
       <div class="kb-detail">
         <div class="muted small" style="margin-bottom:.5rem">
           Iniciado: ${UI.fmtDateTime(card.startedAt)}
           ${card.completedAt ? `* Concluido: ${UI.fmtDateTime(card.completedAt)}` : ''}
         </div>
-        <div id="kb-stages">${card.stages.map(s => stageHtml(card, s)).join('')}</div>
+        <div id="kb-stages">${orderedStages.map(s => stageHtml(card, s)).join('')}</div>
       </div>`);
 
     document.getElementById('kb-stages').addEventListener('click', handleStageClick);
