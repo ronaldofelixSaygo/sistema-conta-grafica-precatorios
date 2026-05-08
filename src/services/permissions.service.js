@@ -81,6 +81,11 @@ export async function listAll() {
 }
 
 export async function update(id, data) {
+  // Verifica que o registro existe primeiro (debug-friendly)
+  const exists = await prisma.rolePermission.findUnique({ where: { id } });
+  if (!exists) {
+    const e = new Error(`RolePermission ${id} nao encontrado`); e.status = 404; throw e;
+  }
   const upd = {};
   if (data.canView   !== undefined) upd.canView   = !!data.canView;
   if (data.canCreate !== undefined) upd.canCreate = !!data.canCreate;
@@ -91,6 +96,7 @@ export async function update(id, data) {
       ? data.restrictedFields.filter(s => typeof s === 'string')
       : [];
   }
+  if (Object.keys(upd).length === 0) return exists; // nada a atualizar
   return prisma.rolePermission.update({ where: { id }, data: upd });
 }
 

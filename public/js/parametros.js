@@ -143,17 +143,48 @@ window.VIEW_parametros = (() => {
   }
 
   async function savePerms() {
-    const checks = document.querySelectorAll('[data-pid]');
+    const btn = document.getElementById('pe-save');
+    if (!btn) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Salvando...';
+
+    // Coleta apenas checkboxes que NÃO estão disabled (ADM são fixos)
+    const checks = document.querySelectorAll('[data-pid]:not([disabled])');
     const byPid = {};
     checks.forEach(c => {
       byPid[c.dataset.pid] = byPid[c.dataset.pid] || {};
       byPid[c.dataset.pid][c.dataset.k] = c.checked;
     });
-    let ok=0, fail=0;
-    for (const [pid, body] of Object.entries(byPid)) {
-      try { await API.put(`/api/permissions/${pid}`, body); ok++; } catch { fail++; }
+    const entries = Object.entries(byPid);
+
+    let ok = 0, fail = 0, errors = [];
+    // Paraleliza em lotes de 10 pra não congestionar
+    for (let i = 0; i < entries.length; i += 10) {
+      const batch = entries.slice(i, i + 10);
+      const results = await Promise.all(batch.map(([pid, body]) =>
+        API.put(`/api/permissions/${pid}`, body)
+          .then(() => ({ ok: true }))
+          .catch(e => ({ ok: false, msg: e.message }))
+      ));
+      for (const r of results) {
+        if (r.ok) ok++;
+        else { fail++; errors.push(r.msg); }
+      }
+      // Atualiza progresso no botão
+      btn.textContent = `Salvando ${Math.min(i + 10, entries.length)}/${entries.length}...`;
     }
-    UI.toast(`${ok} salvo${fail?`, ${fail} falha(s)`:''}`, fail?'err':'ok');
+
+    btn.disabled = false;
+    btn.textContent = original;
+    if (fail > 0) {
+      console.error('Erros de salvamento:', errors);
+      UI.toast(`${ok} salvo, ${fail} falha(s) — veja console`, 'err');
+    } else {
+      UI.toast(`${ok} permissões salvas com sucesso!`, 'ok');
+    }
+    // Recarrega a matriz para confirmar visualmente
+    await loadPerms();
   }
 
   // ===== Campos Sensíveis (modal) =====
