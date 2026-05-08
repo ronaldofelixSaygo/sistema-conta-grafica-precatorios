@@ -1,36 +1,67 @@
 import { prisma } from '../config/prisma.js';
 
 const ROLES = ['ADM','SAYGO','PARTNER','CLIENT'];
+const PARTNER_TYPES = ['ESCRITORIO','ARMADOR_LOGISTICO','OUTRO'];
 const MODULES = [
   'dashboard','clientes','movimentacoes','saldos','comissoes',
   'relatorios','alertas','kanban','acionamentos','parceiros',
-  'usuarios','auditoria','migracao','chat','parametros',
+  'usuarios','auditoria','chat','parametros',
 ];
 
-// Defaults: tabela de permissões inicial usada no first-run
+// Coluns "perfis" exibidas no frontend = combinação role+partnerType
+export const PROFILES = [
+  { key: 'ADM',                   role: 'ADM',     partnerType: null },
+  { key: 'SAYGO',                 role: 'SAYGO',   partnerType: null },
+  { key: 'PARTNER_ESCRITORIO',    role: 'PARTNER', partnerType: 'ESCRITORIO' },
+  { key: 'PARTNER_ARMADOR',       role: 'PARTNER', partnerType: 'ARMADOR_LOGISTICO' },
+  { key: 'PARTNER_OUTRO',         role: 'PARTNER', partnerType: 'OUTRO' },
+  { key: 'CLIENT',                role: 'CLIENT',  partnerType: null },
+];
+
+// Default: sensitive fields por (perfil, módulo) — chave inicial movível pra UI
+const DEFAULT_RESTRICTIONS = {
+  PARTNER_ARMADOR: { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
+  PARTNER_OUTRO:   { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
+};
+
 function defaults() {
   const out = [];
-  for (const role of ROLES) {
+  for (const p of PROFILES) {
     for (const m of MODULES) {
       let canView=false, canCreate=false, canEdit=false, canDelete=false;
-      if (role === 'ADM') { canView=canCreate=canEdit=canDelete=true; }
-      else if (role === 'SAYGO') {
-        canView = !['parametros'].includes(m);
-        canCreate = ['clientes','movimentacoes','kanban','acionamentos','parceiros'].includes(m);
+      if (p.key === 'ADM') { canView=canCreate=canEdit=canDelete=true; }
+      else if (p.key === 'SAYGO') {
+        canView   = !['parametros'].includes(m);
+        canCreate = ['clientes','movimentacoes','kanban','acionamentos','parceiros','comissoes'].includes(m);
         canEdit   = canCreate;
         canDelete = canCreate;
-      } else if (role === 'PARTNER') {
-        canView = ['dashboard','clientes','movimentacoes','saldos','comissoes','kanban','acionamentos','chat'].includes(m);
-        canCreate = ['acionamentos'].includes(m);
-        canEdit   = ['acionamentos','kanban'].includes(m);
+      } else if (p.key === 'PARTNER_ESCRITORIO') {
+        canView   = ['dashboard','clientes','movimentacoes','saldos','comissoes','relatorios','alertas','kanban','acionamentos','chat'].includes(m);
+        canCreate = ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(m);
+        canEdit   = canCreate;
+        canDelete = canCreate;
+      } else if (p.key === 'PARTNER_ARMADOR') {
+        canView   = ['kanban','chat'].includes(m);  // armador: só Kanban e Chat por padrão
+        canCreate = ['kanban'].includes(m);
+        canEdit   = canCreate;
         canDelete = false;
-      } else if (role === 'CLIENT') {
-        canView = ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','chat'].includes(m);
+      } else if (p.key === 'PARTNER_OUTRO') {
+        canView   = ['kanban','chat'].includes(m);
+        canCreate = ['kanban'].includes(m);
+        canEdit   = canCreate;
+        canDelete = false;
+      } else if (p.key === 'CLIENT') {
+        canView   = ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','chat'].includes(m);
         canCreate = ['acionamentos'].includes(m);
         canEdit   = false;
         canDelete = false;
       }
-      out.push({ role, module: m, canView, canCreate, canEdit, canDelete });
+      const restricted = DEFAULT_RESTRICTIONS[p.key]?.[m] || [];
+      out.push({
+        role: p.role, partnerType: p.partnerType, module: m,
+        canView, canCreate, canEdit, canDelete,
+        restrictedFields: restricted,
+      });
     }
   }
   return out;
@@ -45,20 +76,22 @@ export async function ensureDefaults() {
 export async function listAll() {
   await ensureDefaults();
   return prisma.rolePermission.findMany({
-    orderBy: [{ role: 'asc' }, { module: 'asc' }],
+    orderBy: [{ role: 'asc' }, { partnerType: 'asc' }, { module: 'asc' }],
   });
 }
 
 export async function update(id, data) {
-  return prisma.rolePermission.update({
-    where: { id },
-    data: {
-      canView:   !!data.canView,
-      canCreate: !!data.canCreate,
-      canEdit:   !!data.canEdit,
-      canDelete: !!data.canDelete,
-    },
-  });
+  const upd = {};
+  if (data.canView   !== undefined) upd.canView   = !!data.canView;
+  if (data.canCreate !== undefined) upd.canCreate = !!data.canCreate;
+  if (data.canEdit   !== undefined) upd.canEdit   = !!data.canEdit;
+  if (data.canDelete !== undefined) upd.canDelete = !!data.canDelete;
+  if (data.restrictedFields !== undefined) {
+    upd.restrictedFields = Array.isArray(data.restrictedFields)
+      ? data.restrictedFields.filter(s => typeof s === 'string')
+      : [];
+  }
+  return prisma.rolePermission.update({ where: { id }, data: upd });
 }
 
 export async function resetToDefaults() {
@@ -67,4 +100,50 @@ export async function resetToDefaults() {
   return { ok: true };
 }
 
-export const META = { ROLES, MODULES };
+// === Permissões efetivas para um usuário ===
+function profileKeyOf(user) {
+  if (!user) return null;
+  if (user.role !== 'PARTNER') return user.role;
+  const t = user.partnerType || 'OUTRO';
+  if (t === 'ESCRITORIO') return 'PARTNER_ESCRITORIO';
+  if (t === 'ARMADOR_LOGISTICO') return 'PARTNER_ARMADOR';
+  return 'PARTNER_OUTRO';
+}
+function profileFromKey(key) {
+  return PROFILES.find(p => p.key === key);
+}
+
+// Retorna { modules: [], byModule: { mod: { canView, canCreate, canEdit, canDelete, restrictedFields }}}
+export async function effectivePerms(user) {
+  if (!user) return { modules: [], byModule: {}, profileKey: null };
+  await ensureDefaults();
+  const key = profileKeyOf(user);
+  const p = profileFromKey(key);
+  if (!p) return { modules: [], byModule: {}, profileKey: null };
+  const rows = await prisma.rolePermission.findMany({
+    where: { role: p.role, partnerType: p.partnerType },
+  });
+  const byModule = {};
+  const modules = [];
+  for (const r of rows) {
+    byModule[r.module] = {
+      canView: r.canView, canCreate: r.canCreate, canEdit: r.canEdit, canDelete: r.canDelete,
+      restrictedFields: Array.isArray(r.restrictedFields) ? r.restrictedFields : [],
+    };
+    if (r.canView) modules.push(r.module);
+  }
+  return { modules, byModule, profileKey: key, role: user.role, partnerType: user.partnerType || null };
+}
+
+// Helper síncrono para lookup com perms já carregadas
+export function applyRestrictions(record, fields) {
+  if (!record || !fields?.length) return record;
+  const out = { ...record };
+  for (const f of fields) delete out[f];
+  return out;
+}
+
+export const META = { ROLES, PARTNER_TYPES, MODULES, PROFILES };
+
+// Helper exportado para o controller
+export { MODULES };

@@ -3,11 +3,37 @@ window.VIEW_parametros = (() => {
   let stages = [];
   let activeTab = 'permissoes';
 
+  // Mapa de campos disponíveis para "restringir" por entidade.
+  // Adicione aqui campos sensíveis que o Adm poderá ocultar para cada perfil.
+  const SENSITIVE_FIELDS_BY_MODULE = {
+    clientes: [
+      { key: 'cnpj',                label: 'CNPJ' },
+      { key: 'cnpjFilial',          label: 'CNPJ filial' },
+      { key: 'percentualComissao',  label: '% Comissão' },
+      { key: 'diaFechamento',       label: 'Dia fechamento' },
+      { key: 'observacoes',         label: 'Observações' },
+      { key: 'parceiroSala',        label: 'Parceiro sala' },
+      { key: 'parceiroFilial',      label: 'Parceiro filial' },
+      { key: 'parceiroIe',          label: 'Parceiro IE' },
+      { key: 'locacaoSala',         label: 'Status locação sala' },
+      { key: 'aberturaFilial',      label: 'Status abertura filial' },
+      { key: 'reativacaoIe',        label: 'Status reativação IE' },
+      { key: 'contaGrafica',        label: 'Status conta gráfica' },
+      { key: 'clienteCertificado',  label: 'Cliente certificado' },
+    ],
+    movimentacoes: [
+      { key: 'percentual',     label: '%' },
+      { key: 'valor',          label: 'Valor bruto' },
+      { key: 'valorAjustado',  label: 'Valor ajustado' },
+      { key: 'parceiro',       label: 'Parceiro' },
+    ],
+  };
+
   async function render() {
     const el = document.getElementById('view-parametros');
     el.innerHTML = `
       <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem">
-        <button class="btn ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissoes</button>
+        <button class="btn ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissões</button>
         <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
       </div>
       <div id="param-content"></div>`;
@@ -26,30 +52,49 @@ window.VIEW_parametros = (() => {
       drawPerms();
     } catch (e) { c.innerHTML = `<div class="err">${e.message}</div>`; }
   }
+
+  function findPerm(profile, mod) {
+    return perms.find(p => p.role === profile.role
+      && (p.partnerType || null) === (profile.partnerType || null)
+      && p.module === mod);
+  }
+
   function drawPerms() {
     const c = document.getElementById('param-content');
     const moduleLabels = {
-      dashboard:'Painel', clientes:'Clientes', movimentacoes:'Movimentacoes',
-      saldos:'Saldos', comissoes:'Comissoes', relatorios:'Relatorios',
+      dashboard:'Painel', clientes:'Clientes', movimentacoes:'Movimentações',
+      saldos:'Saldos', comissoes:'Comissões', relatorios:'Relatórios',
       alertas:'Alertas', kanban:'Kanban', acionamentos:'Acionamentos',
-      parceiros:'Parceiros', usuarios:'Usuarios', auditoria:'Auditoria',
-      migracao:'Migracao', chat:'Chat', parametros:'Parametros',
+      parceiros:'Parceiros', usuarios:'Usuários', auditoria:'Auditoria',
+      chat:'Chat', parametros:'Parâmetros',
     };
-    const roleLabels = { ADM:'Administrador', SAYGO:'Saygo', PARTNER:'Parceiro', CLIENT:'Cliente' };
+    const profileLabels = {
+      ADM: 'Administrador',
+      SAYGO: 'Saygo',
+      PARTNER_ESCRITORIO: 'Parceiro<br><small>Escritório</small>',
+      PARTNER_ARMADOR:    'Parceiro<br><small>Armador Logístico</small>',
+      PARTNER_OUTRO:      'Parceiro<br><small>Outro</small>',
+      CLIENT: 'Cliente',
+    };
+    const profiles = permsMeta.PROFILES || [];
     c.innerHTML = `
       <div class="panel">
-        <h3>Matriz de permissoes por perfil</h3>
-        <p class="muted small" style="margin-bottom:1rem">Marque o que cada perfil pode fazer em cada modulo.</p>
+        <h3>Matriz de permissões por perfil</h3>
+        <p class="muted small" style="margin-bottom:1rem">
+          Marque o que cada perfil pode fazer em cada módulo.
+          Para os módulos com campos sensíveis (Clientes, Movimentações), use o botão
+          <strong>"Campos sensíveis"</strong> ao lado do nome do módulo para ocultar campos específicos
+          do retorno por perfil.
+        </p>
         <div style="overflow-x:auto">
           <table class="table">
             <thead>
               <tr>
-                <th>Modulo</th>
-                ${permsMeta.ROLES.map(r => `<th colspan="4" style="text-align:center;border-left:1px solid var(--bd2)">${roleLabels[r]||r}</th>`).join('')}
+                <th rowspan="2" style="vertical-align:bottom">Módulo</th>
+                ${profiles.map(p => `<th colspan="4" style="text-align:center;border-left:1px solid var(--bd2);min-width:180px">${profileLabels[p.key]||p.key}</th>`).join('')}
               </tr>
               <tr>
-                <th></th>
-                ${permsMeta.ROLES.map(() => `
+                ${profiles.map(() => `
                   <th style="font-size:9px;border-left:1px solid var(--bd2)">VER</th>
                   <th style="font-size:9px">CRIAR</th>
                   <th style="font-size:9px">EDIT</th>
@@ -59,34 +104,44 @@ window.VIEW_parametros = (() => {
             </thead>
             <tbody>
               ${permsMeta.MODULES.map(mod => {
-                const cells = permsMeta.ROLES.map(role => {
-                  const p = perms.find(x => x.role===role && x.module===mod);
-                  if (!p) return '<td>--</td>'.repeat(4);
-                  const cb = (k) => `<input type="checkbox" data-pid="${p.id}" data-k="${k}" ${p[k]?'checked':''} ${role==='ADM'?'disabled':''}>`;
+                const cells = profiles.map(p => {
+                  const r = findPerm(p, mod);
+                  if (!r) return '<td>--</td>'.repeat(4);
+                  const cb = (k) => `<input type="checkbox" data-pid="${r.id}" data-k="${k}" ${r[k]?'checked':''} ${p.key==='ADM'?'disabled':''}>`;
                   return `
                     <td style="text-align:center;border-left:1px solid var(--bd2)">${cb('canView')}</td>
                     <td style="text-align:center">${cb('canCreate')}</td>
                     <td style="text-align:center">${cb('canEdit')}</td>
                     <td style="text-align:center">${cb('canDelete')}</td>`;
                 }).join('');
-                return `<tr><td><strong>${moduleLabels[mod]||mod}</strong></td>${cells}</tr>`;
+                const sensitiveBtn = SENSITIVE_FIELDS_BY_MODULE[mod]
+                  ? `<button class="btn small ghost" data-sens-mod="${mod}" style="font-size:10px;margin-left:.4rem">Campos sensíveis</button>`
+                  : '';
+                return `<tr>
+                  <td><strong>${moduleLabels[mod]||mod}</strong>${sensitiveBtn}</td>
+                  ${cells}
+                </tr>`;
               }).join('')}
             </tbody>
           </table>
         </div>
         <div style="margin-top:1rem;display:flex;gap:.5rem">
-          <button class="btn primary" id="pe-save">Salvar alteracoes</button>
-          <button class="btn" id="pe-reset">Restaurar padroes</button>
+          <button class="btn primary" id="pe-save">Salvar alterações</button>
+          <button class="btn" id="pe-reset">Restaurar padrões</button>
         </div>
-      </div>
-    `;
+      </div>`;
     document.getElementById('pe-save').onclick = savePerms;
     document.getElementById('pe-reset').onclick = async () => {
-      if (!confirm('Restaurar permissoes padrao?')) return;
+      if (!confirm('Restaurar permissões padrão?')) return;
       try { await API.post('/api/permissions/reset'); UI.toast('Restaurado'); loadPerms(); }
       catch (e) { UI.toast(e.message, 'err'); }
     };
+    // Botões "Campos sensíveis"
+    c.querySelectorAll('[data-sens-mod]').forEach(b => {
+      b.onclick = () => openSensitiveModal(b.dataset.sensMod);
+    });
   }
+
   async function savePerms() {
     const checks = document.querySelectorAll('[data-pid]');
     const byPid = {};
@@ -99,6 +154,72 @@ window.VIEW_parametros = (() => {
       try { await API.put(`/api/permissions/${pid}`, body); ok++; } catch { fail++; }
     }
     UI.toast(`${ok} salvo${fail?`, ${fail} falha(s)`:''}`, fail?'err':'ok');
+  }
+
+  // ===== Campos Sensíveis (modal) =====
+  function openSensitiveModal(mod) {
+    const fields = SENSITIVE_FIELDS_BY_MODULE[mod] || [];
+    const profiles = permsMeta.PROFILES || [];
+    const profileLabels = {
+      ADM:'Administrador', SAYGO:'Saygo',
+      PARTNER_ESCRITORIO:'Parceiro Escritório',
+      PARTNER_ARMADOR:'Parceiro Armador',
+      PARTNER_OUTRO:'Parceiro Outro',
+      CLIENT:'Cliente',
+    };
+    const rows = fields.map(f => {
+      const cells = profiles.map(p => {
+        const r = findPerm(p, mod);
+        if (!r) return '<td>--</td>';
+        const restricted = (r.restrictedFields || []).includes(f.key);
+        const disabled = p.key === 'ADM' ? 'disabled' : '';
+        return `<td style="text-align:center;border-left:1px solid var(--bd2)">
+          <input type="checkbox" data-sf-pid="${r.id}" data-sf-field="${f.key}" ${restricted?'checked':''} ${disabled}>
+        </td>`;
+      }).join('');
+      return `<tr><td><strong>${UI.escapeHtml(f.label)}</strong> <span class="muted small">${f.key}</span></td>${cells}</tr>`;
+    }).join('');
+
+    UI.openModal(`Campos sensíveis: ${mod}`, `
+      <p class="muted small" style="margin-bottom:.6rem">
+        Marque para <strong>ocultar</strong> o campo no retorno da API para o perfil.
+        Útil quando o perfil pode ver a lista mas não deve ver certas colunas (ex.: % comissão).
+      </p>
+      <div style="overflow-x:auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Campo</th>
+              ${profiles.map(p => `<th style="text-align:center;border-left:1px solid var(--bd2);min-width:120px">${profileLabels[p.key]||p.key}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="form-actions" style="margin-top:.8rem">
+        <button class="btn" id="sf-cancel">Cancelar</button>
+        <button class="btn primary" id="sf-save">Salvar restrições</button>
+      </div>`);
+    document.getElementById('sf-cancel').onclick = UI.closeModal;
+    document.getElementById('sf-save').onclick = async () => {
+      const byPid = {};
+      document.querySelectorAll('[data-sf-pid]').forEach(c => {
+        const pid = c.dataset.sfPid;
+        byPid[pid] = byPid[pid] || [];
+        if (c.checked) byPid[pid].push(c.dataset.sfField);
+      });
+      let ok=0, fail=0;
+      for (const [pid, fields] of Object.entries(byPid)) {
+        try { await API.put(`/api/permissions/${pid}`, { restrictedFields: fields }); ok++; }
+        catch { fail++; }
+      }
+      // pra perms que não tinham checkbox (sem campos selecionados), também precisa enviar []
+      // No loop acima, byPid só tem pids cujos checkboxes apareceram. Como todos os pids
+      // dessa página apareceram (mesmo que vazios), o loop é completo.
+      UI.toast(`${ok} salvo${fail?`, ${fail} falha(s)`:''}`, fail?'err':'ok');
+      UI.closeModal();
+      loadPerms();
+    };
   }
 
   // ===== ETAPAS E ATIVIDADES =====
@@ -119,8 +240,8 @@ window.VIEW_parametros = (() => {
           <button class="btn primary" id="add-stage">+ Nova etapa</button>
         </div>
         <p class="muted small" style="margin-bottom:1rem">
-          Etapas inativas nao aparecem no Kanban. Atividades inativas tambem ficam ocultas em novos cards.
-          Excluir uma etapa so e possivel se nao houver cards usando ela.
+          Etapas inativas não aparecem no Kanban. Atividades inativas também ficam ocultas em novos cards.
+          Excluir uma etapa só é possível se não houver cards usando ela.
         </p>
         ${stages.map(stageCard).join('')}
       </div>`;
@@ -130,7 +251,7 @@ window.VIEW_parametros = (() => {
   function stageCard(s) {
     const acts = (s.activities || []).map(a => `
       <li class="param-act ${a.active?'':'inactive'}">
-        <input type="text" data-act-edit="${a.id}" value="${UI.escapeHtml(a.label)}">
+        <input type="text" data-cl-stage="${s.id}" data-act-edit="${a.id}" value="${UI.escapeHtml(a.label)}">
         <button class="btn small" data-act-save="${a.id}">Salvar</button>
         <button class="btn small ${a.active?'':'primary'}" data-act-toggle="${a.id}" data-active="${a.active}">${a.active?'Desativar':'Ativar'}</button>
         <button class="btn small danger" data-act-del="${a.id}">x</button>
@@ -152,7 +273,7 @@ window.VIEW_parametros = (() => {
           </div>
         </div>
         <div class="muted small" style="margin:.3rem 0 .6rem">
-          SLA: ${s.slaHours}h * Responsavel padrao: ${s.defaultResponsibleRole || '--'}
+          SLA: ${s.slaHours}h * Responsável padrão: ${s.defaultResponsibleRole || '--'}
         </div>
         <ul class="param-act-list">${acts}</ul>
         <div class="param-act-add">
@@ -169,7 +290,7 @@ window.VIEW_parametros = (() => {
         ${isNew ? '<div class="full"><label>Chave (auto, opcional)</label><input name="key" placeholder="Ex: ONBOARDING (deixar vazio gera automaticamente)"></div>' : ''}
         <div><label>Ordem</label><input type="number" name="order" value="${stage?.order ?? 0}"></div>
         <div><label>SLA (horas)</label><input type="number" min="0" name="slaHours" value="${stage?.slaHours ?? 72}"></div>
-        <div class="full"><label>Responsavel padrao</label>
+        <div class="full"><label>Responsável padrão</label>
           <select name="defaultResponsibleRole">
             <option value=""        ${!stage?.defaultResponsibleRole?'selected':''}>--</option>
             <option value="SAYGO"   ${stage?.defaultResponsibleRole==='SAYGO'?'selected':''}>Saygo</option>
@@ -211,26 +332,21 @@ window.VIEW_parametros = (() => {
             || t.dataset.actAdd || t.dataset.actSave || t.dataset.actDel || t.dataset.actToggle;
     if (!id) return;
     if (t.dataset.stageEdit) {
-      const s = stages.find(x => x.id === id);
-      openStageForm(s);
+      const s = stages.find(x => x.id === id); openStageForm(s);
     } else if (t.dataset.stageDel) {
-      if (!confirm('Excluir essa etapa? So funciona se nao houver cards usando.')) return;
-      try { await API.del(`/api/kanban/stages/${id}`); UI.toast('Etapa excluida'); loadStages(); }
+      if (!confirm('Excluir essa etapa?')) return;
+      try { await API.del(`/api/kanban/stages/${id}`); UI.toast('Etapa excluída'); loadStages(); }
       catch (e) { UI.toast(e.message, 'err'); }
     } else if (t.dataset.stageToggle) {
       const isActive = t.dataset.active === 'true';
-      try {
-        await API.put(`/api/kanban/stages/${id}`, { active: !isActive });
-        UI.toast(isActive ? 'Inativada' : 'Ativada'); loadStages();
-      } catch (e) { UI.toast(e.message, 'err'); }
+      try { await API.put(`/api/kanban/stages/${id}`, { active: !isActive }); UI.toast(isActive?'Inativada':'Ativada'); loadStages(); }
+      catch (e) { UI.toast(e.message, 'err'); }
     } else if (t.dataset.actAdd) {
       const inp = document.getElementById('add-act-' + id);
       const label = inp.value.trim();
       if (!label) return;
-      try {
-        await API.post(`/api/kanban/stages/${id}/activities`, { label });
-        UI.toast('Atividade adicionada'); loadStages();
-      } catch (e) { UI.toast(e.message, 'err'); }
+      try { await API.post(`/api/kanban/stages/${id}/activities`, { label }); UI.toast('Atividade adicionada'); loadStages(); }
+      catch (e) { UI.toast(e.message, 'err'); }
     } else if (t.dataset.actSave) {
       const inp = document.querySelector(`[data-act-edit="${id}"]`);
       const label = inp.value.trim();
@@ -238,14 +354,12 @@ window.VIEW_parametros = (() => {
       catch (e) { UI.toast(e.message, 'err'); }
     } else if (t.dataset.actDel) {
       if (!confirm('Excluir essa atividade?')) return;
-      try { await API.del(`/api/kanban/activities/${id}`); UI.toast('Atividade excluida'); loadStages(); }
+      try { await API.del(`/api/kanban/activities/${id}`); UI.toast('Atividade excluída'); loadStages(); }
       catch (e) { UI.toast(e.message, 'err'); }
     } else if (t.dataset.actToggle) {
       const isActive = t.dataset.active === 'true';
-      try {
-        await API.put(`/api/kanban/activities/${id}`, { active: !isActive });
-        UI.toast(isActive ? 'Inativada' : 'Ativada'); loadStages();
-      } catch (e) { UI.toast(e.message, 'err'); }
+      try { await API.put(`/api/kanban/activities/${id}`, { active: !isActive }); UI.toast(isActive?'Inativada':'Ativada'); loadStages(); }
+      catch (e) { UI.toast(e.message, 'err'); }
     }
   }
 

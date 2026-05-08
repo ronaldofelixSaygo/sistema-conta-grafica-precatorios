@@ -450,17 +450,23 @@ model CommissionExtra {
 // ============================================================
 //   PERMISSÕES POR PERFIL (parâmetros)
 // ============================================================
-// Matriz role × módulo. ADM gerencia na tela Parâmetros.
+// Matriz role × tipo-de-parceiro × módulo. ADM gerencia na tela Parâmetros.
+// Para roles que não são PARTNER, partnerType é null.
+// Para PARTNER, há uma linha por tipo (ESCRITORIO, ARMADOR_LOGISTICO, OUTRO).
 model RolePermission {
-  id        String   @id @default(uuid())
-  role      Role
-  module    String   // 'clientes' | 'movimentacoes' | 'kanban' | 'chat' | 'usuarios' | etc
-  canView   Boolean  @default(true)
-  canCreate Boolean  @default(false)
-  canEdit   Boolean  @default(false)
-  canDelete Boolean  @default(false)
-  updatedAt DateTime @updatedAt
+  id          String       @id @default(uuid())
+  role        Role
+  partnerType PartnerType?
+  module      String
+  canView     Boolean      @default(true)
+  canCreate   Boolean      @default(false)
+  canEdit     Boolean      @default(false)
+  canDelete   Boolean      @default(false)
+  // Campos da entidade que devem ser ocultados do retorno (lista de strings).
+  // Ex.: para PARTNER ARMADOR_LOGISTICO + clientes, ['percentualComissao','diaFechamento']
+  restrictedFields Json    @default("[]")
+  updatedAt   DateTime     @updatedAt
 
-  @@unique([role, module])
+  @@unique([role, partnerType, module])
   @@map("role_permissions")
 }

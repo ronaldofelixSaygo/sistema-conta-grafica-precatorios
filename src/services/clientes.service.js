@@ -1,5 +1,11 @@
 import { prisma } from '../config/prisma.js';
 import { clienteScope, canMutateCliente } from '../utils/scope.js';
+import { effectivePerms, applyRestrictions } from './permissions.service.js';
+
+async function getRestrictedFields(user) {
+  const p = await effectivePerms(user);
+  return p.byModule?.clientes?.restrictedFields || [];
+}
 
 function toNumberOrNull(v) {
   if (v === '' || v === undefined || v === null) return null;
@@ -7,15 +13,20 @@ function toNumberOrNull(v) {
 }
 
 export async function listClientes(user) {
-  return prisma.cliente.findMany({
+  const items = await prisma.cliente.findMany({
     where: clienteScope(user),
     orderBy: { nome: 'asc' },
   });
+  const restricted = await getRestrictedFields(user);
+  return items.map(c => applyRestrictions(c, restricted));
 }
 
 export async function getCliente(user, id) {
   const where = { ...clienteScope(user), id: Number(id) };
-  return prisma.cliente.findFirst({ where });
+  const c = await prisma.cliente.findFirst({ where });
+  if (!c) return null;
+  const restricted = await getRestrictedFields(user);
+  return applyRestrictions(c, restricted);
 }
 
 export async function createCliente(user, data) {

@@ -34,17 +34,22 @@ window.APP = (() => {
   }
 
   function applyRoleVisibility() {
-    const isAdm   = AUTH.isAdm();
-    const isStaff = AUTH.isStaff();
-    document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = isAdm   ? '' : 'none');
-    document.querySelectorAll('[data-staff-only]').forEach(el => el.style.display = isStaff ? '' : 'none');
-    // Esconde itens do menu lateral conforme permissoes efetivas (role + tipo de parceiro)
+    // Tudo agora é dirigido pelas permissões efetivas (vindas de RolePermission no banco).
+    // ADM tem todos os módulos true; outros perfis dependem da configuração feita em Parâmetros.
     document.querySelectorAll('.sidebar nav a[data-view]').forEach(a => {
       const v = a.dataset.view;
-      // sempre permite dashboard, parametros (admin only ja filtrado acima)
-      if (a.hasAttribute('data-admin-only') || a.hasAttribute('data-staff-only')) return;
-      if (!AUTH.canView(v)) a.style.display = 'none';
-      else a.style.display = '';
+      a.style.display = AUTH.canView(v) ? '' : 'none';
+    });
+    // Mantém os legacy attributes funcionando (fallback)
+    const isAdm   = AUTH.isAdm();
+    const isStaff = AUTH.isStaff();
+    document.querySelectorAll('[data-admin-only]').forEach(el => {
+      if (el.dataset.view) return; // ja tratado acima
+      el.style.display = isAdm ? '' : 'none';
+    });
+    document.querySelectorAll('[data-staff-only]').forEach(el => {
+      if (el.dataset.view) return;
+      el.style.display = isStaff ? '' : 'none';
     });
   }
 
@@ -54,7 +59,11 @@ window.APP = (() => {
     document.getElementById('me-role').textContent = roleLabel(me.role) + (me.officeName ? ` · ${me.officeName}` : '');
     showScreen('app');
     applyRoleVisibility();
-    showView('dashboard');
+    // Carrega a primeira view permitida (na ordem do menu lateral)
+    const visibleViews = [...document.querySelectorAll('.sidebar nav a[data-view]')]
+      .filter(a => a.style.display !== 'none')
+      .map(a => a.dataset.view);
+    showView(visibleViews[0] || 'dashboard');
     CHAT.init();
     if (window.THEME) THEME.init();
   }

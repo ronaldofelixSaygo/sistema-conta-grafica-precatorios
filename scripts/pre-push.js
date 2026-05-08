@@ -48,6 +48,18 @@ DO $$ BEGIN
     ALTER TABLE kanban_stage_configs
       ALTER COLUMN stage TYPE TEXT USING stage::text;
   END IF;
+
+  -- role_permissions: troca o unique antigo (role, module) e adiciona partnerType.
+  -- Como a estrutura mudou bastante, dropamos a tabela e deixamos o Prisma recriar.
+  -- Os defaults populam automaticamente no primeiro acesso ao endpoint.
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='role_permissions') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name='role_permissions' AND column_name='partnerType'
+    ) THEN
+      DROP TABLE role_permissions CASCADE;
+    END IF;
+  END IF;
 END $$;
 `;
 
