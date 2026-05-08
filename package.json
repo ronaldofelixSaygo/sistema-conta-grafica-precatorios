@@ -15,8 +15,9 @@
     "seed": "node prisma/seed.js",
     "migrate:from-sqlite": "node scripts/migrate-from-sqlite.js",
     "postinstall": "prisma generate",
-    "render:build": "npm install && prisma generate && prisma db push --skip-generate --accept-data-loss && node prisma/seed.js",
-    "db:push": "prisma db push"
+    "render:build": "npm install && prisma generate && node scripts/pre-push.js && prisma db push --skip-generate --accept-data-loss && node prisma/seed.js",
+    "db:push": "prisma db push",
+    "pre-push": "node scripts/pre-push.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
