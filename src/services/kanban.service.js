@@ -2,6 +2,7 @@ import { prisma } from '../config/prisma.js';
 import { clienteScope } from '../utils/scope.js';
 import { MAX_UPLOAD_BYTES } from '../utils/kanban.constants.js';
 import * as stageDef from './stageDef.service.js';
+import * as email from './email.service.js';
 
 // Cria todas as etapas do card lendo da configuracao dinamica.
 // stageParceiros: { 'ONBOARDING': 'parceiroId', ... }
@@ -187,18 +188,22 @@ export async function completeStage(user, cardId, stage, { force = false } = {})
     data: { status: 'COMPLETED', completedAt: new Date() },
   });
 
+  // Notifica e-mail: etapa concluida
+  email.notifyStageDone({ cardId, stageKey: stage, byUser: user }).catch(()=>{});
+
   const nx = await stageDef.nextActiveStageKey(stage);
   if (nx) {
     await prisma.kanbanStageProgress.updateMany({
       where: { cardId, stage: nx },
       data: { status: 'IN_PROGRESS', startedAt: new Date() },
     });
-    // Detecta se nx e final
     const nxDef = await prisma.kanbanStageDef.findUnique({ where: { key: nx } });
     await prisma.kanbanCard.update({
       where: { id: cardId },
       data: { currentStage: nx, ...(nxDef?.isFinal ? { completedAt: new Date() } : {}) },
     });
+    // Notifica e-mail: mudanca de etapa
+    email.notifyStageChange({ cardId, fromStage: stage, toStage: nx, byUser: user }).catch(()=>{});
   }
   return { ok: true, nextStage: nx };
 }
@@ -225,6 +230,7 @@ export async function moveCard(user, cardId, toStage) {
     await prisma.kanbanStageProgress.updateMany({ where: { cardId, stage }, data });
   }
   const toDef = stages[tIdx];
+  const fromStage = card.currentStage;
   await prisma.kanbanCard.update({
     where: { id: cardId },
     data: {
@@ -232,6 +238,10 @@ export async function moveCard(user, cardId, toStage) {
       completedAt:  toDef?.isFinal ? new Date() : null,
     },
   });
+  // Notifica e-mail: mudanca manual de etapa
+  if (fromStage !== toStage) {
+    email.notifyStageChange({ cardId, fromStage, toStage, byUser: user }).catch(()=>{});
+  }
   return { ok: true };
 }
 

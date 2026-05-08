@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma.js';
 import { clienteScope } from '../utils/scope.js';
+import * as email from './email.service.js';
 
 // Cria uma solicitação direcionada ao parceiro do cliente.
 // Apenas CLIENT (do próprio cliente) ou Saygo/Adm pode criar.
@@ -16,7 +17,7 @@ export async function createRequest(user, { clienteId, type, payload, message })
                   (user.role === 'CLIENT' && user.clienteId === cli.id);
   if (!allowed) { const e = new Error('Sem permissão'); e.status = 403; throw e; }
 
-  return prisma.partnerRequest.create({
+  const req = await prisma.partnerRequest.create({
     data: {
       clienteId: cli.id,
       type,
@@ -26,6 +27,9 @@ export async function createRequest(user, { clienteId, type, payload, message })
       partnerOfficeName: cli.escritorio,
     },
   });
+  // Notifica e-mail: nova solicitacao
+  email.notifyPartnerRequest({ requestId: req.id, byUser: user }).catch(()=>{});
+  return req;
 }
 
 // Lista as solicitações visíveis para o usuário

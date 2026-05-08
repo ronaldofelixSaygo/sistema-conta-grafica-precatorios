@@ -32,15 +32,105 @@ window.VIEW_parametros = (() => {
   async function render() {
     const el = document.getElementById('view-parametros');
     el.innerHTML = `
-      <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem">
+      <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem;flex-wrap:wrap">
         <button class="btn ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissões</button>
         <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
+        <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail (SMTP)</button>
       </div>
       <div id="param-content"></div>`;
     el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { activeTab = b.dataset.tab; render(); });
     if (activeTab === 'permissoes') return loadPerms();
+    if (activeTab === 'email')      return loadEmail();
     return loadStages();
   }
+
+  // ===== E-MAIL (SMTP) =====
+  async function loadEmail() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = '<div class="muted">Carregando...</div>';
+    try {
+      const s = await API.get('/api/email/settings');
+      const logs = await API.get('/api/email/logs').catch(() => []);
+      drawEmail(s, logs);
+    } catch (e) { c.innerHTML = `<div class="err">${e.message}</div>`; }
+  }
+  function drawEmail(s, logs) {
+    const c = document.getElementById('param-content');
+    c.innerHTML = `
+      <div class="panel">
+        <h3>Configuração SMTP</h3>
+        <p class="muted small" style="margin-bottom:1rem">
+          O sistema envia e-mails automáticos quando uma etapa do Kanban muda, quando uma etapa
+          é concluída, e quando um cliente faz uma solicitação. Configure o SMTP da Saygo abaixo.
+        </p>
+        <form id="email-form" class="form-grid">
+          <div class="full"><label><input type="checkbox" name="enabled" ${s.enabled?'checked':''}> Ativar envio de e-mails</label></div>
+          <div><label>Servidor SMTP *</label><input name="host" value="${UI.escapeHtml(s.host||'')}" placeholder="ex: smtp.gmail.com"></div>
+          <div><label>Porta *</label><input type="number" name="port" value="${s.port||587}"></div>
+          <div class="full"><label><input type="checkbox" name="secure" ${s.secure?'checked':''}> SSL/TLS (porta 465)</label></div>
+          <div><label>Usuário *</label><input name="user" value="${UI.escapeHtml(s.user||'')}" placeholder="ex: noreply@saygogroup.com.br"></div>
+          <div><label>Senha</label><input type="password" name="pass" value="${s.pass==='***'?'***':''}" placeholder="(deixe ${s.pass==='***'?'*** para manter':'em branco'})"></div>
+          <div><label>E-mail remetente</label><input name="fromAddress" value="${UI.escapeHtml(s.fromAddress||'')}" placeholder="noreply@saygogroup.com.br"></div>
+          <div><label>Nome remetente</label><input name="fromName" value="${UI.escapeHtml(s.fromName||'')}" placeholder="Sistema Conta Gráfica - Saygo"></div>
+
+          <div class="full" style="border-top:1px solid var(--bd);padding-top:.6rem;margin-top:.4rem">
+            <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Quando enviar</strong>
+          </div>
+          <div class="full"><label><input type="checkbox" name="notifyKanbanStageChange" ${s.notifyKanbanStageChange?'checked':''}> Mudança de etapa no Kanban</label></div>
+          <div class="full"><label><input type="checkbox" name="notifyKanbanStageDone"   ${s.notifyKanbanStageDone?'checked':''}> Conclusão de etapa no Kanban</label></div>
+          <div class="full"><label><input type="checkbox" name="notifyPartnerRequest"    ${s.notifyPartnerRequest?'checked':''}> Nova solicitação (acionamento)</label></div>
+
+          <div class="full form-actions">
+            <button type="button" class="btn" id="email-test">Enviar e-mail de teste</button>
+            <button type="submit" class="btn primary">Salvar</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h3>Histórico de envios</h3>
+        ${UI.table({
+          cols: [
+            { label: 'Quando', get: r => UI.fmtDateTime(r.createdAt) },
+            { label: 'Para', key: 'to' },
+            { label: 'Assunto', key: 'subject' },
+            { label: 'Status', html: true, get: r => r.status==='sent'
+              ? '<span class="pill green">Enviado</span>'
+              : `<span class="pill red" title="${UI.escapeHtml(r.error||'')}">Erro</span>` },
+            { label: 'Contexto', key: 'context' },
+          ],
+          rows: logs.slice(0, 50),
+          empty: 'Nenhum e-mail enviado ainda.',
+        })}
+      </div>`;
+
+    document.getElementById('email-form').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const data = {
+        enabled: !!fd.get('enabled'),
+        host: fd.get('host'),
+        port: Number(fd.get('port')) || 587,
+        secure: !!fd.get('secure'),
+        user: fd.get('user'),
+        pass: fd.get('pass'),
+        fromAddress: fd.get('fromAddress'),
+        fromName: fd.get('fromName'),
+        notifyKanbanStageChange: !!fd.get('notifyKanbanStageChange'),
+        notifyKanbanStageDone:   !!fd.get('notifyKanbanStageDone'),
+        notifyPartnerRequest:    !!fd.get('notifyPartnerRequest'),
+      };
+      try { await API.put('/api/email/settings', data); UI.toast('SMTP salvo'); loadEmail(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    };
+    document.getElementById('email-test').onclick = async () => {
+      const to = prompt('Enviar e-mail de teste para:', AUTH.user()?.email || '');
+      if (!to) return;
+      try { await API.post('/api/email/test', { to }); UI.toast('E-mail enviado (verifique)'); loadEmail(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    };
+  }
+
 
   // ===== PERMISSOES =====
   async function loadPerms() {

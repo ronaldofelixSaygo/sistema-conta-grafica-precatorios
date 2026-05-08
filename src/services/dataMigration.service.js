@@ -1,7 +1,6 @@
 // =====================================================================
-// Migração de dados Neon antigo → Neon novo.
-// Roda a partir do Render (não tem firewall pra 5432). É chamado por
-// um endpoint admin: POST /api/admin/migrate-from-old.
+// Migração Neon antigo → Neon novo. Versão otimizada com createMany
+// em lotes, evitando timeout no Render.
 // =====================================================================
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
@@ -15,7 +14,7 @@ function calcAjustado(tipo, valor) {
   return 0;
 }
 
-export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false }) {
+export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false, wipeMovs = false }) {
   if (!oldDatabaseUrl) {
     const e = new Error('oldDatabaseUrl é obrigatório'); e.status = 400; throw e;
   }
@@ -28,7 +27,7 @@ export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false }) {
   const summary = {
     users: { read: 0, created: 0, skipped: 0, errors: [] },
     clientes: { read: 0, created: 0, skipped: 0, errors: [] },
-    movimentacoes: { read: 0, created: 0, skipped: 0, errors: [] },
+    movimentacoes: { read: 0, created: 0, skipped: 0, errors: [], wipedBefore: 0 },
     audit: { read: 0, created: 0, skipped: 0 },
     dryRun,
   };
@@ -44,11 +43,9 @@ export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false }) {
         const exists = await prisma.user.findUnique({ where: { email } });
         if (exists) { summary.users.skipped++; continue; }
         if (dryRun) continue;
-
         const role = u.role === 'admin' ? 'ADM' : 'SAYGO';
         const looksHashed = typeof u.password === 'string' && u.password.startsWith('$2');
         const passwordHash = looksHashed ? u.password : await bcrypt.hash('TrocarSenha123!', 10);
-
         await prisma.user.create({
           data: { email, name: u.name || email, role, active: true, passwordHash },
         });
@@ -59,7 +56,7 @@ export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false }) {
     // ── CLIENTES ─────────────────────────────────────────────────
     const cliR = await old.query('SELECT * FROM clientes ORDER BY id');
     summary.clientes.read = cliR.rows.length;
-    const cliMap = new Map(); // idAntigo → idNovo
+    const cliMap = new Map();
     for (const c of cliR.rows) {
       try {
         const found = await prisma.cliente.findFirst({
@@ -67,7 +64,6 @@ export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false }) {
         });
         if (found) { cliMap.set(c.id, found.id); summary.clientes.skipped++; continue; }
         if (dryRun) continue;
-
         const created = await prisma.cliente.create({
           data: {
             nome: c.nome,
@@ -92,47 +88,58 @@ export async function migrateFromOldNeon({ oldDatabaseUrl, dryRun = false }) {
       } catch (e) { summary.clientes.errors.push(`cliente ${c.id}: ${e.message}`); }
     }
 
-    // ── MOVIMENTAÇÕES ───────────────────────────────────────────
+    // ── MOVIMENTAÇÕES (createMany em lotes) ─────────────────────
+    if (wipeMovs && !dryRun) {
+      const r = await prisma.movimentacao.deleteMany({});
+      summary.movimentacoes.wipedBefore = r.count;
+    }
+
     const movsR = await old.query('SELECT * FROM movimentacoes ORDER BY id');
     summary.movimentacoes.read = movsR.rows.length;
-    for (const m of movsR.rows) {
-      try {
+
+    if (!dryRun) {
+      const BATCH = 500;
+      let buffer = [];
+      const flush = async () => {
+        if (!buffer.length) return;
+        try {
+          const r = await prisma.movimentacao.createMany({ data: buffer, skipDuplicates: true });
+          summary.movimentacoes.created += r.count;
+        } catch (e) {
+          summary.movimentacoes.errors.push(`batch: ${e.message}`);
+        }
+        buffer = [];
+      };
+
+      for (const m of movsR.rows) {
         const novoCliId = cliMap.get(m.cliente_id);
         if (!novoCliId) { summary.movimentacoes.skipped++; continue; }
-        if (dryRun) continue;
-
-        const exists = await prisma.movimentacao.findFirst({
-          where: {
-            clienteId: novoCliId,
-            tipoMovimento: m.tipo_movimento || '',
-            dataNf: m.data_nf ? new Date(m.data_nf) : null,
-            valor: Number(m.valor) || 0,
-            duimpDiProcesso: m.duimp_di_processo || null,
-          },
+        buffer.push({
+          clienteId: novoCliId,
+          tipoMovimento: m.tipo_movimento || '',
+          dataNf: m.data_nf ? new Date(m.data_nf) : null,
+          duimpDiProcesso: m.duimp_di_processo || null,
+          parceiro: m.parceiro || null,
+          dataExoneracao: m.data_exoneracao ? new Date(m.data_exoneracao) : null,
+          percentual: Number(m.percentual) || 0,
+          valor: Number(m.valor) || 0,
+          valorAjustado: m.valor_ajustado != null
+            ? Number(m.valor_ajustado)
+            : calcAjustado(m.tipo_movimento, m.valor),
         });
-        if (exists) { summary.movimentacoes.skipped++; continue; }
-
-        await prisma.movimentacao.create({
-          data: {
-            clienteId: novoCliId,
-            tipoMovimento: m.tipo_movimento || '',
-            dataNf: m.data_nf ? new Date(m.data_nf) : null,
-            duimpDiProcesso: m.duimp_di_processo || null,
-            parceiro: m.parceiro || null,
-            dataExoneracao: m.data_exoneracao ? new Date(m.data_exoneracao) : null,
-            percentual: Number(m.percentual) || 0,
-            valor: Number(m.valor) || 0,
-            valorAjustado: m.valor_ajustado != null
-              ? Number(m.valor_ajustado)
-              : calcAjustado(m.tipo_movimento, m.valor),
-          },
-        });
-        summary.movimentacoes.created++;
-      } catch (e) { summary.movimentacoes.errors.push(`mov ${m.id}: ${e.message}`); }
+        if (buffer.length >= BATCH) await flush();
+      }
+      await flush();
     }
 
     return summary;
   } finally {
     await old.end();
   }
+}
+
+// Wipe simples
+export async function wipeMovimentacoes() {
+  const r = await prisma.movimentacao.deleteMany({});
+  return { deleted: r.count };
 }

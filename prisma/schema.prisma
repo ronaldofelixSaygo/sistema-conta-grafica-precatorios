@@ -445,6 +445,42 @@ model CommissionExtra {
 // ============================================================
 //   CONFIG DE ETAPAS DO KANBAN (editável pelo Adm)
 // ============================================================
+// ============================================================
+//   CONFIGURAÇÃO DE E-MAIL (SMTP) — singleton (id fixo "default")
+// ============================================================
+model EmailSettings {
+  id          String   @id @default("default")
+  enabled     Boolean  @default(false)
+  host        String?
+  port        Int      @default(587)
+  secure      Boolean  @default(false)   // true para 465 (SSL)
+  user        String?
+  pass        String?
+  fromAddress String?
+  fromName    String?  @default("Sistema Conta Gráfica - Saygo")
+  // Triggers ligados/desligados
+  notifyKanbanStageChange  Boolean @default(true)
+  notifyKanbanStageDone    Boolean @default(true)
+  notifyPartnerRequest     Boolean @default(true)
+  updatedAt   DateTime @updatedAt
+
+  @@map("email_settings")
+}
+
+model EmailLog {
+  id        String   @id @default(uuid())
+  to        String
+  subject   String
+  status    String   // 'sent' | 'error'
+  error     String?
+  context   String?  // ex: 'kanban_stage', 'partner_request'
+  contextId String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("email_log")
+}
+
 // (KanbanStageConfig foi removido — agora usamos KanbanStageDef + KanbanActivityDef)
 
 // ============================================================

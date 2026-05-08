@@ -1,6 +1,5 @@
 window.VIEW_clientes = (() => {
   let cache = [];
-  let filterEsc = '';
 
   function isYes(v) {
     if (v == null) return false;
@@ -18,62 +17,116 @@ window.VIEW_clientes = (() => {
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
       cache = await API.get('/api/clientes');
-      const canMutate = AUTH.canMutate('clientes');
-      const escritorios = [...new Set(cache.map(c => c.escritorio).filter(Boolean))].sort();
-      el.innerHTML = `
-        <div class="page-toolbar">
-          <input id="cli-search" placeholder="Buscar cliente..." />
-          <select id="cli-esc">
-            <option value="">Todos os escritórios</option>
-            ${escritorios.map(e => `<option value="${UI.escapeHtml(e)}">${UI.escapeHtml(e)}</option>`).join('')}
-          </select>
-          ${canMutate ? '<button class="btn primary" id="btn-new-cli" style="margin-left:auto">+ Novo Cliente</button>' : ''}
-        </div>
-        <div id="cli-table"></div>`;
-
-      const draw = () => {
-        const f = (document.getElementById('cli-search')?.value || '').toLowerCase();
-        const e = document.getElementById('cli-esc')?.value || '';
-        const list = cache.filter(c => {
-          if (e && c.escritorio !== e) return false;
-          if (!f) return true;
-          return (c.nome||'').toLowerCase().includes(f)
-              || (c.cnpj||'').toLowerCase().includes(f);
-        });
-        document.getElementById('cli-table').innerHTML = UI.table({
-          cols: [
-            { label: 'Nome', key: 'nome' },
-            { label: 'Escritório', key: 'escritorio' },
-            { label: 'Sala',          html: true, get: r => pill(r.locacaoSala) },
-            { label: 'Filial',        html: true, get: r => pill(r.aberturaFilial) },
-            { label: 'IE',            html: true, get: r => pill(r.reativacaoIe) },
-            { label: 'Conta Gráfica', html: true, get: r => pill(r.contaGrafica) },
-            { label: 'Crédito Cert.', html: true, get: r => pill(r.clienteCertificado) },
-            { label: '% Comissão', align: 'right', get: r => (r.percentualComissao ?? 0) + '%' },
-            { label: 'Dia Fech.',  align: 'right', key: 'diaFechamento' },
-            { label: 'Ações', html: true, get: r => canMutate
-              ? `<div class="actions"><button class="btn small" data-edit="${r.id}">Editar</button>
-                  <button class="btn small danger" data-del="${r.id}">Excluir</button></div>` : '',
-            },
-          ],
-          rows: list,
-          empty: 'Nenhum cliente encontrado.',
-        });
-      };
-      draw();
-      document.getElementById('cli-search').addEventListener('input', draw);
-      document.getElementById('cli-esc').addEventListener('change', draw);
-
-      if (canMutate) {
-        document.getElementById('btn-new-cli').addEventListener('click', () => openForm());
-        el.addEventListener('click', e => {
-          const id = e.target.getAttribute('data-edit') || e.target.getAttribute('data-del');
-          if (!id) return;
-          if (e.target.dataset.edit) openForm(cache.find(c => String(c.id) === id));
-          if (e.target.dataset.del)  removeCli(id);
-        });
-      }
+      // Se for CLIENT, mostra tela de detalhe (vê apenas o seu cliente)
+      if (AUTH.role() === 'CLIENT') return renderClientDetail(cache[0]);
+      return renderList();
     } catch (e) { el.innerHTML = `<div class="err">${e.message}</div>`; }
+  }
+
+  // ===== TELA DE DETALHE (somente para perfil CLIENT) =====
+  function fieldHtml(label, value, opts = {}) {
+    if (value === undefined) return '';  // campo restrito (oculto pelo backend)
+    const v = (value === null || value === '') ? '—' : value;
+    const cls = opts.pill ? `<span class="pill ${isYes(value)?'yes':'no'}">${isYes(value)?'Sim':'Não'}</span>` : UI.escapeHtml(String(v));
+    return `
+      <div class="field-row">
+        <label>${UI.escapeHtml(label)}</label>
+        <div>${opts.pill ? cls : (opts.html ? v : UI.escapeHtml(String(v)))}</div>
+      </div>`;
+  }
+
+  function renderClientDetail(c) {
+    const el = document.getElementById('view-clientes');
+    if (!c) {
+      el.innerHTML = '<div class="panel"><div class="muted">Nenhum dado encontrado para o seu cliente.</div></div>';
+      return;
+    }
+    el.innerHTML = `
+      <div class="panel">
+        <h3>Meus dados</h3>
+        <div class="client-grid">
+          ${fieldHtml('Nome', c.nome)}
+          ${c.cnpj          !== undefined ? fieldHtml('CNPJ', c.cnpj) : ''}
+          ${c.cnpjFilial    !== undefined ? fieldHtml('CNPJ filial', c.cnpjFilial) : ''}
+          ${fieldHtml('Escritório (parceiro principal)', c.escritorio)}
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Status dos serviços</h3>
+        <div class="client-grid">
+          ${c.locacaoSala         !== undefined ? fieldHtml('Locação Sala',     c.locacaoSala,     { pill: true }) : ''}
+          ${c.aberturaFilial      !== undefined ? fieldHtml('Abertura Filial',   c.aberturaFilial,  { pill: true }) : ''}
+          ${c.reativacaoIe        !== undefined ? fieldHtml('Reativação IE',     c.reativacaoIe,    { pill: true }) : ''}
+          ${c.contaGrafica        !== undefined ? fieldHtml('Conta Gráfica',     c.contaGrafica,    { pill: true }) : ''}
+          ${c.clienteCertificado  !== undefined ? fieldHtml('Cliente Certificado', c.clienteCertificado, { pill: true }) : ''}
+        </div>
+      </div>
+      ${c.observacoes !== undefined ? `
+        <div class="panel">
+          <h3>Observações</h3>
+          <div class="muted small" style="white-space:pre-wrap">${UI.escapeHtml(c.observacoes || '—')}</div>
+        </div>` : ''}
+    `;
+  }
+
+  // ===== LISTA (Saygo / Adm / Parceiro Escritorio) =====
+  function renderList() {
+    const el = document.getElementById('view-clientes');
+    const canMutate = AUTH.canMutate('clientes');
+    const escritorios = [...new Set(cache.map(c => c.escritorio).filter(Boolean))].sort();
+    el.innerHTML = `
+      <div class="page-toolbar">
+        <input id="cli-search" placeholder="Buscar cliente..." />
+        <select id="cli-esc">
+          <option value="">Todos os escritórios</option>
+          ${escritorios.map(e => `<option value="${UI.escapeHtml(e)}">${UI.escapeHtml(e)}</option>`).join('')}
+        </select>
+        ${canMutate ? '<button class="btn primary" id="btn-new-cli" style="margin-left:auto">+ Novo Cliente</button>' : ''}
+      </div>
+      <div id="cli-table"></div>`;
+
+    const draw = () => {
+      const f = (document.getElementById('cli-search')?.value || '').toLowerCase();
+      const esc = document.getElementById('cli-esc')?.value || '';
+      const list = cache.filter(c => {
+        if (esc && c.escritorio !== esc) return false;
+        if (!f) return true;
+        return (c.nome||'').toLowerCase().includes(f)
+            || (c.cnpj||'').toLowerCase().includes(f);
+      });
+      // Monta colunas — pula as que estão restritas (undefined)
+      const sample = cache[0] || {};
+      const cols = [
+        { label: 'Nome', key: 'nome' },
+        { label: 'Escritório', key: 'escritorio' },
+        sample.locacaoSala         !== undefined && { label: 'Sala',          html: true, get: r => pill(r.locacaoSala) },
+        sample.aberturaFilial      !== undefined && { label: 'Filial',        html: true, get: r => pill(r.aberturaFilial) },
+        sample.reativacaoIe        !== undefined && { label: 'IE',            html: true, get: r => pill(r.reativacaoIe) },
+        sample.contaGrafica        !== undefined && { label: 'Conta Gráfica', html: true, get: r => pill(r.contaGrafica) },
+        sample.clienteCertificado  !== undefined && { label: 'Crédito Cert.', html: true, get: r => pill(r.clienteCertificado) },
+        sample.percentualComissao  !== undefined && { label: '% Comissão', align: 'right', get: r => (r.percentualComissao ?? 0) + '%' },
+        sample.diaFechamento       !== undefined && { label: 'Dia Fech.',  align: 'right', key: 'diaFechamento' },
+        canMutate && { label: 'Ações', html: true, get: r =>
+          `<div class="actions"><button class="btn small" data-edit="${r.id}">Editar</button>
+            <button class="btn small danger" data-del="${r.id}">Excluir</button></div>` },
+      ].filter(Boolean);
+      document.getElementById('cli-table').innerHTML = UI.table({
+        cols, rows: list, empty: 'Nenhum cliente encontrado.',
+      });
+    };
+    draw();
+    document.getElementById('cli-search').addEventListener('input', draw);
+    document.getElementById('cli-esc').addEventListener('change', draw);
+
+    if (canMutate) {
+      document.getElementById('btn-new-cli').addEventListener('click', () => openForm());
+      document.getElementById('view-clientes').addEventListener('click', e => {
+        const id = e.target.getAttribute('data-edit') || e.target.getAttribute('data-del');
+        if (!id) return;
+        if (e.target.dataset.edit) openForm(cache.find(c => String(c.id) === id));
+        if (e.target.dataset.del)  removeCli(id);
+      });
+    }
   }
 
   function selYesNo(name, val) {

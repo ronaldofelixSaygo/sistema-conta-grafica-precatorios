@@ -22,6 +22,7 @@ export const PROFILES = [
 const DEFAULT_RESTRICTIONS = {
   PARTNER_ARMADOR: { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
   PARTNER_OUTRO:   { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
+  CLIENT:          { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
 };
 
 function defaults() {
