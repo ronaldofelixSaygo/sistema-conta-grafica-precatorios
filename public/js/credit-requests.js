@@ -216,7 +216,7 @@ window['VIEW_credit-requests'] = (() => {
 
   function drawGruposTable() {
     const headers = [
-      { f: 'ncm',          l: 'NCM',         w: 130, t: 'text' },
+      { f: 'ncm',          l: 'NCM',         w: 160, t: 'text' },
       { f: 'valor_usd',    l: 'Valor USD',   w: 110, t: 'number' },
       { f: 'acrescimo_usd',l: 'Acréscimo',   w: 90,  t: 'number' },
       { f: 'frete_usd',    l: 'Frete',       w: 90,  t: 'number' },
@@ -230,13 +230,22 @@ window['VIEW_credit-requests'] = (() => {
     const head = headers.map(h => `<th style="font-size:10px;padding:4px 6px;min-width:${h.w}px">${h.l}</th>`).join('') + '<th></th>';
     const rows = grupos.map((g, idx) => `
       <tr data-grow="${idx}">
-        ${headers.map(h => `<td style="padding:2px 4px"><input type="${h.t}" data-field="${h.f}" value="${g[h.f] ?? ''}" step="0.01" style="width:100%"></td>`).join('')}
+        ${headers.map(h => {
+          if (h.f === 'ncm') {
+            return `<td style="padding:2px 4px;white-space:nowrap">
+              <input type="text" data-field="ncm" value="${g.ncm ?? ''}" placeholder="ex: 8517.62.59" style="width:120px;display:inline-block">
+              <button type="button" class="btn small" data-lookup-ncm="${idx}" title="Buscar tributos e anuentes">🔍</button>
+            </td>`;
+          }
+          return `<td style="padding:2px 4px"><input type="${h.t}" data-field="${h.f}" value="${g[h.f] ?? ''}" step="0.01" style="width:100%"></td>`;
+        }).join('')}
         <td><button type="button" class="btn small danger" data-rm-ncm="${idx}">×</button></td>
       </tr>`).join('');
     const div = document.getElementById('cr-grupos');
     div.innerHTML = `
       <table class="table" style="font-size:12px"><thead><tr>${head}</tr></thead>
-      <tbody>${rows}</tbody></table>`;
+      <tbody>${rows}</tbody></table>
+      <div id="cr-anuentes" style="margin-top:.6rem"></div>`;
     div.querySelectorAll('[data-rm-ncm]').forEach(b => b.onclick = () => {
       const i = Number(b.dataset.rmNcm);
       readGruposFromTable();
@@ -244,6 +253,74 @@ window['VIEW_credit-requests'] = (() => {
       if (!grupos.length) grupos = [emptyGrupo()];
       drawGruposTable();
     });
+    div.querySelectorAll('[data-lookup-ncm]').forEach(b => b.onclick = () => lookupNcmRow(Number(b.dataset.lookupNcm)));
+  }
+
+  // Estado dos anuentes (acumulado por NCM consultado)
+  const anuentesByNcm = {}; // { '85176259': [...] }
+
+  async function lookupNcmRow(idx) {
+    readGruposFromTable();
+    const g = grupos[idx];
+    if (!g) return;
+    const ncmRaw = (g.ncm || '').replace(/\D/g, '');
+    if (ncmRaw.length < 2) return UI.toast('Informe o NCM', 'err');
+    const uf = (cabecalho.uf || 'AL').toUpperCase();
+    try {
+      const r = await API.get(`/api/ncm/${ncmRaw}`, { uf });
+      // Calcula valores em R$ a partir das alíquotas e do valor USD do grupo
+      const taxa = Number(cabecalho.taxa_cambio) || 0;
+      const valorUSD = Number(g.valor_usd) || 0;
+      const baseBRL = (valorUSD + Number(g.acrescimo_usd || 0) + Number(g.frete_usd || 0) + Number(g.outros_usd || 0)) * taxa;
+
+      if (r.ii_aliq != null)     g.ii     = +(baseBRL * r.ii_aliq / 100).toFixed(2);
+      if (r.pis_aliq != null)    g.pis    = +(baseBRL * r.pis_aliq / 100).toFixed(2);
+      if (r.cofins_aliq != null) g.cofins = +(baseBRL * r.cofins_aliq / 100).toFixed(2);
+      // IPI incide sobre base + II
+      if (r.ipi_aliq != null) {
+        const baseIpi = baseBRL + (g.ii || 0);
+        g.ipi = +(baseIpi * r.ipi_aliq / 100).toFixed(2);
+      }
+      if (r.icms_aliq != null) {
+        cabecalho.icms_aliq_estado = r.icms_aliq;
+      }
+      anuentesByNcm[ncmRaw] = r.anuentes || [];
+      // Atualiza a tabela e mostra anuentes
+      drawGruposTable();
+      drawAnuentes();
+
+      // Toast com info de match
+      const lvl = r.matchLevel === 8 ? 'NCM exato'
+                : r.matchLevel ? `aproximado (${r.matchLevel} dígitos)`
+                : 'não encontrado — usando defaults';
+      UI.toast(`✓ ${lvl}${r.descricao ? ' — ' + r.descricao.slice(0, 40) : ''}`);
+    } catch (e) {
+      UI.toast('Falha no lookup: ' + e.message, 'err');
+    }
+  }
+
+  function drawAnuentes() {
+    const all = Object.entries(anuentesByNcm);
+    const div = document.getElementById('cr-anuentes');
+    if (!div) return;
+    if (!all.length) { div.innerHTML = ''; return; }
+    const cards = all.map(([ncm, list]) => {
+      if (!list.length) return `
+        <div style="background:var(--s2);padding:.5rem .8rem;border-radius:6px;border-left:3px solid var(--green);margin-bottom:.4rem">
+          <strong>NCM ${ncm}</strong> · <span class="muted small">sem anuente exigido</span>
+        </div>`;
+      return `
+        <div style="background:var(--s2);padding:.5rem .8rem;border-radius:6px;border-left:3px solid var(--amber);margin-bottom:.4rem">
+          <strong>NCM ${ncm}</strong> · <span class="muted small">anuentes obrigatórios:</span>
+          <div style="margin-top:.3rem;display:flex;gap:6px;flex-wrap:wrap">
+            ${list.map(a => `<span class="pill ${a.obrigatorio?'amber':''}" title="${UI.escapeHtml(a.descricao||'')}">${UI.escapeHtml(a.anuente)}${a.obrigatorio?'':' (condicional)'}</span>`).join('')}
+          </div>
+          ${list.map(a => a.descricao ? `<div class="muted small" style="margin-top:4px">• ${UI.escapeHtml(a.anuente)}: ${UI.escapeHtml(a.descricao)}</div>` : '').join('')}
+        </div>`;
+    }).join('');
+    div.innerHTML = `
+      <div class="muted small" style="margin-bottom:.3rem">⚠ Órgãos anuentes que controlam os NCMs informados:</div>
+      ${cards}`;
   }
 
   function drawResult(r) {

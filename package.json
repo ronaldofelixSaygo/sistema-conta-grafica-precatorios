@@ -13,9 +13,10 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed": "node prisma/seed.js",
+    "seed:ncm": "node prisma/seed-ncm.js",
     "migrate:from-sqlite": "node scripts/migrate-from-sqlite.js",
     "postinstall": "prisma generate",
-    "render:build": "npm install && prisma generate && node scripts/pre-push.js && prisma db push --skip-generate --accept-data-loss && node prisma/seed.js",
+    "render:build": "npm install && prisma generate && node scripts/pre-push.js && prisma db push --skip-generate --accept-data-loss && node prisma/seed.js && node prisma/seed-ncm.js",
     "db:push": "prisma db push",
     "pre-push": "node scripts/pre-push.js"
   },

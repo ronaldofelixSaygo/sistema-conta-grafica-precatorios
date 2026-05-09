@@ -579,6 +579,50 @@ model CreditRequest {
   @@map("credit_requests")
 }
 
+// ============================================================
+//   NCM LOOKUP — tributos federais, anuentes e ICMS por UF
+// ============================================================
+// Tabela de tributos federais por NCM. Lookup por código exato, com
+// fallback hierárquico (8 dígitos → 6 → 4 → 2) feito no service.
+model NcmTributo {
+  ncm         String   @id           // ex.: "85176259" (8 dígitos sem ponto)
+  descricao   String?
+  ii_aliq     Float    @default(0)   // % II
+  ipi_aliq    Float    @default(0)   // % IPI
+  pis_aliq    Float    @default(2.1) // % PIS importação
+  cofins_aliq Float    @default(9.65)// % COFINS importação
+  observacoes String?  @db.Text
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@map("ncm_tributos")
+}
+
+// Órgãos anuentes que controlam o NCM (ANVISA, MAPA, INMETRO, ANATEL etc.)
+model NcmAnuente {
+  id          String   @id @default(uuid())
+  ncm         String                  // pode ser prefixo (ex.: "8517") ou código completo
+  anuente     String                  // ANATEL, ANVISA, MAPA, INMETRO, IBAMA, etc.
+  descricao   String?
+  obrigatorio Boolean  @default(true) // false = anuência condicional
+  observacoes String?  @db.Text
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@index([ncm])
+  @@map("ncm_anuentes")
+}
+
+// Alíquota de ICMS interna padrão por UF (fallback quando o cliente não tem TTD/regime especial)
+model IcmsUf {
+  uf          String   @id           // 2 letras: "AL", "SP", etc.
+  aliq        Float    @default(18)  // % ICMS interna padrão
+  observacoes String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("icms_uf")
+}
+
 model EmailLog {
   id        String   @id @default(uuid())
   to        String
