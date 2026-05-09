@@ -4,6 +4,7 @@ window.APP = (() => {
     dashboard: 'Painel',
     kanban: 'Kanban de Habilitação',
     acionamentos: 'Acionamentos',
+    'credit-requests': 'Solicitação de Créditos',
     clientes: 'Clientes',
     movimentacoes: 'Movimentações',
     saldos: 'Saldos',

@@ -35,13 +35,140 @@ window.VIEW_parametros = (() => {
       <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem;flex-wrap:wrap">
         <button class="btn ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissões</button>
         <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
-        <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail (SMTP)</button>
+        <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail (briefing diário)</button>
+        <button class="btn ${activeTab==='ia'?'primary':''}"          data-tab="ia">IA (extração de invoice)</button>
       </div>
       <div id="param-content"></div>`;
     el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { activeTab = b.dataset.tab; render(); });
     if (activeTab === 'permissoes') return loadPerms();
     if (activeTab === 'email')      return loadEmail();
+    if (activeTab === 'ia')         return loadIa();
     return loadStages();
+  }
+
+  // ===== IA (provider / model / apiKey / systemPrompt + versões do prompt) =====
+  async function loadIa() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = '<div class="muted">Carregando...</div>';
+    try {
+      const [s, versions] = await Promise.all([
+        API.get('/api/credit-requests/ai/settings'),
+        API.get('/api/credit-requests/ai/prompt/versions').catch(() => []),
+      ]);
+      drawIa(s, versions);
+    } catch (e) { c.innerHTML = `<div class="err">${e.message}</div>`; }
+  }
+
+  function drawIa(s, versions) {
+    const c = document.getElementById('param-content');
+    c.innerHTML = `
+      <div class="panel">
+        <h3>🤖 IA — Configuração</h3>
+        <p class="muted small" style="margin-bottom:1rem">
+          Provedor de IA usado para ler PDFs de invoice e extrair os dados de cálculo.
+          Mesmo padrão multi-provider do projeto Indicadores Comercial Bitrix.
+        </p>
+        <form id="ia-form" class="form-grid">
+          <div class="full">
+            <label><strong>ai_provider</strong></label>
+            <select name="provider">
+              <option value="anthropic" ${s.provider==='anthropic'?'selected':''}>anthropic</option>
+              <option value="openai"    ${s.provider==='openai'?'selected':''}>openai</option>
+              <option value="gemini"    ${s.provider==='gemini'?'selected':''}>gemini</option>
+              <option value="groq"      ${s.provider==='groq'?'selected':''}>groq</option>
+            </select>
+            <small class="muted">Provedor de IA (anthropic | openai | gemini | groq).</small>
+          </div>
+          <div class="full">
+            <label><strong>ai_model</strong></label>
+            <input name="model" value="${UI.escapeHtml(s.model||'')}" placeholder="ex: claude-sonnet-4-5, gpt-4o-mini, gemini-2.5-flash, llama-3.3-70b-versatile">
+            <small class="muted">Modelo (vazio = padrão do provider).</small>
+          </div>
+          <div class="full">
+            <label><strong>ai_api_key</strong></label>
+            <input type="password" name="apiKey" value="${s.hasApiKey?'***':''}" placeholder="${s.hasApiKey?'(key configurada — deixe *** para manter)':'cole a API key'}">
+            <small class="muted">API key do provedor de IA (sensível).</small>
+          </div>
+          <div class="full"><label><input type="checkbox" name="enabled" ${s.enabled?'checked':''}> Ativar IA</label></div>
+
+          <div class="full form-actions">
+            <button type="submit" class="btn primary">Salvar</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h3>📝 ai_system_prompt</h3>
+        <p class="muted small" style="margin-bottom:1rem">
+          Prompt usado para extrair os campos da invoice. Edite e clique em "Salvar como nova versão" — o sistema mantém histórico.
+        </p>
+        <div id="ia-prompt"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Versões do prompt</h3>
+        <div id="ia-versions"></div>
+      </div>`;
+
+    document.getElementById('ia-form').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const data = {
+        provider: fd.get('provider'),
+        model:    fd.get('model'),
+        apiKey:   fd.get('apiKey'),
+        enabled:  !!fd.get('enabled'),
+      };
+      try { await API.put('/api/credit-requests/ai/settings', data); UI.toast('IA salva'); loadIa(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    };
+
+    drawPromptEditor();
+    drawVersions(versions);
+  }
+
+  async function drawPromptEditor() {
+    const cur = await API.get('/api/credit-requests/ai/prompt/active').catch(() => ({ content: '' }));
+    const div = document.getElementById('ia-prompt');
+    div.innerHTML = `
+      <textarea id="ia-prompt-text" rows="14" style="width:100%;font-family:ui-monospace,monospace;font-size:12px">${UI.escapeHtml(cur.content||'')}</textarea>
+      <div class="full"><label>Notas (opcional, ex.: "ajuste pra invoice da China")</label>
+        <input id="ia-prompt-notes" placeholder="">
+      </div>
+      <div class="form-actions" style="margin-top:.5rem">
+        <button class="btn primary" id="ia-prompt-save">Salvar como nova versão</button>
+        ${cur.version ? `<span class="muted small">Versão ativa: <strong>v${cur.version}</strong></span>` : '<span class="muted small">(nenhuma versão salva — usando default)</span>'}
+      </div>`;
+    document.getElementById('ia-prompt-save').onclick = async () => {
+      const content = document.getElementById('ia-prompt-text').value;
+      const notes   = document.getElementById('ia-prompt-notes').value;
+      if (!content.trim()) return UI.toast('Prompt vazio','err');
+      try { await API.post('/api/credit-requests/ai/prompt', { content, notes }); UI.toast('Nova versão ativa'); loadIa(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    };
+  }
+
+  function drawVersions(versions) {
+    const div = document.getElementById('ia-versions');
+    if (!versions.length) { div.innerHTML = '<div class="muted small">Nenhuma versão criada — usando o prompt padrão do sistema.</div>'; return; }
+    div.innerHTML = UI.table({
+      cols: [
+        { label: 'v', get: r => 'v' + r.version },
+        { label: 'Data', get: r => UI.fmtDateTime(r.createdAt) },
+        { label: 'Por', get: r => r.createdBy?.name || '—' },
+        { label: 'Notas', get: r => r.notes || '—' },
+        { label: 'Ativa?', html: true, get: r => r.active ? '<span class="pill green">Ativa</span>' : '<span class="pill">—</span>' },
+        { label: 'Trecho', html: true, get: r => `<span class="muted small">${UI.escapeHtml((r.content||'').slice(0, 100))}${(r.content||'').length>100?'…':''}</span>` },
+        { label: '', html: true, get: r => r.active ? '' : `<button class="btn small" data-act="${r.id}">Ativar</button>` },
+      ],
+      rows: versions,
+    });
+    div.onclick = async e => {
+      const id = e.target.getAttribute('data-act');
+      if (!id) return;
+      try { await API.post(`/api/credit-requests/ai/prompt/${id}/activate`); UI.toast('Ativada'); loadIa(); }
+      catch (er) { UI.toast(er.message, 'err'); }
+    };
   }
 
   // ===== E-MAIL (SMTP) =====
@@ -58,20 +185,37 @@ window.VIEW_parametros = (() => {
     const c = document.getElementById('param-content');
     c.innerHTML = `
       <div class="panel">
-        <h3>Configuração SMTP</h3>
+        <h3>📧 Email (briefing diário)</h3>
         <p class="muted small" style="margin-bottom:1rem">
-          O sistema envia e-mails automáticos quando uma etapa do Kanban muda, quando uma etapa
-          é concluída, e quando um cliente faz uma solicitação. Configure o SMTP da Saygo abaixo.
+          O sistema dispara e-mails automáticos via API interna Saygo (mesmo padrão do projeto Indicadores Comercial Bitrix).
         </p>
         <form id="email-form" class="form-grid">
-          <div class="full"><label><input type="checkbox" name="enabled" ${s.enabled?'checked':''}> Ativar envio de e-mails</label></div>
-          <div><label>Servidor SMTP *</label><input name="host" value="${UI.escapeHtml(s.host||'')}" placeholder="ex: smtp.gmail.com"></div>
-          <div><label>Porta *</label><input type="number" name="port" value="${s.port||587}"></div>
-          <div class="full"><label><input type="checkbox" name="secure" ${s.secure?'checked':''}> SSL/TLS (porta 465)</label></div>
-          <div><label>Usuário *</label><input name="user" value="${UI.escapeHtml(s.user||'')}" placeholder="ex: noreply@saygogroup.com.br"></div>
-          <div><label>Senha</label><input type="password" name="pass" value="${s.pass==='***'?'***':''}" placeholder="(deixe ${s.pass==='***'?'*** para manter':'em branco'})"></div>
-          <div><label>E-mail remetente</label><input name="fromAddress" value="${UI.escapeHtml(s.fromAddress||'')}" placeholder="noreply@saygogroup.com.br"></div>
-          <div><label>Nome remetente</label><input name="fromName" value="${UI.escapeHtml(s.fromName||'')}" placeholder="Sistema Conta Gráfica - Saygo"></div>
+          <div class="full">
+            <label><strong>email_enabled</strong></label>
+            <select name="enabled">
+              <option value="true"  ${s.enabled?'selected':''}>Sim</option>
+              <option value="false" ${!s.enabled?'selected':''}>Não</option>
+            </select>
+            <small class="muted">Envio de briefing por email ligado/desligado (true/false).</small>
+          </div>
+
+          <div class="full">
+            <label><strong>email_api_url</strong></label>
+            <input name="apiUrl" value="${UI.escapeHtml(s.apiUrl||'')}" placeholder="https://fn4lvdgkug.execute-api.sa-east-1.amazonaws.com/v1/send">
+            <small class="muted">URL da API interna Saygo de envio de email.</small>
+          </div>
+
+          <div class="full">
+            <label><strong>email_api_token</strong></label>
+            <input type="password" name="apiToken" value="${s.apiToken==='***'?'***':''}" placeholder="${s.apiToken==='***'?'(token configurado — deixe *** para manter)':'cole o x-access-token'}">
+            <small class="muted">x-access-token da API de email Saygo (obrigatório). Peça à TI.</small>
+          </div>
+
+          <div class="full">
+            <label><strong>email_sender</strong></label>
+            <input name="sender" value="${UI.escapeHtml(s.sender||'')}" placeholder="ronaldo.felix@saygogroup.com.br">
+            <small class="muted">Remetente do email (campo "sender" da API Saygo).</small>
+          </div>
 
           <div class="full" style="border-top:1px solid var(--bd);padding-top:.6rem;margin-top:.4rem">
             <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Quando enviar</strong>
@@ -108,19 +252,15 @@ window.VIEW_parametros = (() => {
       ev.preventDefault();
       const fd = new FormData(ev.target);
       const data = {
-        enabled: !!fd.get('enabled'),
-        host: fd.get('host'),
-        port: Number(fd.get('port')) || 587,
-        secure: !!fd.get('secure'),
-        user: fd.get('user'),
-        pass: fd.get('pass'),
-        fromAddress: fd.get('fromAddress'),
-        fromName: fd.get('fromName'),
+        enabled: fd.get('enabled') === 'true',
+        apiUrl:   fd.get('apiUrl'),
+        apiToken: fd.get('apiToken'),
+        sender:   fd.get('sender'),
         notifyKanbanStageChange: !!fd.get('notifyKanbanStageChange'),
         notifyKanbanStageDone:   !!fd.get('notifyKanbanStageDone'),
         notifyPartnerRequest:    !!fd.get('notifyPartnerRequest'),
       };
-      try { await API.put('/api/email/settings', data); UI.toast('SMTP salvo'); loadEmail(); }
+      try { await API.put('/api/email/settings', data); UI.toast('Configuração salva'); loadEmail(); }
       catch (e) { UI.toast(e.message, 'err'); }
     };
     document.getElementById('email-test').onclick = async () => {
@@ -155,6 +295,7 @@ window.VIEW_parametros = (() => {
       dashboard:'Painel', clientes:'Clientes', movimentacoes:'Movimentações',
       saldos:'Saldos', comissoes:'Comissões', relatorios:'Relatórios',
       alertas:'Alertas', kanban:'Kanban', acionamentos:'Acionamentos',
+      'credit-requests':'Solicitação de Créditos',
       parceiros:'Intervenientes Aduaneiros', usuarios:'Usuários', auditoria:'Auditoria',
       chat:'Chat', parametros:'Parâmetros',
     };

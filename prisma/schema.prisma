@@ -68,6 +68,11 @@ model User {
   commissionsCreated   Commission[] @relation("CommissionCreatedBy")
   commissionsReviewed  Commission[] @relation("CommissionReviewedBy")
 
+  // Solicitações de crédito
+  creditRequestsRequested CreditRequest[] @relation("CreditRequestRequestedBy")
+  creditRequestsResolved  CreditRequest[] @relation("CreditRequestResolvedBy")
+  aiPromptsCreated        AiPromptVersion[] @relation("AiPromptCreatedBy")
+
   @@index([role])
   @@index([officeName])
   @@map("users")
@@ -99,6 +104,7 @@ model Cliente {
   user                User?    @relation("ClienteUser")
   kanbanCard          KanbanCard?
   partnerRequests     PartnerRequest[]
+  creditRequests      CreditRequest[]
 
   @@index([escritorio])
   @@index([nome])
@@ -451,13 +457,21 @@ model CommissionExtra {
 model EmailSettings {
   id          String   @id @default("default")
   enabled     Boolean  @default(false)
+
+  // === Padrão Saygo (API custom) ===
+  apiUrl      String?  // Ex.: https://fn4lvdgkug.execute-api.sa-east-1.amazonaws.com/v1/send
+  apiToken    String?  // x-access-token da API
+  sender      String?  // Email remetente (campo "sender" no payload)
+
+  // === Legacy SMTP (mantido pra compatibilidade — não usado pelo novo sender) ===
   host        String?
   port        Int      @default(587)
-  secure      Boolean  @default(false)   // true para 465 (SSL)
+  secure      Boolean  @default(false)
   user        String?
   pass        String?
   fromAddress String?
   fromName    String?  @default("Sistema Conta Gráfica - Saygo")
+
   // Triggers ligados/desligados
   notifyKanbanStageChange  Boolean @default(true)
   notifyKanbanStageDone    Boolean @default(true)
@@ -465,6 +479,91 @@ model EmailSettings {
   updatedAt   DateTime @updatedAt
 
   @@map("email_settings")
+}
+
+// ============================================================
+//   IA — Configurações + Prompt + Solicitações de Crédito
+// ============================================================
+model AiSettings {
+  id            String   @id @default("default")
+  provider      String   @default("anthropic") // anthropic | openai | gemini | groq
+  model         String?
+  apiKey        String?
+  systemPrompt  String?  @db.Text
+  enabled       Boolean  @default(false)
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@map("ai_settings")
+}
+
+// Histórico de versões do prompt usado para extrair invoice
+model AiPromptVersion {
+  id          String   @id @default(uuid())
+  version     Int      @default(autoincrement())
+  content     String   @db.Text
+  active      Boolean  @default(false)
+  createdById String?
+  createdBy   User?    @relation("AiPromptCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  @@index([active])
+  @@map("ai_prompt_versions")
+}
+
+enum CreditRequestStatus {
+  DRAFT       // só rascunho local
+  SENT        // enviado pro escritório
+  IN_PROGRESS // escritório resolvendo
+  RESOLVED    // concluído (com ou sem anexos)
+  CANCELED
+}
+
+model CreditRequest {
+  id              String   @id @default(uuid())
+  clienteId       Int
+  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  // snapshot do escritório do cliente (parceiro alvo)
+  partnerOfficeName String
+
+  // dados de entrada da invoice (formulário ou extraídos de PDF)
+  inputs          Json     @default("{}")
+  // resultado completo do cálculo (subtotal, custos, ICMS dos cenários, economia, etc.)
+  result          Json     @default("{}")
+  // valor final de créditos a comprar (referência rápida — vem de result.icms_al_nf por padrão)
+  creditosACompar Float    @default(0)
+  modalidade      String   @default("AL_NF") // AL_NF (4%) | AL_DIF (1.2%)
+
+  // Anexos do PDF de entrada (opcional)
+  inputPdfName    String?
+  inputPdfBytes   Bytes?
+
+  // anexos da resolução (opcionais — não bloqueiam conclusão)
+  resolutionAttachments Json @default("[]")
+  resolutionNote  String?  @db.Text
+
+  status          CreditRequestStatus @default(DRAFT)
+  message         String?  @db.Text
+
+  requestedById   String
+  requestedBy     User     @relation("CreditRequestRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
+  resolvedById    String?
+  resolvedBy      User?    @relation("CreditRequestResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  // Versão do prompt usado para a extração via IA (rastreabilidade)
+  aiPromptVersion Int?
+
+  createdAt       DateTime @default(now())
+  sentAt          DateTime?
+  resolvedAt      DateTime?
+  updatedAt       DateTime @updatedAt
+
+  @@index([clienteId])
+  @@index([partnerOfficeName, status])
+  @@index([status])
+  @@map("credit_requests")
 }
 
 model EmailLog {

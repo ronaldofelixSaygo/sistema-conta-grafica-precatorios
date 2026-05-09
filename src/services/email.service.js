@@ -1,14 +1,8 @@
 // =====================================================================
-// Envio de e-mail. Lê config do banco (EmailSettings singleton 'default').
-// Inclui templates simples para Kanban e Acionamentos.
-// Inspirado no padrão usado no projeto Indicadores_Comercial_Bitrix
-// (config configurável + triggers em eventos de negócio).
+// Envio de e-mail via API interna Saygo (mesmo padrão do projeto
+// Indicadores_Comercial_Bitrix). POST com x-access-token.
 // =====================================================================
-import nodemailer from 'nodemailer';
 import { prisma } from '../config/prisma.js';
-
-let transporterCache = null;
-let cacheKey = null;
 
 async function getSettings() {
   let s = await prisma.emailSettings.findUnique({ where: { id: 'default' } });
@@ -18,40 +12,36 @@ async function getSettings() {
   return s;
 }
 
-async function getTransporter() {
-  const s = await getSettings();
-  if (!s.enabled || !s.host || !s.user) return null;
-  const key = `${s.host}|${s.port}|${s.secure}|${s.user}`;
-  if (transporterCache && cacheKey === key) return transporterCache;
-  transporterCache = nodemailer.createTransport({
-    host: s.host,
-    port: s.port,
-    secure: !!s.secure,
-    auth: { user: s.user, pass: s.pass || '' },
-  });
-  cacheKey = key;
-  return transporterCache;
-}
-
 export async function getSettingsSafe() {
   const s = await getSettings();
-  // Não vaza a senha
-  return { ...s, pass: s.pass ? '***' : '' };
+  // Não vaza tokens/senhas — só retorna flag de presença
+  return {
+    ...s,
+    apiToken: s.apiToken ? '***' : '',
+    pass: s.pass ? '***' : '',
+  };
 }
 
 export async function updateSettings(data) {
-  const s = await getSettings();
   const upd = {};
-  for (const k of ['enabled','host','port','secure','user','fromAddress','fromName',
-                   'notifyKanbanStageChange','notifyKanbanStageDone','notifyPartnerRequest']) {
-    if (data[k] !== undefined) upd[k] = (k === 'port') ? (Number(data[k]) || 587)
-                                       : (typeof data[k] === 'boolean' ? data[k] : data[k] || null);
+  // Novos campos (padrão API Saygo)
+  if (data.enabled  !== undefined) upd.enabled  = !!data.enabled;
+  if (data.apiUrl   !== undefined) upd.apiUrl   = data.apiUrl   || null;
+  if (data.sender   !== undefined) upd.sender   = data.sender   || null;
+  // Token: vazio ou '***' = manter o atual
+  if (data.apiToken !== undefined && data.apiToken !== '' && data.apiToken !== '***') {
+    upd.apiToken = data.apiToken;
   }
-  // Senha só se enviada e diferente do mascarado
-  if (data.pass !== undefined && data.pass !== '***') upd.pass = data.pass || null;
-  // limpa cache
-  transporterCache = null; cacheKey = null;
-  return prisma.emailSettings.update({ where: { id: 'default' }, data: upd });
+  // Triggers
+  if (data.notifyKanbanStageChange !== undefined) upd.notifyKanbanStageChange = !!data.notifyKanbanStageChange;
+  if (data.notifyKanbanStageDone   !== undefined) upd.notifyKanbanStageDone   = !!data.notifyKanbanStageDone;
+  if (data.notifyPartnerRequest    !== undefined) upd.notifyPartnerRequest    = !!data.notifyPartnerRequest;
+
+  return prisma.emailSettings.upsert({
+    where: { id: 'default' },
+    create: { id: 'default', ...upd },
+    update: upd,
+  });
 }
 
 async function logEmail({ to, subject, status, error, context, contextId }) {
@@ -60,18 +50,38 @@ async function logEmail({ to, subject, status, error, context, contextId }) {
   } catch {}
 }
 
-// Envia e-mail (não bloqueia caller; loga em background)
+// Envia e-mail via API Saygo
 export async function sendMail({ to, subject, html, text, context, contextId }) {
   if (!to) return;
   try {
-    const t = await getTransporter();
-    if (!t) {
-      await logEmail({ to, subject, status: 'error', error: 'SMTP nao configurado/ativo', context, contextId });
+    const s = await getSettings();
+    if (!s.enabled) {
+      await logEmail({ to, subject, status: 'error', error: 'E-mail desabilitado', context, contextId });
       return;
     }
-    const s = await getSettings();
-    const from = s.fromName ? `"${s.fromName}" <${s.fromAddress || s.user}>` : (s.fromAddress || s.user);
-    await t.sendMail({ from, to, subject, html, text: text || stripHtml(html||'') });
+    if (!s.apiUrl || !s.apiToken || !s.sender) {
+      await logEmail({ to, subject, status: 'error', error: 'API de e-mail não configurada (apiUrl/apiToken/sender)', context, contextId });
+      return;
+    }
+    const body = {
+      sender: s.sender,
+      to,
+      subject,
+      html,
+      text: text || stripHtml(html || ''),
+    };
+    const r = await fetch(s.apiUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-access-token': s.apiToken,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const errText = await r.text().catch(() => '');
+      throw new Error(`HTTP ${r.status} ${errText.slice(0, 200)}`);
+    }
     await logEmail({ to, subject, status: 'sent', context, contextId });
   } catch (e) {
     console.error('[email] erro:', e.message);

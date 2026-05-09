@@ -4,7 +4,7 @@ const ROLES = ['ADM','SAYGO','PARTNER','CLIENT'];
 const PARTNER_TYPES = ['ESCRITORIO','ARMADOR_LOGISTICO','OUTRO'];
 const MODULES = [
   'dashboard','clientes','movimentacoes','saldos','comissoes',
-  'relatorios','alertas','kanban','acionamentos','parceiros',
+  'relatorios','alertas','kanban','acionamentos','credit-requests','parceiros',
   'usuarios','auditoria','chat','parametros',
 ];
 
@@ -37,8 +37,8 @@ function defaults() {
         canEdit   = canCreate;
         canDelete = canCreate;
       } else if (p.key === 'PARTNER_ESCRITORIO') {
-        canView   = ['dashboard','clientes','movimentacoes','saldos','comissoes','relatorios','alertas','kanban','acionamentos','chat'].includes(m);
-        canCreate = ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(m);
+        canView   = ['dashboard','clientes','movimentacoes','saldos','comissoes','relatorios','alertas','kanban','acionamentos','credit-requests','chat'].includes(m);
+        canCreate = ['clientes','movimentacoes','kanban','acionamentos','credit-requests','comissoes'].includes(m);
         canEdit   = canCreate;
         canDelete = canCreate;
       } else if (p.key === 'PARTNER_ARMADOR') {
