@@ -14,8 +14,9 @@ window['VIEW_credit-requests'] = (() => {
         API.get('/api/clientes').catch(() => []),
       ]);
       clientesCache = clientes;
-      const isPartner = AUTH.role() === 'PARTNER';
-      const canCreate = isPartner;
+      // Quem CRIA: CLIENT (próprio) ou SAYGO/ADM. PARTNER nunca cria — só resolve.
+      const role = AUTH.role();
+      const canCreate = role === 'CLIENT' || role === 'SAYGO' || role === 'ADM';
       el.innerHTML = `
         <div class="page-toolbar">
           <div class="muted small">${list.length} solicitação(ões)</div>
@@ -56,7 +57,19 @@ window['VIEW_credit-requests'] = (() => {
 
   // ---------- Wizard de criação ----------
   function openWizard() {
-    const cliOpts = clientesCache.map(c => `<option value="${c.id}">${UI.escapeHtml(c.nome)}${c.escritorio?` — ${UI.escapeHtml(c.escritorio)}`:''}</option>`).join('');
+    const role = AUTH.role();
+    let cliOpts;
+    if (role === 'CLIENT') {
+      // CLIENT: vê só o próprio cliente (clientesCache deve ter apenas 1)
+      const myCli = clientesCache[0];
+      cliOpts = myCli
+        ? `<option value="${myCli.id}" selected>${UI.escapeHtml(myCli.nome)}</option>`
+        : '';
+    } else {
+      cliOpts = clientesCache.map(c =>
+        `<option value="${c.id}">${UI.escapeHtml(c.nome)}${c.escritorio?` — ${UI.escapeHtml(c.escritorio)}`:''}</option>`
+      ).join('');
+    }
     UI.openModal('Nova solicitação de créditos', `
       <div style="display:flex;gap:.4rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem;margin-bottom:1rem">
         <button class="btn primary" data-tab="manual">Preencher manualmente</button>
@@ -260,13 +273,22 @@ window['VIEW_credit-requests'] = (() => {
 
   // ---------- Detail ----------
   function openDetail(r) {
-    const isStaff = AUTH.isStaff();
-    const isOwner = AUTH.isPartner() && r.partnerOfficeName === (AUTH.user()?.officeName || AUTH.user()?.parceiroNome);
+    const me = AUTH.user();
+    const role = AUTH.role();
+    const office = me?.officeName || me?.parceiroNome;
+    // Solicitante = quem criou (CLIENT do cliente, ou SAYGO/ADM)
+    const isOwner = r.requestedById === me?.id;
+    // Resolvedor = PARTNER ESCRITORIO do escritório alvo (e SAYGO/ADM podem em fallback)
+    const isResolver = role === 'PARTNER' && r.partnerOfficeName === office;
+    const isStaff    = role === 'ADM' || role === 'SAYGO';
     const inp = r.inputs || {};
     const cen = r.result?.cenarios || {};
+
     UI.openModal(`Solicitação — ${r.cliente?.nome || ''}`, `
       <div class="muted small" style="margin-bottom:.6rem">
         ${UI.escapeHtml(r.cliente?.nome || '')} · ${UI.escapeHtml(r.partnerOfficeName)} · ${statusPill(r.status)} · ${UI.fmtDateTime(r.createdAt)}
+        <br>Solicitante: ${UI.escapeHtml(r.requestedBy?.name || '—')}
+        ${r.resolvedBy ? `· Resolvido por: ${UI.escapeHtml(r.resolvedBy?.name)} em ${UI.fmtDateTime(r.resolvedAt)}` : ''}
       </div>
       <div class="panel">
         <h3>Dados da invoice</h3>
@@ -293,27 +315,66 @@ window['VIEW_credit-requests'] = (() => {
           <tr><td>Economia</td><td class="num val-pos">${UI.fmtMoney((r.modalidade==='AL_DIF'?cen.al_dif?.economia:cen.al_nf?.economia)||0)}</td></tr>
         </tbody></table>
       </div>
-      ${r.message ? `<div class="panel"><h3>Mensagem</h3><p>${UI.escapeHtml(r.message)}</p></div>` : ''}
-      ${r.resolutionNote ? `<div class="panel"><h3>Resposta da Saygo</h3><p>${UI.escapeHtml(r.resolutionNote)}</p></div>` : ''}
-      <div class="form-actions">
-        ${isOwner && r.status === 'DRAFT'   ? `<button class="btn primary" data-act="send">Enviar</button>` : ''}
-        ${isOwner && (r.status === 'DRAFT' || r.status === 'SENT') ? `<button class="btn danger" data-act="cancel">Cancelar</button>` : ''}
-        ${isStaff && r.status === 'SENT'    ? `<button class="btn" data-act="start">Marcar em andamento</button>` : ''}
-        ${isStaff && (r.status === 'SENT' || r.status === 'IN_PROGRESS') ? `<button class="btn primary" data-act="resolve">Concluir</button>` : ''}
-      </div>`);
+      ${r.message ? `<div class="panel"><h3>Mensagem do solicitante</h3><p>${UI.escapeHtml(r.message)}</p></div>` : ''}
+      ${r.resolutionNote ? `<div class="panel"><h3>Resposta do interveniente</h3><p>${UI.escapeHtml(r.resolutionNote)}</p>
+        ${r.resolutionAttachmentName ? `<div class="muted small" style="margin-top:.4rem">📎 Evidência: <a href="/api/credit-requests/${r.id}/evidence" target="_blank">${UI.escapeHtml(r.resolutionAttachmentName)}</a></div>` : ''}
+      </div>` : ''}
+
+      <div id="cr-actions"></div>
+    `);
+
+    // Render dos botões/forms
+    const actDiv = document.getElementById('cr-actions');
+    let html = '';
+    if (isOwner && r.status === 'DRAFT')              html += `<button class="btn primary" data-act="send">Enviar para o interveniente</button> `;
+    if (isOwner && (r.status === 'DRAFT' || r.status === 'SENT')) html += `<button class="btn danger" data-act="cancel">Cancelar</button> `;
+    if ((isResolver || isStaff) && r.status === 'SENT')   html += `<button class="btn" data-act="start">Marcar em andamento</button> `;
+    if ((isResolver || isStaff) && (r.status === 'SENT' || r.status === 'IN_PROGRESS')) html += `<button class="btn primary" data-act="resolve">Concluir solicitação</button> `;
+    actDiv.innerHTML = html ? `<div class="form-actions">${html}</div>` : '';
+
     document.getElementById('modal-body').onclick = async e => {
       const act = e.target.getAttribute('data-act');
       if (!act) return;
       try {
-        if (act === 'send')    await API.post(`/api/credit-requests/${r.id}/send`);
-        if (act === 'start')   await API.post(`/api/credit-requests/${r.id}/start`);
-        if (act === 'resolve') {
-          const note = prompt('Observação (opcional):') || '';
-          await API.post(`/api/credit-requests/${r.id}/resolve`, { note });
-        }
-        if (act === 'cancel')  await API.post(`/api/credit-requests/${r.id}/cancel`);
-        UI.toast('OK'); UI.closeModal(); render();
+        if (act === 'send')    { await API.post(`/api/credit-requests/${r.id}/send`); UI.toast('Enviada'); UI.closeModal(); render(); }
+        if (act === 'cancel')  { await API.post(`/api/credit-requests/${r.id}/cancel`); UI.toast('Cancelada'); UI.closeModal(); render(); }
+        if (act === 'start')   { await API.post(`/api/credit-requests/${r.id}/start`); UI.toast('Em andamento'); UI.closeModal(); render(); }
+        if (act === 'resolve') { openResolveForm(r); }
       } catch (er) { UI.toast(er.message, 'err'); }
+    };
+  }
+
+  // Form para concluir solicitação — anexo opcional
+  function openResolveForm(r) {
+    const div = document.getElementById('cr-actions');
+    div.innerHTML = `
+      <div class="panel" style="margin-top:.5rem">
+        <h3>Concluir solicitação</h3>
+        <form id="cr-resolve" class="form-grid">
+          <div class="full"><label>Observação (opcional)</label>
+            <textarea name="note" rows="3" placeholder="Detalhes da execução..."></textarea>
+          </div>
+          <div class="full"><label>Evidência (opcional — PDF, imagem etc.)</label>
+            <input type="file" name="file">
+            <small class="muted">Pode concluir sem anexo. Sem evidência, fica marcado "Concluído sem documentos".</small>
+          </div>
+          <div class="full form-actions">
+            <button type="button" class="btn" id="cr-resolve-cancel">Voltar</button>
+            <button type="submit" class="btn primary">Concluir</button>
+          </div>
+        </form>
+      </div>`;
+    document.getElementById('cr-resolve-cancel').onclick = () => openDetail(r);
+    document.getElementById('cr-resolve').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        const resp = await fetch(`/api/credit-requests/${r.id}/resolve`, {
+          method: 'POST', credentials: 'include', body: fd,
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        UI.toast('Solicitação concluída'); UI.closeModal(); render();
+      } catch (e) { UI.toast(e.message, 'err'); }
     };
   }
 

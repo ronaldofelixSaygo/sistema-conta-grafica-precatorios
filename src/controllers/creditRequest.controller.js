@@ -118,9 +118,24 @@ export async function start(req, res, next) {
 }
 export async function resolve(req, res, next) {
   try {
-    const r = await svc.resolveRequest(req.user, req.params.id, req.body || {});
+    const body = req.body || {};
+    const args = { note: body.note };
+    if (req.file) {
+      args.attachmentName  = req.file.originalname;
+      args.attachmentMime  = req.file.mimetype;
+      args.attachmentBytes = req.file.buffer;
+    }
+    const r = await svc.resolveRequest(req.user, req.params.id, args);
     await logAction({ user: req.user, action: 'RESOLVE', entity: 'credit_request', entityId: r.id, ip: req.ip });
     res.json(r);
+  } catch (e) { next(e); }
+}
+export async function downloadEvidence(req, res, next) {
+  try {
+    const { filename, mime, bytes } = await svc.getResolutionAttachment(req.user, req.params.id);
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(filename)}"`);
+    res.end(Buffer.from(bytes));
   } catch (e) { next(e); }
 }
 export async function cancel(req, res, next) {

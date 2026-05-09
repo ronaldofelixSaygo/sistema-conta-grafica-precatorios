@@ -33,14 +33,15 @@ function defaults() {
       if (p.key === 'ADM') { canView=canCreate=canEdit=canDelete=true; }
       else if (p.key === 'SAYGO') {
         canView   = !['parametros'].includes(m);
-        canCreate = ['clientes','movimentacoes','kanban','acionamentos','parceiros','comissoes'].includes(m);
+        canCreate = ['clientes','movimentacoes','kanban','acionamentos','credit-requests','parceiros','comissoes'].includes(m);
         canEdit   = canCreate;
         canDelete = canCreate;
       } else if (p.key === 'PARTNER_ESCRITORIO') {
         canView   = ['dashboard','clientes','movimentacoes','saldos','comissoes','relatorios','alertas','kanban','acionamentos','credit-requests','chat'].includes(m);
-        canCreate = ['clientes','movimentacoes','kanban','acionamentos','credit-requests','comissoes'].includes(m);
-        canEdit   = canCreate;
-        canDelete = canCreate;
+        // Não cria solicitação de crédito — ele apenas resolve as que recebe
+        canCreate = ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(m);
+        canEdit   = ['clientes','movimentacoes','kanban','acionamentos','credit-requests','comissoes'].includes(m); // edita pra resolver
+        canDelete = ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(m);
       } else if (p.key === 'PARTNER_ARMADOR') {
         canView   = ['kanban','chat'].includes(m);  // armador: só Kanban e Chat por padrão
         canCreate = ['kanban'].includes(m);
@@ -52,8 +53,8 @@ function defaults() {
         canEdit   = canCreate;
         canDelete = false;
       } else if (p.key === 'CLIENT') {
-        canView   = ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','chat'].includes(m);
-        canCreate = ['acionamentos'].includes(m);
+        canView   = ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','credit-requests','chat'].includes(m);
+        canCreate = ['acionamentos','credit-requests'].includes(m);
         canEdit   = false;
         canDelete = false;
       }
@@ -69,9 +70,25 @@ function defaults() {
 }
 
 export async function ensureDefaults() {
+  // Popula tudo se vazia
   const count = await prisma.rolePermission.count();
-  if (count > 0) return;
-  await prisma.rolePermission.createMany({ data: defaults() });
+  if (count === 0) {
+    await prisma.rolePermission.createMany({ data: defaults() });
+    return;
+  }
+  // Caso já existam dados, adiciona somente módulos novos sem sobrescrever existentes.
+  const all = defaults();
+  for (const d of all) {
+    const exists = await prisma.rolePermission.findFirst({
+      where: { role: d.role, partnerType: d.partnerType, module: d.module },
+      select: { id: true },
+    });
+    if (!exists) {
+      try {
+        await prisma.rolePermission.create({ data: d });
+      } catch {} // ignora unique conflict
+    }
+  }
 }
 
 export async function listAll() {

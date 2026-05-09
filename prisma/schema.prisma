@@ -540,8 +540,10 @@ model CreditRequest {
   inputPdfName    String?
   inputPdfBytes   Bytes?
 
-  // anexos da resolução (opcionais — não bloqueiam conclusão)
-  resolutionAttachments Json @default("[]")
+  // anexo de evidência da resolução (opcional — não bloqueia conclusão)
+  resolutionAttachmentName  String?
+  resolutionAttachmentMime  String?
+  resolutionAttachmentBytes Bytes?
   resolutionNote  String?  @db.Text
 
   status          CreditRequestStatus @default(DRAFT)

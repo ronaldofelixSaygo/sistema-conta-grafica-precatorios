@@ -27,8 +27,9 @@ router.post('/', upload.single('file'),                  ctrl.create);
 router.get('/:id',                                       ctrl.get);
 router.post('/:id/send',                                 ctrl.send);
 router.post('/:id/start',                                ctrl.start);
-router.post('/:id/resolve',                              ctrl.resolve);
+router.post('/:id/resolve', upload.single('file'),       ctrl.resolve);
 router.post('/:id/cancel',                               ctrl.cancel);
 router.get('/:id/pdf',                                   ctrl.downloadPdf);
+router.get('/:id/evidence',                              ctrl.downloadEvidence);
 
 export default router;

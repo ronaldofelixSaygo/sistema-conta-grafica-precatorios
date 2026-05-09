@@ -6,31 +6,44 @@
 import { prisma } from '../../config/prisma.js';
 import { calcularInvoice } from './taxCalculator.service.js';
 
-function ensurePartner(user) {
-  if (!user || user.role !== 'PARTNER') {
-    const e = new Error('Apenas Intervenientes (PARTNER) podem criar solicitações'); e.status = 403; throw e;
+// Quem pode CRIAR solicitação: CLIENT (próprio) ou SAYGO/ADM (em nome de qualquer cliente)
+function ensureRequester(user) {
+  if (!user) { const e = new Error('Não autenticado'); e.status = 401; throw e; }
+  if (!['CLIENT','SAYGO','ADM'].includes(user.role)) {
+    const e = new Error('Apenas Cliente ou Saygo podem criar solicitações de crédito'); e.status = 403; throw e;
   }
 }
 
-async function ensureClienteOfPartner(user, clienteId) {
-  const officeName = user.officeName || user.parceiroNome;
+// CLIENT só pode criar pra si; SAYGO/ADM pode pra qualquer cliente
+async function resolveCliente(user, clienteId) {
+  if (user.role === 'CLIENT') {
+    if (!user.clienteId) { const e = new Error('Usuário sem cliente vinculado'); e.status = 400; throw e; }
+    if (clienteId && Number(clienteId) !== user.clienteId) {
+      const e = new Error('Cliente não permitido'); e.status = 403; throw e;
+    }
+    const cli = await prisma.cliente.findUnique({ where: { id: user.clienteId } });
+    if (!cli) { const e = new Error('Cliente não encontrado'); e.status = 404; throw e; }
+    return cli;
+  }
+  // SAYGO/ADM: precisa enviar clienteId
+  if (!clienteId) { const e = new Error('clienteId é obrigatório'); e.status = 400; throw e; }
   const cli = await prisma.cliente.findUnique({ where: { id: Number(clienteId) } });
   if (!cli) { const e = new Error('Cliente não encontrado'); e.status = 404; throw e; }
-  if (officeName && cli.escritorio !== officeName) {
-    const e = new Error('Cliente fora do seu escritório'); e.status = 403; throw e;
-  }
   return cli;
 }
 
-// PARTNER lista as suas; STAFF/ADM lista todas; CLIENT só as do próprio cliente
+// Lista filtrada por escopo do user
+//  - CLIENT: só do próprio cliente
+//  - PARTNER ESCRITORIO: solicitações endereçadas ao seu escritório
+//  - SAYGO/ADM: tudo
 export async function listRequests(user) {
   const where = {};
-  if (user.role === 'PARTNER') {
+  if (user.role === 'CLIENT' && user.clienteId) {
+    where.clienteId = user.clienteId;
+  } else if (user.role === 'PARTNER') {
     const office = user.officeName || user.parceiroNome;
     if (!office) return [];
     where.partnerOfficeName = office;
-  } else if (user.role === 'CLIENT' && user.clienteId) {
-    where.clienteId = user.clienteId;
   }
   return prisma.creditRequest.findMany({
     where,
@@ -53,11 +66,12 @@ export async function getRequest(user, id) {
     },
   });
   if (!r) { const e = new Error('Solicitação não encontrada'); e.status = 404; throw e; }
-  // permissao
-  const isOwner = user.role === 'PARTNER' && r.partnerOfficeName === (user.officeName || user.parceiroNome);
-  const isClient = user.role === 'CLIENT' && r.clienteId === user.clienteId;
-  const isStaff  = user.role === 'ADM' || user.role === 'SAYGO';
-  if (!isOwner && !isClient && !isStaff) {
+  // permissão de visualização
+  const office = user.officeName || user.parceiroNome;
+  const isResolver = user.role === 'PARTNER' && r.partnerOfficeName === office;
+  const isClient   = user.role === 'CLIENT' && r.clienteId === user.clienteId;
+  const isStaff    = user.role === 'ADM' || user.role === 'SAYGO';
+  if (!isResolver && !isClient && !isStaff) {
     const e = new Error('Sem permissão'); e.status = 403; throw e;
   }
   return r;
@@ -69,9 +83,10 @@ export function simulate(input) {
 }
 
 // Cria DRAFT (cálculo + dados, ainda não enviado)
+// Solicitante: CLIENT (sempre) ou SAYGO/ADM (em nome de um cliente)
 export async function createDraft(user, payload, pdfBuffer = null, pdfName = null, aiPromptVersion = null) {
-  ensurePartner(user);
-  const cli = await ensureClienteOfPartner(user, payload.clienteId);
+  ensureRequester(user);
+  const cli = await resolveCliente(user, payload.clienteId);
 
   const result = calcularInvoice(payload.inputs || {});
   const modalidade = payload.modalidade === 'AL_DIF' ? 'AL_DIF' : 'AL_NF';
@@ -80,7 +95,7 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
   return prisma.creditRequest.create({
     data: {
       clienteId: cli.id,
-      partnerOfficeName: cli.escritorio || (user.officeName || user.parceiroNome || ''),
+      partnerOfficeName: cli.escritorio || '',
       inputs: payload.inputs || {},
       result,
       creditosACompar,
@@ -96,12 +111,12 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
   });
 }
 
-// Envia: muda status para SENT
+// Envia: DRAFT → SENT — apenas o solicitante (ou STAFF)
 export async function sendRequest(user, id) {
   const r = await getRequest(user, id);
-  if (!(user.role === 'PARTNER' && r.partnerOfficeName === (user.officeName || user.parceiroNome))) {
-    const e = new Error('Apenas o solicitante pode enviar'); e.status = 403; throw e;
-  }
+  const isOwner = r.requestedById === user.id;
+  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
+  if (!isOwner && !isStaff) { const e = new Error('Apenas o solicitante pode enviar'); e.status = 403; throw e; }
   if (r.status !== 'DRAFT') {
     const e = new Error('Solicitação não está em rascunho'); e.status = 400; throw e;
   }
@@ -111,35 +126,46 @@ export async function sendRequest(user, id) {
   });
 }
 
-// Marca como em andamento (PARTNER ESCRITORIO da Saygo / Saygo)
+// Marca como em andamento — PARTNER ESCRITORIO do escritório alvo (resolvedor)
+function ensureResolverPartner(user, r) {
+  const office = user.officeName || user.parceiroNome;
+  const isResolver = user.role === 'PARTNER' && r.partnerOfficeName === office;
+  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
+  if (!isResolver && !isStaff) { const e = new Error('Sem permissão para resolver'); e.status = 403; throw e; }
+}
+
 export async function startResolution(user, id) {
   const r = await getRequest(user, id);
-  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
-  if (!isStaff) { const e = new Error('Sem permissão'); e.status = 403; throw e; }
+  ensureResolverPartner(user, r);
+  if (!(r.status === 'SENT' || r.status === 'DRAFT')) {
+    const e = new Error('Status inválido para iniciar'); e.status = 400; throw e;
+  }
   return prisma.creditRequest.update({
     where: { id }, data: { status: 'IN_PROGRESS' },
   });
 }
 
-// Conclui — atualiza cliente.clienteCertificado se for a primeira concluída
-export async function resolveRequest(user, id, { note, attachments } = {}) {
+// Conclui — opcionalmente com anexo de evidência. Atualiza certificado do cliente se for a 1ª resolução.
+export async function resolveRequest(user, id, { note, attachmentName, attachmentMime, attachmentBytes } = {}) {
   const r = await getRequest(user, id);
-  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
-  if (!isStaff) { const e = new Error('Sem permissão'); e.status = 403; throw e; }
+  ensureResolverPartner(user, r);
   if (r.status === 'RESOLVED' || r.status === 'CANCELED') {
     const e = new Error('Solicitação já encerrada'); e.status = 400; throw e;
   }
 
-  const updated = await prisma.creditRequest.update({
-    where: { id },
-    data: {
-      status: 'RESOLVED',
-      resolvedAt: new Date(),
-      resolvedById: user.id,
-      resolutionNote: note || null,
-      ...(Array.isArray(attachments) ? { resolutionAttachments: attachments } : {}),
-    },
-  });
+  const data = {
+    status: 'RESOLVED',
+    resolvedAt: new Date(),
+    resolvedById: user.id,
+    resolutionNote: note || null,
+  };
+  if (attachmentBytes) {
+    data.resolutionAttachmentName  = attachmentName  || 'evidencia';
+    data.resolutionAttachmentMime  = attachmentMime  || 'application/octet-stream';
+    data.resolutionAttachmentBytes = attachmentBytes;
+  }
+
+  const updated = await prisma.creditRequest.update({ where: { id }, data });
 
   // primeira solicitação concluída desse cliente? Atualiza certificado.
   const totalResolved = await prisma.creditRequest.count({
@@ -156,18 +182,29 @@ export async function resolveRequest(user, id, { note, attachments } = {}) {
 
 export async function cancelRequest(user, id) {
   const r = await getRequest(user, id);
-  const office = user.officeName || user.parceiroNome;
-  const isOwner = user.role === 'PARTNER' && r.partnerOfficeName === office;
-  if (!isOwner) { const e = new Error('Apenas o solicitante pode cancelar'); e.status = 403; throw e; }
+  const isOwner = r.requestedById === user.id;
+  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
+  if (!isOwner && !isStaff) { const e = new Error('Apenas o solicitante pode cancelar'); e.status = 403; throw e; }
   if (r.status === 'RESOLVED' || r.status === 'CANCELED') {
     const e = new Error('Solicitação já encerrada'); e.status = 400; throw e;
   }
   return prisma.creditRequest.update({ where: { id }, data: { status: 'CANCELED' } });
 }
 
-// Download do PDF original
+// Download do PDF original (input)
 export async function getInputPdf(user, id) {
   const r = await getRequest(user, id);
   if (!r.inputPdfBytes) { const e = new Error('Sem PDF anexado'); e.status = 404; throw e; }
   return { filename: r.inputPdfName || 'invoice.pdf', bytes: r.inputPdfBytes };
+}
+
+// Download do anexo de resolução
+export async function getResolutionAttachment(user, id) {
+  const r = await getRequest(user, id);
+  if (!r.resolutionAttachmentBytes) { const e = new Error('Sem anexo de resolução'); e.status = 404; throw e; }
+  return {
+    filename: r.resolutionAttachmentName || 'evidencia',
+    mime: r.resolutionAttachmentMime || 'application/octet-stream',
+    bytes: r.resolutionAttachmentBytes,
+  };
 }
