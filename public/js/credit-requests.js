@@ -96,7 +96,35 @@ window['VIEW_credit-requests'] = (() => {
       acrescimo_usd: 0, frete_usd: 0, outros_usd: 0,
       ii: 0, pis: 0, cofins: 0, ipi: 0,
       siscomex: 0, afrmm: 0, antidumping: 0,
+      // Alíquotas vindas do lookup NCM (pra recalcular se a base mudar)
+      _ii_aliq: null, _pis_aliq: null, _cofins_aliq: null, _ipi_aliq: null,
     };
+  }
+
+  // Recalcula os valores em R$ de um grupo a partir das alíquotas salvas
+  function recalcGrupoFromAliquotas(g) {
+    const taxa = Number(cabecalho.taxa_cambio) || 0;
+    if (taxa <= 0) return false;
+    const baseBRL = (Number(g.valor_usd||0) + Number(g.acrescimo_usd||0)
+                  + Number(g.frete_usd||0) + Number(g.outros_usd||0)) * taxa;
+    let mudou = false;
+    if (g._ii_aliq != null)     { g.ii     = +(baseBRL * g._ii_aliq / 100).toFixed(2);     mudou = true; }
+    if (g._pis_aliq != null)    { g.pis    = +(baseBRL * g._pis_aliq / 100).toFixed(2);    mudou = true; }
+    if (g._cofins_aliq != null) { g.cofins = +(baseBRL * g._cofins_aliq / 100).toFixed(2); mudou = true; }
+    if (g._ipi_aliq != null)    {
+      const baseIpi = baseBRL + (g.ii || 0);
+      g.ipi = +(baseIpi * g._ipi_aliq / 100).toFixed(2);
+      mudou = true;
+    }
+    return mudou;
+  }
+
+  function recalcAllGrupos() {
+    let mudou = false;
+    for (const g of grupos) {
+      if (recalcGrupoFromAliquotas(g)) mudou = true;
+    }
+    if (mudou) drawGruposTable();
   }
 
   function drawManualTab(cliOpts) {
@@ -151,12 +179,29 @@ window['VIEW_credit-requests'] = (() => {
     drawGruposTable();
     document.getElementById('cr-add-ncm').onclick = () => { grupos.push(emptyGrupo()); drawGruposTable(); };
 
-    // captura mudanças no cabeçalho
+    // captura mudanças no cabeçalho e na tabela
     const form = document.getElementById('cr-form');
     form.addEventListener('input', e => {
       const t = e.target;
+      // Cabeçalho
       if (t.name && cabecalho.hasOwnProperty(t.name)) {
         cabecalho[t.name] = t.type === 'number' ? Number(t.value) : t.value;
+        if (t.name === 'taxa_cambio') {
+          // Recalcula impostos em R$ de TODOS os grupos com alíquotas salvas
+          readGruposFromTable();
+          recalcAllGrupos();
+        }
+      }
+      // Linha da tabela: valor_usd / acrescimo_usd / frete_usd / outros_usd → recalcula a linha
+      const row = t.closest('[data-grow]');
+      if (row) {
+        const idx = Number(row.dataset.grow);
+        const g = grupos[idx];
+        const f = t.dataset.field;
+        if (g && f && ['valor_usd','acrescimo_usd','frete_usd','outros_usd'].includes(f)) {
+          g[f] = Number(t.value) || 0;
+          if (recalcGrupoFromAliquotas(g)) drawGruposTable();
+        }
       }
     });
 
@@ -268,28 +313,29 @@ window['VIEW_credit-requests'] = (() => {
     const uf = (cabecalho.uf || 'AL').toUpperCase();
     try {
       const r = await API.get(`/api/ncm/${ncmRaw}`, { uf });
-      // Calcula valores em R$ a partir das alíquotas e do valor USD do grupo
-      const taxa = Number(cabecalho.taxa_cambio) || 0;
-      const valorUSD = Number(g.valor_usd) || 0;
-      const baseBRL = (valorUSD + Number(g.acrescimo_usd || 0) + Number(g.frete_usd || 0) + Number(g.outros_usd || 0)) * taxa;
-
-      if (r.ii_aliq != null)     g.ii     = +(baseBRL * r.ii_aliq / 100).toFixed(2);
-      if (r.pis_aliq != null)    g.pis    = +(baseBRL * r.pis_aliq / 100).toFixed(2);
-      if (r.cofins_aliq != null) g.cofins = +(baseBRL * r.cofins_aliq / 100).toFixed(2);
-      // IPI incide sobre base + II
-      if (r.ipi_aliq != null) {
-        const baseIpi = baseBRL + (g.ii || 0);
-        g.ipi = +(baseIpi * r.ipi_aliq / 100).toFixed(2);
-      }
+      // Salva alíquotas no grupo — recalcula em R$ sempre que valor_usd ou taxa mudar
+      g._ii_aliq     = r.ii_aliq;
+      g._pis_aliq    = r.pis_aliq;
+      g._cofins_aliq = r.cofins_aliq;
+      g._ipi_aliq    = r.ipi_aliq;
       if (r.icms_aliq != null) {
         cabecalho.icms_aliq_estado = r.icms_aliq;
       }
       anuentesByNcm[ncmRaw] = r.anuentes || [];
-      // Atualiza a tabela e mostra anuentes
+
+      const taxa = Number(cabecalho.taxa_cambio) || 0;
+      if (taxa <= 0) {
+        UI.toast('⚠ Preencha a Taxa câmbio para calcular os impostos em R$', 'err');
+        // Mesmo sem taxa, redesenha pra mostrar anuentes e atualizar ICMS
+        drawGruposTable();
+        drawAnuentes();
+        return;
+      }
+      // Calcula valores em R$
+      recalcGrupoFromAliquotas(g);
       drawGruposTable();
       drawAnuentes();
 
-      // Toast com info de match
       const lvl = r.matchLevel === 8 ? 'NCM exato'
                 : r.matchLevel ? `aproximado (${r.matchLevel} dígitos)`
                 : 'não encontrado — usando defaults';
