@@ -216,7 +216,8 @@ function buildSaygoPayload({ sender, to, subject, html, text }) {
 }
 
 // sendMail que NÃO engole erros — usado pelo botão "Testar"
-export async function sendMailStrict({ to, subject, html, text, context, contextId }) {
+// Quando { debug: true }, retorna detalhes da request/response (sem o token)
+export async function sendMailStrict({ to, subject, html, text, context, contextId, payloadVariant }) {
   if (!to) throw new Error('Destinatário vazio');
   const s = await getSettings();
   if (!s.enabled) {
@@ -232,20 +233,53 @@ export async function sendMailStrict({ to, subject, html, text, context, context
     await logEmail({ to, subject, status: 'error', error: err, context, contextId });
     throw new Error(err);
   }
-  const body = buildSaygoPayload({ sender: s.sender, to, subject, html, text });
-  const r = await fetch(s.apiUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-access-token': s.apiToken },
-    body: JSON.stringify(body),
-  });
+  // Variantes do payload pra testar formatos esperados pelo lambda
+  const variant = payloadVariant || 'arrays';
+  let body;
+  if (variant === 'string') {
+    // to/cc/bcc como strings; sem attachments
+    body = {
+      sender: s.sender,
+      to: String(to),
+      subject, html,
+      text: text || stripHtml(html || ''),
+    };
+  } else if (variant === 'minimal') {
+    // formato minimalista, só os essenciais
+    body = {
+      sender: s.sender,
+      to: String(to),
+      subject, html,
+    };
+  } else {
+    // default: arrays
+    body = buildSaygoPayload({ sender: s.sender, to, subject, html, text });
+  }
+
+  console.log('[email] POST', s.apiUrl, '\nbody:', JSON.stringify(body));
+
+  let r, respText;
+  try {
+    r = await fetch(s.apiUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-access-token': s.apiToken },
+      body: JSON.stringify(body),
+    });
+    respText = await r.text().catch(() => '');
+    console.log('[email] response', r.status, respText);
+  } catch (netErr) {
+    console.error('[email] network error', netErr);
+    await logEmail({ to: String(to), subject, status: 'error', error: `Network: ${netErr.message}`, context, contextId });
+    throw new Error(`Network error: ${netErr.message}`);
+  }
+
   if (!r.ok) {
-    const errText = await r.text().catch(() => '');
-    const err = `HTTP ${r.status} ${errText.slice(0, 300)}`;
+    const err = `HTTP ${r.status} | variant=${variant} | resp=${respText.slice(0, 500)}`;
     await logEmail({ to: String(to), subject, status: 'error', error: err, context, contextId });
     throw new Error(err);
   }
   await logEmail({ to: String(to), subject, status: 'sent', context, contextId });
-  return { ok: true };
+  return { ok: true, variant, response: respText.slice(0, 500) };
 }
 
 export async function notifyStageChange({ cardId, fromStage, toStage, byUser }) {

@@ -73,13 +73,13 @@ window.VIEW_parametros = (() => {
           <input type="password" style="display:none" autocomplete="new-password">
           <div class="full">
             <label><strong>ai_provider</strong></label>
-            <select name="provider">
+            <select name="provider" id="ia-provider-select">
               <option value="anthropic" ${s.provider==='anthropic'?'selected':''}>anthropic</option>
               <option value="openai"    ${s.provider==='openai'?'selected':''}>openai</option>
               <option value="gemini"    ${s.provider==='gemini'?'selected':''}>gemini</option>
               <option value="groq"      ${s.provider==='groq'?'selected':''}>groq</option>
             </select>
-            <small class="muted">Provedor de IA (anthropic | openai | gemini | groq).</small>
+            <small class="muted">Provedor de IA. <span id="ia-provider-hint"></span></small>
           </div>
           <div class="full">
             <label><strong>ai_model</strong></label>
@@ -92,8 +92,9 @@ window.VIEW_parametros = (() => {
                 ? `<span class="pill green" style="margin-left:.4rem">✓ key salva${s.updatedAt ? ` em ${UI.fmtDateTime(s.updatedAt)}` : ''}</span>`
                 : '<span class="pill amber" style="margin-left:.4rem">não configurada</span>'}
             </label>
-            <input type="password" name="apiKey" value="" placeholder="${s.hasApiKey?'(deixe em branco para manter a atual)':'cole a API key'}" autocomplete="new-password">
-            <small class="muted">API key do provedor de IA (sensível). Para trocar, digite a nova. Para manter, deixe em branco.</small>
+            <input type="password" id="ia-apikey-input" name="apiKey" value="" placeholder="${s.hasApiKey?'(deixe em branco para manter a atual)':'cole a API key'}" autocomplete="new-password">
+            <small class="muted">API key do provedor (sensível). <span id="ia-apikey-hint"></span></small>
+            <div id="ia-apikey-warn" class="err small" style="display:none;margin-top:4px"></div>
           </div>
           <div class="full">
             <label class="ai-toggle">
@@ -122,16 +123,52 @@ window.VIEW_parametros = (() => {
         <div id="ia-versions"></div>
       </div>`;
 
+    // Dicas e validação dinâmicas: provider × formato esperado de key
+    const PROVIDER_KEY_INFO = {
+      anthropic: { prefix: 'sk-ant-', label: 'Anthropic Claude', example: 'sk-ant-api03-...' },
+      openai:    { prefix: 'sk-',     label: 'OpenAI',           example: 'sk-... ou sk-proj-...' },
+      gemini:    { prefix: 'AIzaSy',  label: 'Google Gemini',    example: 'AIzaSy...' },
+      groq:      { prefix: 'gsk_',    label: 'Groq',             example: 'gsk_...' },
+    };
+    const providerSel = document.getElementById('ia-provider-select');
+    const hintEl = document.getElementById('ia-provider-hint');
+    const keyHintEl = document.getElementById('ia-apikey-hint');
+    const keyWarnEl = document.getElementById('ia-apikey-warn');
+    const keyInput = document.getElementById('ia-apikey-input');
+    const refreshHints = () => {
+      const info = PROVIDER_KEY_INFO[providerSel.value] || PROVIDER_KEY_INFO.anthropic;
+      hintEl.textContent = `(${info.label} — chave começa com "${info.prefix}")`;
+      keyHintEl.textContent = `Formato esperado: ${info.example}`;
+      // Valida key digitada (se houver) contra o prefix do provider
+      const k = (keyInput.value || '').trim();
+      if (k && !k.startsWith(info.prefix)) {
+        keyWarnEl.style.display = 'block';
+        keyWarnEl.textContent = `⚠ Esta key não parece ser do provider "${info.label}" (esperado prefixo "${info.prefix}"). Confira o provider acima.`;
+      } else {
+        keyWarnEl.style.display = 'none';
+      }
+    };
+    providerSel.addEventListener('change', refreshHints);
+    keyInput.addEventListener('input', refreshHints);
+    refreshHints();
+
     document.getElementById('ia-form').onsubmit = async ev => {
       ev.preventDefault();
       const fd = new FormData(ev.target);
       const keyVal = (fd.get('apiKey') || '').trim();
+      const provider = fd.get('provider');
       const data = {
-        provider: fd.get('provider'),
+        provider,
         model:    (fd.get('model') || '').trim(),
         enabled:  !!fd.get('enabled'),
       };
       if (keyVal) data.apiKey = keyVal; // só envia se foi digitada nova; vazio = mantém
+      // Validação client-side: prevent salvar provider+key incompatíveis
+      const info = PROVIDER_KEY_INFO[provider];
+      if (keyVal && info && !keyVal.startsWith(info.prefix)) {
+        const ok = confirm(`A key não parece ser do provider "${info.label}" (esperado começar com "${info.prefix}").\n\nSalvar mesmo assim?`);
+        if (!ok) return;
+      }
       const fb = document.getElementById('ia-feedback');
       fb.innerHTML = '';
       try { await API.put('/api/credit-requests/ai/settings', data); UI.toast('IA salva'); loadIa(); }

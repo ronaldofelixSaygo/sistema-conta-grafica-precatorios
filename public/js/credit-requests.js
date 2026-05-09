@@ -87,10 +87,15 @@ window['VIEW_credit-requests'] = (() => {
   }
 
   function drawManualTab(cliOpts, prefill = {}) {
+    // Pré-seleciona cliente quando vier do tab PDF
+    const preselectedCliId = prefill._clienteId ? String(prefill._clienteId) : '';
+    const cliOptsPicked = preselectedCliId
+      ? cliOpts.replace(`value="${preselectedCliId}"`, `value="${preselectedCliId}" selected`)
+      : cliOpts;
     document.getElementById('cr-wiz-content').innerHTML = `
       <form id="cr-form" class="form-grid">
         <div class="full"><label>Cliente *</label>
-          <select name="clienteId" required><option value="">—</option>${cliOpts}</select>
+          <select name="clienteId" required><option value="">—</option>${cliOptsPicked}</select>
         </div>
         <div><label>NCM *</label><input name="ncm" required value="${UI.escapeHtml(prefill.ncm||'')}"></div>
         <div><label>UF *</label><input name="uf" required value="${UI.escapeHtml(prefill.uf||'AL')}" maxlength="2"></div>
@@ -229,12 +234,31 @@ window['VIEW_credit-requests'] = (() => {
   }
 
   function drawPdfTab(cliOpts) {
+    const role = AUTH.role();
+    // CLIENT: cliente fixo (não escolhe). SAYGO/ADM: select obrigatório.
+    let cliField = '';
+    if (role === 'CLIENT') {
+      const myCli = clientesCache[0];
+      cliField = myCli
+        ? `<input type="hidden" id="cr-pdf-cliente" value="${myCli.id}">
+           <div class="full muted small">Cliente: <strong>${UI.escapeHtml(myCli.nome)}</strong></div>`
+        : '<div class="err">Sem cliente vinculado.</div>';
+    } else {
+      cliField = `
+        <div class="full">
+          <label>Cliente *</label>
+          <select id="cr-pdf-cliente" required>
+            <option value="">— selecione —</option>${cliOpts}
+          </select>
+        </div>`;
+    }
     document.getElementById('cr-wiz-content').innerHTML = `
       <div class="form-grid">
         <div class="full muted small">
           Faça o upload de um PDF de invoice. A IA configurada (Parâmetros → IA) vai ler o documento e preencher os campos automaticamente.
           Depois você revisa, calcula e envia.
         </div>
+        ${cliField}
         <div class="full">
           <label>Arquivo PDF *</label>
           <input type="file" id="cr-pdf-file" accept="application/pdf">
@@ -245,6 +269,9 @@ window['VIEW_credit-requests'] = (() => {
         <div class="full" id="cr-pdf-out"></div>
       </div>`;
     document.getElementById('cr-pdf-go').onclick = async () => {
+      const cliEl = document.getElementById('cr-pdf-cliente');
+      const cliId = cliEl?.value;
+      if (!cliId) return UI.toast('Selecione o cliente', 'err');
       const file = document.getElementById('cr-pdf-file').files[0];
       if (!file) return UI.toast('Selecione um PDF', 'err');
       const out = document.getElementById('cr-pdf-out');
@@ -265,9 +292,9 @@ window['VIEW_credit-requests'] = (() => {
             <button class="btn primary" id="cr-pdf-use">Usar esses dados no formulário</button>
           </div>`;
         document.getElementById('cr-pdf-use').onclick = () => {
-          // volta pro tab manual com prefill
+          // volta pro tab manual com prefill (já com clienteId pré-selecionado)
           document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('primary', x.dataset.tab==='manual'));
-          drawManualTab(cliOpts, j.fields);
+          drawManualTab(cliOpts, { ...j.fields, _clienteId: cliId });
         };
       } catch (e) {
         out.innerHTML = `<div class="err">Erro: ${UI.escapeHtml(e.message)}</div>`;
