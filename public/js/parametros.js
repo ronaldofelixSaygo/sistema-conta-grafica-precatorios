@@ -65,17 +65,45 @@ window.VIEW_parametros = (() => {
         </div>
 
         <div style="border-top:1px solid var(--bd);padding-top:.8rem;margin-top:1rem">
-          <h4 style="margin:0 0 .4rem">📤 Importar TIPI completo (CSV ou XLSX)</h4>
+          <h4 style="margin:0 0 .4rem">📤 Importar dados oficiais</h4>
           <p class="muted small" style="margin-bottom:.6rem">
-            Aceita o XLSX oficial da Receita Federal (TIPI) ou um CSV custom com colunas:
-            <code>ncm, descricao, ii_aliq, ipi_aliq, pis_aliq, cofins_aliq</code>.
-            O sistema detecta as colunas automaticamente. Faça upload pra substituir os ~40 NCMs do dataset starter pelo TIPI completo (~10k linhas).
+            Faça upload de CSV ou XLSX com dados oficiais. Detecta colunas automaticamente.
           </p>
-          <div class="form-actions" style="align-items:center;gap:8px;flex-wrap:wrap">
-            <input type="file" id="ncm-import-file" accept=".csv,.xlsx,.xls,.tsv" style="max-width:300px">
-            <button class="btn primary" id="ncm-import-btn">📤 Importar arquivo</button>
-            <a href="https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/legislacao/documentos-e-arquivos/tipi.xlsx"
-               target="_blank" class="muted small">↗ Baixar TIPI oficial</a>
+
+          <div style="background:var(--s2);padding:.8rem;border-radius:6px;margin-bottom:.6rem">
+            <strong style="font-size:13px">📦 TIPI (IPI por NCM)</strong>
+            <div class="muted small" style="margin:4px 0 8px">
+              Colunas esperadas: <code>ncm, descricao, ipi_aliq</code> (+ pis_aliq, cofins_aliq opcional). Substitui IPI/Descrição mantendo II existente.
+              <a href="https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/legislacao/documentos-e-arquivos/tipi.xlsx" target="_blank">↗ Baixar TIPI oficial</a>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="file" id="ncm-import-tributos-file" accept=".csv,.xlsx,.xls,.tsv" style="max-width:280px">
+              <button class="btn primary" data-import="tributos">Importar TIPI</button>
+            </div>
+          </div>
+
+          <div style="background:var(--s2);padding:.8rem;border-radius:6px;margin-bottom:.6rem">
+            <strong style="font-size:13px">🌎 TEC (II por NCM)</strong>
+            <div class="muted small" style="margin:4px 0 8px">
+              Colunas: <code>ncm, ii_aliq</code> (ou ncm, tec). Atualiza apenas o II (Imposto de Importação) sem mexer em IPI/PIS/COFINS.
+              <a href="https://www.gov.br/siscomex/pt-br/informacoes/tarifa-externa-comum-tec" target="_blank">↗ TEC Mercosul</a>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="file" id="ncm-import-tec-file" accept=".csv,.xlsx,.xls,.tsv" style="max-width:280px">
+              <button class="btn primary" data-import="tec">Importar TEC (II)</button>
+            </div>
+          </div>
+
+          <div style="background:var(--s2);padding:.8rem;border-radius:6px;margin-bottom:.6rem">
+            <strong style="font-size:13px">🏛 Anuentes (Tratamento Administrativo)</strong>
+            <div class="muted small" style="margin:4px 0 8px">
+              Colunas: <code>ncm, anuente, descricao, obrigatorio</code>. ⚠ Substitui completamente a tabela de anuentes.
+              <a href="https://siscomex.desenvolvimento.gov.br/tratamento/" target="_blank">↗ Tratamento Administrativo</a>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input type="file" id="ncm-import-anuentes-file" accept=".csv,.xlsx,.xls,.tsv" style="max-width:280px">
+              <button class="btn primary" data-import="anuentes">Importar Anuentes</button>
+            </div>
           </div>
         </div>
 
@@ -114,29 +142,35 @@ window.VIEW_parametros = (() => {
       }
     };
 
-    document.getElementById('ncm-import-btn').onclick = async () => {
-      const file = document.getElementById('ncm-import-file').files[0];
-      if (!file) return UI.toast('Selecione um arquivo CSV ou XLSX', 'err');
-      const out = document.getElementById('ncm-out');
-      out.innerHTML = '<div class="muted">Importando... isso pode levar até 1 minuto pra o TIPI completo</div>';
-      const fd = new FormData();
-      fd.append('file', file);
-      try {
-        const resp = await fetch('/api/admin/ncm-import', {
-          method: 'POST', credentials: 'include', body: fd,
-        });
-        if (!resp.ok) {
-          const errText = await resp.text();
-          throw new Error(errText || `HTTP ${resp.status}`);
+    // Handler genérico pra os 3 imports
+    document.querySelectorAll('[data-import]').forEach(btn => {
+      btn.onclick = async () => {
+        const modo = btn.dataset.import; // tributos | tec | anuentes
+        const inputId = `ncm-import-${modo}-file`;
+        const file = document.getElementById(inputId)?.files[0];
+        if (!file) return UI.toast('Selecione um arquivo CSV ou XLSX', 'err');
+        const out = document.getElementById('ncm-out');
+        out.innerHTML = `<div class="muted">Importando ${modo}... pode levar até 1 minuto</div>`;
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('modo', modo);
+        try {
+          const resp = await fetch('/api/admin/ncm-import', {
+            method: 'POST', credentials: 'include', body: fd,
+          });
+          if (!resp.ok) {
+            const errText = await resp.text();
+            throw new Error(errText || `HTTP ${resp.status}`);
+          }
+          const r = await resp.json();
+          out.innerHTML = `
+            <div class="pill green">✓ Import (${modo}) concluído</div>
+            <pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px;margin-top:.4rem">${UI.escapeHtml(JSON.stringify(r, null, 2))}</pre>`;
+        } catch (e) {
+          out.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`;
         }
-        const r = await resp.json();
-        out.innerHTML = `
-          <div class="pill green">✓ Importação concluída</div>
-          <pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px;margin-top:.4rem">${UI.escapeHtml(JSON.stringify(r, null, 2))}</pre>`;
-      } catch (e) {
-        out.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`;
-      }
-    };
+      };
+    });
   }
 
   async function refreshNcmCounts() {

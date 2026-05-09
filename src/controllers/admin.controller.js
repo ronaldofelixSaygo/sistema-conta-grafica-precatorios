@@ -31,14 +31,19 @@ export async function wipeMovs(req, res, next) {
 export async function importNcm(req, res, next) {
   try {
     if (!req.file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
+    const modo = req.body?.modo || req.query?.modo || 'tributos';
     const stats = await importNcmFile({
       buffer: req.file.buffer,
       filename: req.file.originalname,
+      modo,
     });
     await logAction({ user: req.user, action: 'IMPORT_NCM', entity: 'admin',
-                      details: JSON.stringify({ importados: stats.importados, ignorados: stats.ignorados }), ip: req.ip });
-    const total = await prisma.ncmTributo.count();
-    res.json({ ok: true, ...stats, totalNoBanco: total });
+                      details: JSON.stringify({ modo, importados: stats.importados, atualizados: stats.atualizados, ignorados: stats.ignorados }), ip: req.ip });
+    const totals = {
+      ncm_tributos: await prisma.ncmTributo.count(),
+      ncm_anuentes: await prisma.ncmAnuente.count(),
+    };
+    res.json({ ok: true, ...stats, totalNoBanco: totals });
   } catch (e) { next(e); }
 }
 
