@@ -1,5 +1,6 @@
 import { migrateFromOldNeon, wipeMovimentacoes } from '../services/dataMigration.service.js';
 import { runNcmSeed, NCM_DATASET_INFO } from '../services/ncmSeed.service.js';
+import { importNcmFile } from '../services/ncmImport.service.js';
 import { prisma } from '../config/prisma.js';
 import { logAction } from '../services/audit.service.js';
 
@@ -24,6 +25,20 @@ export async function wipeMovs(req, res, next) {
     const r = await wipeMovimentacoes();
     await logAction({ user: req.user, action: 'WIPE', entity: 'movimentacao', details: `${r.deleted} excluidas`, ip: req.ip });
     res.json(r);
+  } catch (e) { next(e); }
+}
+
+export async function importNcm(req, res, next) {
+  try {
+    if (!req.file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
+    const stats = await importNcmFile({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+    });
+    await logAction({ user: req.user, action: 'IMPORT_NCM', entity: 'admin',
+                      details: JSON.stringify({ importados: stats.importados, ignorados: stats.ignorados }), ip: req.ip });
+    const total = await prisma.ncmTributo.count();
+    res.json({ ok: true, ...stats, totalNoBanco: total });
   } catch (e) { next(e); }
 }
 

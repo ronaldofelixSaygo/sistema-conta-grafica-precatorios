@@ -30,9 +30,11 @@ const NCMS = [
   { ncm: '850440', descricao: 'Conversores estáticos (UPS, fontes)', ii_aliq: 14, ipi_aliq: 8 },
   { ncm: '8517', descricao: 'Aparelhos para telecomunicações', ii_aliq: 16, ipi_aliq: 5 },
   { ncm: '851712', descricao: 'Telefones celulares', ii_aliq: 16, ipi_aliq: 0 },
-  { ncm: '851762', descricao: 'Equipamentos de transmissão/recepção (radioenlaces, switches)', ii_aliq: 16, ipi_aliq: 5 },
-  { ncm: '85176259', descricao: 'Outros aparelhos para transmissão/recepção', ii_aliq: 16, ipi_aliq: 5 },
-  { ncm: '85176277', descricao: 'Antenas e refletores parabólicos para radioenlace', ii_aliq: 16, ipi_aliq: 5 },
+  { ncm: '851762', descricao: 'Aparelhos para recepção, conversão, transmissão ou regeneração de voz, imagens ou outros dados', ii_aliq: 20, ipi_aliq: 15 },
+  { ncm: '8517625', descricao: 'Outros aparelhos para recepção/transmissão de dados em rede com fio', ii_aliq: 20, ipi_aliq: 15 },
+  { ncm: '85176259', descricao: 'Outros aparelhos para transmissão/recepção em rede com fio (TIPI 2026 ADE 1/2026)', ii_aliq: 20, ipi_aliq: 15 },
+  { ncm: '8517627', descricao: 'Antenas e refletores parabólicos / equipamentos para radioenlace', ii_aliq: 20, ipi_aliq: 15 },
+  { ncm: '85176277', descricao: 'Outras antenas/equipamentos para radioenlace (TIPI 2026)', ii_aliq: 20, ipi_aliq: 15 },
   { ncm: '8528', descricao: 'Monitores e projetores; aparelhos receptores de TV', ii_aliq: 20, ipi_aliq: 15 },
   { ncm: '8543', descricao: 'Máquinas e aparelhos elétricos com função própria', ii_aliq: 14, ipi_aliq: 8 },
   // Capítulo 90 — Instrumentos e aparelhos de medida
@@ -137,20 +139,20 @@ export async function runNcmSeed({ resetAnuentes = true } = {}) {
     out.ufs++;
   }
 
-  // NCMs — upsert (mantém customizações se existirem)
+  // NCMs — upsert com update completo (atualiza alíquotas mesmo se já existir)
   for (const n of NCMS) {
     const ncm = String(n.ncm).replace(/\D/g, '');
+    const data = {
+      descricao: n.descricao,
+      ii_aliq: n.ii_aliq ?? 0,
+      ipi_aliq: n.ipi_aliq ?? 0,
+      pis_aliq: n.pis_aliq ?? 2.1,
+      cofins_aliq: n.cofins_aliq ?? 9.65,
+    };
     await prisma.ncmTributo.upsert({
       where: { ncm },
-      create: {
-        ncm,
-        descricao: n.descricao,
-        ii_aliq: n.ii_aliq ?? 0,
-        ipi_aliq: n.ipi_aliq ?? 0,
-        pis_aliq: n.pis_aliq ?? 2.1,
-        cofins_aliq: n.cofins_aliq ?? 9.65,
-      },
-      update: {}, // não sobrescreve se já existe
+      create: { ncm, ...data },
+      update: data,
     });
     out.ncms++;
   }

@@ -152,9 +152,12 @@ window['VIEW_credit-requests'] = (() => {
           <div><label>ICMS estado (%)</label><input type="number" step="0.01" name="icms_aliq_estado" value="${cabecalho.icms_aliq_estado ?? 18}"></div>
         </div>
 
-        <div style="border-top:1px solid var(--bd);padding-top:.6rem;margin-top:.8rem;display:flex;justify-content:space-between;align-items:center">
+        <div style="border-top:1px solid var(--bd);padding-top:.6rem;margin-top:.8rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
           <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Grupos por NCM</strong>
-          <button type="button" class="btn small" id="cr-add-ncm">+ Adicionar NCM</button>
+          <div style="display:flex;gap:6px">
+            <button type="button" class="btn small" id="cr-recalc-ncm" title="Re-consultar alíquotas atualizadas do dataset">🔄 Atualizar alíquotas</button>
+            <button type="button" class="btn small" id="cr-add-ncm">+ Adicionar NCM</button>
+          </div>
         </div>
         <div id="cr-grupos" style="overflow-x:auto;margin-top:.4rem"></div>
 
@@ -178,6 +181,7 @@ window['VIEW_credit-requests'] = (() => {
 
     drawGruposTable();
     document.getElementById('cr-add-ncm').onclick = () => { grupos.push(emptyGrupo()); drawGruposTable(); };
+    document.getElementById('cr-recalc-ncm').onclick = recalcAllFromBackend;
 
     // captura mudanças no cabeçalho e na tabela
     const form = document.getElementById('cr-form');
@@ -303,6 +307,35 @@ window['VIEW_credit-requests'] = (() => {
 
   // Estado dos anuentes (acumulado por NCM consultado)
   const anuentesByNcm = {}; // { '85176259': [...] }
+
+  // Re-consulta /api/ncm para todos os grupos preenchidos e recalcula tudo
+  async function recalcAllFromBackend() {
+    readGruposFromTable();
+    const uf = (cabecalho.uf || 'AL').toUpperCase();
+    const validGrupos = grupos.filter(g => (g.ncm || '').replace(/\D/g, '').length >= 2);
+    if (!validGrupos.length) return UI.toast('Nenhum NCM preenchido', 'err');
+    let atualizados = 0;
+    // Limpa cache antigo de alíquotas pra forçar refresh
+    for (const g of validGrupos) {
+      const ncmRaw = String(g.ncm).replace(/\D/g, '');
+      try {
+        const r = await API.get(`/api/ncm/${ncmRaw}`, { uf });
+        g._ii_aliq     = r.ii_aliq;
+        g._pis_aliq    = r.pis_aliq;
+        g._cofins_aliq = r.cofins_aliq;
+        g._ipi_aliq    = r.ipi_aliq;
+        if (r.icms_aliq != null) cabecalho.icms_aliq_estado = r.icms_aliq;
+        anuentesByNcm[ncmRaw] = r.anuentes || [];
+        atualizados++;
+      } catch (e) {
+        console.warn('Lookup falhou pra', ncmRaw, e);
+      }
+    }
+    recalcAllGrupos();
+    drawGruposTable();
+    drawAnuentes();
+    UI.toast(`✓ ${atualizados} NCM(s) recalculado(s) com alíquotas atuais`);
+  }
 
   async function lookupNcmRow(idx) {
     readGruposFromTable();

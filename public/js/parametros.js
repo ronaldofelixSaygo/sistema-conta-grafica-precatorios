@@ -60,9 +60,25 @@ window.VIEW_parametros = (() => {
         </p>
         <div id="ncm-counts" class="muted small" style="margin-bottom:1rem">Carregando contagens...</div>
         <div class="form-actions">
-          <button class="btn primary" id="ncm-seed-btn">🌱 Popular dataset (force seed)</button>
+          <button class="btn primary" id="ncm-seed-btn">🌱 Popular dataset (starter ~40)</button>
           <button class="btn" id="ncm-test-btn">🔍 Testar lookup</button>
         </div>
+
+        <div style="border-top:1px solid var(--bd);padding-top:.8rem;margin-top:1rem">
+          <h4 style="margin:0 0 .4rem">📤 Importar TIPI completo (CSV ou XLSX)</h4>
+          <p class="muted small" style="margin-bottom:.6rem">
+            Aceita o XLSX oficial da Receita Federal (TIPI) ou um CSV custom com colunas:
+            <code>ncm, descricao, ii_aliq, ipi_aliq, pis_aliq, cofins_aliq</code>.
+            O sistema detecta as colunas automaticamente. Faça upload pra substituir os ~40 NCMs do dataset starter pelo TIPI completo (~10k linhas).
+          </p>
+          <div class="form-actions" style="align-items:center;gap:8px;flex-wrap:wrap">
+            <input type="file" id="ncm-import-file" accept=".csv,.xlsx,.xls,.tsv" style="max-width:300px">
+            <button class="btn primary" id="ncm-import-btn">📤 Importar arquivo</button>
+            <a href="https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/legislacao/documentos-e-arquivos/tipi.xlsx"
+               target="_blank" class="muted small">↗ Baixar TIPI oficial</a>
+          </div>
+        </div>
+
         <div id="ncm-out" style="margin-top:.6rem"></div>
       </div>`;
 
@@ -93,6 +109,30 @@ window.VIEW_parametros = (() => {
       try {
         const r = await API.get(`/api/ncm/${ncm.replace(/\D/g,'')}`, { uf });
         out.innerHTML = `<pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px">${UI.escapeHtml(JSON.stringify(r, null, 2))}</pre>`;
+      } catch (e) {
+        out.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`;
+      }
+    };
+
+    document.getElementById('ncm-import-btn').onclick = async () => {
+      const file = document.getElementById('ncm-import-file').files[0];
+      if (!file) return UI.toast('Selecione um arquivo CSV ou XLSX', 'err');
+      const out = document.getElementById('ncm-out');
+      out.innerHTML = '<div class="muted">Importando... isso pode levar até 1 minuto pra o TIPI completo</div>';
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const resp = await fetch('/api/admin/ncm-import', {
+          method: 'POST', credentials: 'include', body: fd,
+        });
+        if (!resp.ok) {
+          const errText = await resp.text();
+          throw new Error(errText || `HTTP ${resp.status}`);
+        }
+        const r = await resp.json();
+        out.innerHTML = `
+          <div class="pill green">✓ Importação concluída</div>
+          <pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px;margin-top:.4rem">${UI.escapeHtml(JSON.stringify(r, null, 2))}</pre>`;
       } catch (e) {
         out.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`;
       }
