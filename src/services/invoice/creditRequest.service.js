@@ -5,6 +5,7 @@
 // =====================================================================
 import { prisma } from '../../config/prisma.js';
 import { calcularInvoice } from './taxCalculator.service.js';
+import * as email from '../email.service.js';
 
 // Quem pode CRIAR solicitação: CLIENT (próprio) ou SAYGO/ADM (em nome de qualquer cliente)
 function ensureRequester(user) {
@@ -120,10 +121,12 @@ export async function sendRequest(user, id) {
   if (r.status !== 'DRAFT') {
     const e = new Error('Solicitação não está em rascunho'); e.status = 400; throw e;
   }
-  return prisma.creditRequest.update({
+  const updated = await prisma.creditRequest.update({
     where: { id },
     data: { status: 'SENT', sentAt: new Date() },
   });
+  email.notifyCreditRequest({ requestId: id, event: 'sent', byUser: user }).catch(()=>{});
+  return updated;
 }
 
 // Marca como em andamento — PARTNER ESCRITORIO do escritório alvo (resolvedor)
@@ -176,6 +179,8 @@ export async function resolveRequest(user, id, { note, attachmentName, attachmen
       where: { id: r.clienteId }, data: { clienteCertificado: 'Sim' },
     }).catch(() => {});
   }
+
+  email.notifyCreditRequest({ requestId: id, event: 'resolved', byUser: user }).catch(()=>{});
 
   return updated;
 }

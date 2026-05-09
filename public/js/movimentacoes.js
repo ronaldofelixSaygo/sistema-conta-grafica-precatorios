@@ -11,7 +11,7 @@ window.VIEW_movimentacoes = (() => {
   async function loadEscritorios() {
     if (escritoriosCache) return escritoriosCache;
     try {
-      const list = await API.get('/api/comissoes/escritorios');
+      const list = await API.get('/api/comissoes/escritorios', null, { ttl: 60000 });
       escritoriosCache = (list || []).filter(Boolean);
     } catch { escritoriosCache = []; }
     return escritoriosCache;
@@ -29,7 +29,7 @@ window.VIEW_movimentacoes = (() => {
     const isStaff = AUTH.isStaff();
 
     if (!clientesCache.length) {
-      try { clientesCache = await API.get('/api/clientes'); } catch {}
+      try { clientesCache = await API.get('/api/clientes', null, { ttl: 60000 }); } catch {}
     }
     const escs = isStaff ? await loadEscritorios() : [];
     const cliFilterOpts = clientesCache.map(c =>

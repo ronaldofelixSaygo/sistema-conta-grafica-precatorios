@@ -35,7 +35,7 @@ window.VIEW_parametros = (() => {
       <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem;flex-wrap:wrap">
         <button class="btn ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissões</button>
         <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
-        <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail (briefing diário)</button>
+        <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail</button>
         <button class="btn ${activeTab==='ia'?'primary':''}"          data-tab="ia">IA (extração de invoice)</button>
       </div>
       <div id="param-content"></div>`;
@@ -183,9 +183,17 @@ window.VIEW_parametros = (() => {
   }
   function drawEmail(s, logs) {
     const c = document.getElementById('param-content');
+    const ROLES = ['ADM','SAYGO','PARTNER','CLIENT'];
+    const ROLE_LABELS = { ADM:'Admin', SAYGO:'Saygo', PARTNER:'Interveniente', CLIENT:'Cliente' };
+    const rolesRow = (groupKey, current = []) => `
+      <div class="full" style="display:flex;flex-wrap:wrap;gap:8px;padding-left:1.2rem;margin-top:-2px">
+        ${ROLES.map(r => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:2px 8px;background:var(--s2);border:1px solid var(--bd);border-radius:6px">
+          <input type="checkbox" name="${groupKey}" value="${r}" ${current.includes(r)?'checked':''}> ${ROLE_LABELS[r]}
+        </label>`).join('')}
+      </div>`;
     c.innerHTML = `
       <div class="panel">
-        <h3>📧 Email (briefing diário)</h3>
+        <h3>📧 E-mail</h3>
         <p class="muted small" style="margin-bottom:1rem">
           O sistema dispara e-mails automáticos via API interna Saygo (mesmo padrão do projeto Indicadores Comercial Bitrix).
         </p>
@@ -196,38 +204,55 @@ window.VIEW_parametros = (() => {
               <option value="true"  ${s.enabled?'selected':''}>Sim</option>
               <option value="false" ${!s.enabled?'selected':''}>Não</option>
             </select>
-            <small class="muted">Envio de briefing por email ligado/desligado (true/false).</small>
+            <small class="muted">Envio de e-mail ligado/desligado.</small>
           </div>
 
           <div class="full">
             <label><strong>email_api_url</strong></label>
             <input name="apiUrl" value="${UI.escapeHtml(s.apiUrl||'')}" placeholder="https://fn4lvdgkug.execute-api.sa-east-1.amazonaws.com/v1/send">
-            <small class="muted">URL da API interna Saygo de envio de email.</small>
+            <small class="muted">URL da API interna Saygo de envio de e-mail.</small>
           </div>
 
           <div class="full">
-            <label><strong>email_api_token</strong></label>
-            <input type="password" name="apiToken" value="${s.apiToken==='***'?'***':''}" placeholder="${s.apiToken==='***'?'(token configurado — deixe *** para manter)':'cole o x-access-token'}">
-            <small class="muted">x-access-token da API de email Saygo (obrigatório). Peça à TI.</small>
+            <label><strong>email_api_token</strong> ${s.hasApiToken ? '<span class="pill green" style="margin-left:.4rem">✓ token configurado</span>' : '<span class="pill amber" style="margin-left:.4rem">não configurado</span>'}</label>
+            <input type="password" name="apiToken" value="" placeholder="${s.hasApiToken ? '(deixe em branco para manter o atual)' : 'cole o x-access-token'}" autocomplete="new-password">
+            <small class="muted">x-access-token da API de e-mail Saygo. Para trocar, digite o novo. Para manter, deixe em branco.</small>
           </div>
 
           <div class="full">
             <label><strong>email_sender</strong></label>
             <input name="sender" value="${UI.escapeHtml(s.sender||'')}" placeholder="ronaldo.felix@saygogroup.com.br">
-            <small class="muted">Remetente do email (campo "sender" da API Saygo).</small>
+            <small class="muted">Remetente do e-mail (campo "sender" da API Saygo).</small>
+          </div>
+
+          <div class="full">
+            <label><strong>email_briefing_recipients</strong></label>
+            <textarea name="briefingRecipients" rows="2" placeholder="ronaldo.felix@saygogroup.com.br; outro@exemplo.com">${UI.escapeHtml(s.briefingRecipients||'')}</textarea>
+            <small class="muted">Lista fixa de destinatários para briefing diário. Separe por ; ou , .</small>
           </div>
 
           <div class="full" style="border-top:1px solid var(--bd);padding-top:.6rem;margin-top:.4rem">
-            <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Quando enviar</strong>
+            <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Triggers de notificação</strong>
+            <div class="muted small" style="margin-top:.2rem">Marque os perfis que devem receber cada tipo de alerta.</div>
           </div>
-          <div class="full"><label><input type="checkbox" name="notifyKanbanStageChange" ${s.notifyKanbanStageChange?'checked':''}> Mudança de etapa no Kanban</label></div>
-          <div class="full"><label><input type="checkbox" name="notifyKanbanStageDone"   ${s.notifyKanbanStageDone?'checked':''}> Conclusão de etapa no Kanban</label></div>
-          <div class="full"><label><input type="checkbox" name="notifyPartnerRequest"    ${s.notifyPartnerRequest?'checked':''}> Nova solicitação (acionamento)</label></div>
+
+          <div class="full"><label><input type="checkbox" name="notifyKanbanStageChange" ${s.notifyKanbanStageChange?'checked':''}> <strong>Mudança de etapa no Kanban</strong></label></div>
+          ${rolesRow('notifyKanbanStageChangeRoles', s.notifyKanbanStageChangeRoles||[])}
+
+          <div class="full"><label><input type="checkbox" name="notifyKanbanStageDone" ${s.notifyKanbanStageDone?'checked':''}> <strong>Conclusão de etapa no Kanban</strong></label></div>
+          ${rolesRow('notifyKanbanStageDoneRoles', s.notifyKanbanStageDoneRoles||[])}
+
+          <div class="full"><label><input type="checkbox" name="notifyPartnerRequest" ${s.notifyPartnerRequest?'checked':''}> <strong>Acionamento de interveniente</strong></label></div>
+          ${rolesRow('notifyPartnerRequestRoles', s.notifyPartnerRequestRoles||[])}
+
+          <div class="full"><label><input type="checkbox" name="notifyCreditRequest" ${s.notifyCreditRequest?'checked':''}> <strong>Solicitação de Créditos</strong></label></div>
+          ${rolesRow('notifyCreditRequestRoles', s.notifyCreditRequestRoles||[])}
 
           <div class="full form-actions">
             <button type="button" class="btn" id="email-test">Enviar e-mail de teste</button>
             <button type="submit" class="btn primary">Salvar</button>
           </div>
+          <div class="full" id="email-feedback"></div>
         </form>
       </div>
 
@@ -251,23 +276,46 @@ window.VIEW_parametros = (() => {
     document.getElementById('email-form').onsubmit = async ev => {
       ev.preventDefault();
       const fd = new FormData(ev.target);
+      // Token: se vazio, NÃO envia (mantém o atual). Se preenchido, envia o novo.
+      const tokenVal = (fd.get('apiToken') || '').trim();
       const data = {
         enabled: fd.get('enabled') === 'true',
-        apiUrl:   fd.get('apiUrl'),
-        apiToken: fd.get('apiToken'),
-        sender:   fd.get('sender'),
+        apiUrl:   fd.get('apiUrl') || '',
+        sender:   fd.get('sender') || '',
+        briefingRecipients: fd.get('briefingRecipients') || '',
         notifyKanbanStageChange: !!fd.get('notifyKanbanStageChange'),
         notifyKanbanStageDone:   !!fd.get('notifyKanbanStageDone'),
         notifyPartnerRequest:    !!fd.get('notifyPartnerRequest'),
+        notifyCreditRequest:     !!fd.get('notifyCreditRequest'),
+        notifyKanbanStageChangeRoles: fd.getAll('notifyKanbanStageChangeRoles'),
+        notifyKanbanStageDoneRoles:   fd.getAll('notifyKanbanStageDoneRoles'),
+        notifyPartnerRequestRoles:    fd.getAll('notifyPartnerRequestRoles'),
+        notifyCreditRequestRoles:     fd.getAll('notifyCreditRequestRoles'),
       };
+      if (tokenVal) data.apiToken = tokenVal;
+      const fb = document.getElementById('email-feedback');
+      fb.innerHTML = '';
       try { await API.put('/api/email/settings', data); UI.toast('Configuração salva'); loadEmail(); }
-      catch (e) { UI.toast(e.message, 'err'); }
+      catch (e) {
+        UI.toast(e.message, 'err');
+        fb.innerHTML = `<div class="err" style="margin-top:.5rem">Erro ao salvar: ${UI.escapeHtml(e.message)}</div>`;
+      }
     };
     document.getElementById('email-test').onclick = async () => {
       const to = prompt('Enviar e-mail de teste para:', AUTH.user()?.email || '');
       if (!to) return;
-      try { await API.post('/api/email/test', { to }); UI.toast('E-mail enviado (verifique)'); loadEmail(); }
-      catch (e) { UI.toast(e.message, 'err'); }
+      const fb = document.getElementById('email-feedback');
+      fb.innerHTML = '<div class="muted small" style="margin-top:.5rem">Enviando teste...</div>';
+      try {
+        await API.post('/api/email/test', { to });
+        UI.toast('E-mail enviado');
+        fb.innerHTML = `<div class="pill green" style="margin-top:.5rem">✓ Enviado para ${UI.escapeHtml(to)}</div>`;
+        loadEmail();
+      }
+      catch (e) {
+        UI.toast('Falhou — veja detalhes abaixo', 'err');
+        fb.innerHTML = `<div class="err" style="margin-top:.5rem">❌ Erro: ${UI.escapeHtml(e.message)}</div>`;
+      }
     };
   }
 

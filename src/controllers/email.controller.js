@@ -7,9 +7,10 @@ export async function getSettings(req, res, next) {
 }
 export async function updateSettings(req, res, next) {
   try {
-    const r = await svc.updateSettings(req.body || {});
+    await svc.updateSettings(req.body || {});
     await logAction({ user: req.user, action: 'UPDATE', entity: 'email_settings', ip: req.ip });
-    res.json({ ...r, pass: r.pass ? '***' : '' });
+    // Devolve a versão segura (sem token bruto)
+    res.json(await svc.getSettingsSafe());
   } catch (e) { next(e); }
 }
 export async function testMail(req, res, next) {

@@ -11,7 +11,7 @@ window['VIEW_credit-requests'] = (() => {
     try {
       const [list, clientes] = await Promise.all([
         API.get('/api/credit-requests'),
-        API.get('/api/clientes').catch(() => []),
+        API.get('/api/clientes', null, { ttl: 60000 }).catch(() => []),
       ]);
       clientesCache = clientes;
       // Quem CRIA: CLIENT (próprio) ou SAYGO/ADM. PARTNER nunca cria — só resolve.

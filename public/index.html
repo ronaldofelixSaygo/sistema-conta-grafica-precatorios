@@ -4,14 +4,25 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Vision — Conta Gráfica · Saygo</title>
-<link rel="stylesheet" href="/css/styles.css?v=21" />
+<link rel="stylesheet" href="/css/styles.css?v=22" />
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<script>window.ASSETV='21';</script>
+<script>window.ASSETV='22';</script>
 </head>
 <body>
 
+<!-- ─── SPLASH DE BOOT (mostrado enquanto verifica autenticação) ─── -->
+<div id="screen-boot" class="screen">
+  <div class="boot-card">
+    <div class="boot-mark">V</div>
+    <h1>Vision</h1>
+    <p class="muted">Intervenientes Aduaneiros</p>
+    <div class="boot-spinner"></div>
+    <p class="muted small" id="boot-msg">Conectando ao servidor...</p>
+  </div>
+</div>
+
 <!-- ─── LOGIN ────────────────────────────────────────────────────── -->
-<div id="screen-login" class="screen">
+<div id="screen-login" class="screen hidden">
   <div class="login-card">
     <h1>Vision</h1>
     <p class="muted">Intervenientes Aduaneiros</p>
@@ -117,28 +128,28 @@
 <!-- toast -->
 <div id="toast" class="toast"></div>
 
-<script src="/js/api.js?v=21"></script>
-<script src="/js/ui.js?v=21"></script>
-<script src="/js/mask.js?v=21"></script>
-<script src="/js/viewer.js?v=21"></script>
-<script src="/js/auth.js?v=21"></script>
-<script src="/js/dashboard.js?v=21"></script>
-<script src="/js/clientes.js?v=21"></script>
-<script src="/js/movimentacoes.js?v=21"></script>
-<script src="/js/saldos.js?v=21"></script>
-<script src="/js/comissoes.js?v=21"></script>
-<script src="/js/relatorios.js?v=21"></script>
-<script src="/js/alertas.js?v=21"></script>
-<script src="/js/usuarios.js?v=21"></script>
-<script src="/js/auditoria.js?v=21"></script>
-<script src="/js/kanban.js?v=21"></script>
-<script src="/js/acionamentos.js?v=21"></script>
-<script src="/js/credit-requests.js?v=21"></script>
-<script src="/js/parceiros.js?v=21"></script>
-<script src="/js/parametros.js?v=21"></script>
-<script src="/js/admin.js?v=21"></script>
-<script src="/js/theme.js?v=21"></script>
-<script src="/js/chat.js?v=21"></script>
-<script src="/js/app.js?v=21"></script>
+<script src="/js/api.js?v=22"></script>
+<script src="/js/ui.js?v=22"></script>
+<script src="/js/mask.js?v=22"></script>
+<script src="/js/viewer.js?v=22"></script>
+<script src="/js/auth.js?v=22"></script>
+<script src="/js/dashboard.js?v=22"></script>
+<script src="/js/clientes.js?v=22"></script>
+<script src="/js/movimentacoes.js?v=22"></script>
+<script src="/js/saldos.js?v=22"></script>
+<script src="/js/comissoes.js?v=22"></script>
+<script src="/js/relatorios.js?v=22"></script>
+<script src="/js/alertas.js?v=22"></script>
+<script src="/js/usuarios.js?v=22"></script>
+<script src="/js/auditoria.js?v=22"></script>
+<script src="/js/kanban.js?v=22"></script>
+<script src="/js/acionamentos.js?v=22"></script>
+<script src="/js/credit-requests.js?v=22"></script>
+<script src="/js/parceiros.js?v=22"></script>
+<script src="/js/parametros.js?v=22"></script>
+<script src="/js/admin.js?v=22"></script>
+<script src="/js/theme.js?v=22"></script>
+<script src="/js/chat.js?v=22"></script>
+<script src="/js/app.js?v=22"></script>
 </body>
 </html>

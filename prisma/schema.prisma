@@ -476,6 +476,17 @@ model EmailSettings {
   notifyKanbanStageChange  Boolean @default(true)
   notifyKanbanStageDone    Boolean @default(true)
   notifyPartnerRequest     Boolean @default(true)
+  notifyCreditRequest      Boolean @default(true)
+
+  // Quais perfis recebem cada tipo de notificação (array de roles: ADM, SAYGO, PARTNER, CLIENT)
+  notifyKanbanStageChangeRoles Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\",\"CLIENT\"]")
+  notifyKanbanStageDoneRoles   Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\",\"CLIENT\"]")
+  notifyPartnerRequestRoles    Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\"]")
+  notifyCreditRequestRoles     Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\"]")
+
+  // Lista fixa de e-mails que recebem briefing diário (separados por ; ou ,)
+  briefingRecipients String? @db.Text
+
   updatedAt   DateTime @updatedAt
 
   @@map("email_settings")

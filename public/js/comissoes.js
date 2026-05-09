@@ -5,7 +5,7 @@ window.VIEW_comissoes = (() => {
   async function loadEscritorios() {
     if (escritoriosCache) return escritoriosCache;
     try {
-      const list = await API.get('/api/comissoes/escritorios');
+      const list = await API.get('/api/comissoes/escritorios', null, { ttl: 60000 });
       escritoriosCache = (list || []).filter(Boolean);
       return escritoriosCache;
     } catch { escritoriosCache = []; return []; }

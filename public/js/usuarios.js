@@ -14,8 +14,8 @@ window.VIEW_usuarios = (() => {
     try {
       [users, clientes, parceiros] = await Promise.all([
         API.get('/api/users'),
-        API.get('/api/clientes').catch(() => []),
-        API.get('/api/parceiros').catch(() => []),
+        API.get('/api/clientes', null, { ttl: 60000 }).catch(() => []),
+        API.get('/api/parceiros', null, { ttl: 60000 }).catch(() => []),
       ]);
       el.innerHTML = `
         <div class="page-toolbar">

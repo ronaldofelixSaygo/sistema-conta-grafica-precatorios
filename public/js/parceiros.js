@@ -6,8 +6,8 @@ window.VIEW_parceiros = (() => {
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
       [cache, stagesMeta] = await Promise.all([
-        API.get('/api/parceiros'),
-        API.get('/api/kanban/meta'),
+        API.get('/api/parceiros', null, { ttl: 60000 }),
+        API.get('/api/kanban/meta', null, { ttl: 120000 }),
       ]);
       el.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">

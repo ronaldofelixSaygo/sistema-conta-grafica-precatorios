@@ -8,13 +8,13 @@ window.VIEW_kanban = (() => {
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
       [meta, cards] = await Promise.all([
-        API.get('/api/kanban/meta'),
+        API.get('/api/kanban/meta', null, { ttl: 120000 }),
         API.get('/api/kanban/cards'),
       ]);
       if (!clientesCache.length) {
-        try { clientesCache = await API.get('/api/clientes'); } catch {}
+        try { clientesCache = await API.get('/api/clientes', null, { ttl: 60000 }); } catch {}
       }
-      try { parceirosCache = await API.get('/api/parceiros'); } catch { parceirosCache = []; }
+      try { parceirosCache = await API.get('/api/parceiros', null, { ttl: 60000 }); } catch { parceirosCache = []; }
       drawBoard();
     } catch (e) { el.innerHTML = `<div class="err">${e.message}</div>`; }
   }

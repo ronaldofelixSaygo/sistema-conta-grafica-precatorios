@@ -16,7 +16,7 @@ window.VIEW_clientes = (() => {
     const el = document.getElementById('view-clientes');
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
-      cache = await API.get('/api/clientes');
+      cache = await API.get('/api/clientes', null, { ttl: 30000 });
       // Se for CLIENT, mostra tela de detalhe (vê apenas o seu cliente)
       if (AUTH.role() === 'CLIENT') return renderClientDetail(cache[0]);
       return renderList();
@@ -69,6 +69,7 @@ window.VIEW_clientes = (() => {
     `;
   }
 
+  const CACHE_TTL = 60_000; // 60s
   // ===== LISTA (Saygo / Adm / Parceiro Escritorio) =====
   function renderList() {
     const el = document.getElementById('view-clientes');

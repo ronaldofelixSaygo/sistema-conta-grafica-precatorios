@@ -7,7 +7,7 @@ window.VIEW_acionamentos = (() => {
     try {
       const [reqs, clientes] = await Promise.all([
         API.get('/api/partner-requests'),
-        API.get('/api/clientes').catch(() => []),
+        API.get('/api/clientes', null, { ttl: 60000 }).catch(() => []),
       ]);
       clientesCache = clientes;
       const me = AUTH.user();

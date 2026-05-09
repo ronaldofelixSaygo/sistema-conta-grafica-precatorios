@@ -6,7 +6,7 @@ window.VIEW_dashboard = (() => {
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
       if (!clientesCache.length) {
-        try { clientesCache = await API.get('/api/clientes'); } catch {}
+        try { clientesCache = await API.get('/api/clientes', null, { ttl: 60000 }); } catch {}
       }
       const cliOpts = clientesCache.map(c =>
         `<option value="${c.id}">${UI.escapeHtml(c.nome)}</option>`).join('');

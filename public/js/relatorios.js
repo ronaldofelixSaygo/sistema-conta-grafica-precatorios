@@ -9,7 +9,7 @@ window.VIEW_relatorios = (() => {
   async function render() {
     const el = document.getElementById('view-relatorios');
     if (!clientesCache.length) {
-      try { clientesCache = await API.get('/api/clientes'); } catch {}
+      try { clientesCache = await API.get('/api/clientes', null, { ttl: 60000 }); } catch {}
     }
     const cliOpts = clientesCache.map(c =>
       `<option value="${c.id}">${UI.escapeHtml(c.nome)}${c.escritorio?` — ${UI.escapeHtml(c.escritorio)}`:''}</option>`).join('');
