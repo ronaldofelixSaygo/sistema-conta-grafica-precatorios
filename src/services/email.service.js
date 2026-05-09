@@ -74,42 +74,33 @@ async function logEmail({ to, subject, status, error, context, contextId }) {
   } catch {}
 }
 
-// Envia e-mail via API Saygo
+// Envia e-mail via API Saygo (não-strict — engole erros e loga)
 export async function sendMail({ to, subject, html, text, context, contextId }) {
   if (!to) return;
   try {
     const s = await getSettings();
     if (!s.enabled) {
-      await logEmail({ to, subject, status: 'error', error: 'E-mail desabilitado', context, contextId });
+      await logEmail({ to: String(to), subject, status: 'error', error: 'E-mail desabilitado', context, contextId });
       return;
     }
     if (!s.apiUrl || !s.apiToken || !s.sender) {
-      await logEmail({ to, subject, status: 'error', error: 'API de e-mail não configurada (apiUrl/apiToken/sender)', context, contextId });
+      await logEmail({ to: String(to), subject, status: 'error', error: 'API de e-mail não configurada (apiUrl/apiToken/sender)', context, contextId });
       return;
     }
-    const body = {
-      sender: s.sender,
-      to,
-      subject,
-      html,
-      text: text || stripHtml(html || ''),
-    };
+    const body = buildSaygoPayload({ sender: s.sender, to, subject, html, text });
     const r = await fetch(s.apiUrl, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-access-token': s.apiToken,
-      },
+      headers: { 'content-type': 'application/json', 'x-access-token': s.apiToken },
       body: JSON.stringify(body),
     });
     if (!r.ok) {
       const errText = await r.text().catch(() => '');
       throw new Error(`HTTP ${r.status} ${errText.slice(0, 200)}`);
     }
-    await logEmail({ to, subject, status: 'sent', context, contextId });
+    await logEmail({ to: String(to), subject, status: 'sent', context, contextId });
   } catch (e) {
     console.error('[email] erro:', e.message);
-    await logEmail({ to, subject, status: 'error', error: e.message, context, contextId });
+    await logEmail({ to: String(to), subject, status: 'error', error: e.message, context, contextId });
   }
 }
 
@@ -208,6 +199,22 @@ async function recipientsForCliente(clienteId, allowedRoles = ['ADM','SAYGO','PA
   return [...emails];
 }
 
+// Normaliza o payload pra API Saygo aceitando ambos formatos (string ou array de e-mails).
+// O lambda espera `to`/`cc`/`bcc` como arrays e `attachments` como array (mesmo vazio).
+function buildSaygoPayload({ sender, to, subject, html, text }) {
+  const toArr = Array.isArray(to) ? to : String(to || '').split(/[;,]/).map(s => s.trim()).filter(Boolean);
+  return {
+    sender,
+    to: toArr,
+    cc: [],
+    bcc: [],
+    subject,
+    html,
+    text: text || stripHtml(html || ''),
+    attachments: [],
+  };
+}
+
 // sendMail que NÃO engole erros — usado pelo botão "Testar"
 export async function sendMailStrict({ to, subject, html, text, context, contextId }) {
   if (!to) throw new Error('Destinatário vazio');
@@ -225,7 +232,7 @@ export async function sendMailStrict({ to, subject, html, text, context, context
     await logEmail({ to, subject, status: 'error', error: err, context, contextId });
     throw new Error(err);
   }
-  const body = { sender: s.sender, to, subject, html, text: text || stripHtml(html || '') };
+  const body = buildSaygoPayload({ sender: s.sender, to, subject, html, text });
   const r = await fetch(s.apiUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-access-token': s.apiToken },
@@ -234,10 +241,10 @@ export async function sendMailStrict({ to, subject, html, text, context, context
   if (!r.ok) {
     const errText = await r.text().catch(() => '');
     const err = `HTTP ${r.status} ${errText.slice(0, 300)}`;
-    await logEmail({ to, subject, status: 'error', error: err, context, contextId });
+    await logEmail({ to: String(to), subject, status: 'error', error: err, context, contextId });
     throw new Error(err);
   }
-  await logEmail({ to, subject, status: 'sent', context, contextId });
+  await logEmail({ to: String(to), subject, status: 'sent', context, contextId });
   return { ok: true };
 }
 

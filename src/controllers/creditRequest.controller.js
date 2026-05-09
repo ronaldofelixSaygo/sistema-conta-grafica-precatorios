@@ -13,6 +13,7 @@ export async function getSettings(_req, res, next) {
       systemPrompt: s?.systemPrompt || '',
       enabled: !!s?.enabled,
       hasApiKey: !!(s?.apiKey),
+      updatedAt: s?.updatedAt || null,
     });
   } catch (e) { next(e); }
 }

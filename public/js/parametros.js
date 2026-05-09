@@ -68,7 +68,9 @@ window.VIEW_parametros = (() => {
           Provedor de IA usado para ler PDFs de invoice e extrair os dados de cálculo.
           Mesmo padrão multi-provider do projeto Indicadores Comercial Bitrix.
         </p>
-        <form id="ia-form" class="form-grid">
+        <form id="ia-form" class="form-grid" autocomplete="off">
+          <input type="text" style="display:none" autocomplete="username">
+          <input type="password" style="display:none" autocomplete="new-password">
           <div class="full">
             <label><strong>ai_provider</strong></label>
             <select name="provider">
@@ -81,19 +83,29 @@ window.VIEW_parametros = (() => {
           </div>
           <div class="full">
             <label><strong>ai_model</strong></label>
-            <input name="model" value="${UI.escapeHtml(s.model||'')}" placeholder="ex: claude-sonnet-4-5, gpt-4o-mini, gemini-2.5-flash, llama-3.3-70b-versatile">
+            <input name="model" value="${UI.escapeHtml(s.model||'')}" placeholder="ex: claude-sonnet-4-5, gpt-4o-mini, gemini-2.5-flash, llama-3.3-70b-versatile" autocomplete="off">
             <small class="muted">Modelo (vazio = padrão do provider).</small>
           </div>
           <div class="full">
-            <label><strong>ai_api_key</strong></label>
-            <input type="password" name="apiKey" value="${s.hasApiKey?'***':''}" placeholder="${s.hasApiKey?'(key configurada — deixe *** para manter)':'cole a API key'}">
-            <small class="muted">API key do provedor de IA (sensível).</small>
+            <label><strong>ai_api_key</strong>
+              ${s.hasApiKey
+                ? `<span class="pill green" style="margin-left:.4rem">✓ key salva${s.updatedAt ? ` em ${UI.fmtDateTime(s.updatedAt)}` : ''}</span>`
+                : '<span class="pill amber" style="margin-left:.4rem">não configurada</span>'}
+            </label>
+            <input type="password" name="apiKey" value="" placeholder="${s.hasApiKey?'(deixe em branco para manter a atual)':'cole a API key'}" autocomplete="new-password">
+            <small class="muted">API key do provedor de IA (sensível). Para trocar, digite a nova. Para manter, deixe em branco.</small>
           </div>
-          <div class="full"><label><input type="checkbox" name="enabled" ${s.enabled?'checked':''}> Ativar IA</label></div>
+          <div class="full">
+            <label class="ai-toggle">
+              <input type="checkbox" name="enabled" ${s.enabled?'checked':''}>
+              <span><strong>Ativar IA</strong></span>
+            </label>
+          </div>
 
           <div class="full form-actions">
             <button type="submit" class="btn primary">Salvar</button>
           </div>
+          <div class="full" id="ia-feedback"></div>
         </form>
       </div>
 
@@ -113,14 +125,20 @@ window.VIEW_parametros = (() => {
     document.getElementById('ia-form').onsubmit = async ev => {
       ev.preventDefault();
       const fd = new FormData(ev.target);
+      const keyVal = (fd.get('apiKey') || '').trim();
       const data = {
         provider: fd.get('provider'),
-        model:    fd.get('model'),
-        apiKey:   fd.get('apiKey'),
+        model:    (fd.get('model') || '').trim(),
         enabled:  !!fd.get('enabled'),
       };
+      if (keyVal) data.apiKey = keyVal; // só envia se foi digitada nova; vazio = mantém
+      const fb = document.getElementById('ia-feedback');
+      fb.innerHTML = '';
       try { await API.put('/api/credit-requests/ai/settings', data); UI.toast('IA salva'); loadIa(); }
-      catch (e) { UI.toast(e.message, 'err'); }
+      catch (e) {
+        UI.toast(e.message, 'err');
+        fb.innerHTML = `<div class="err" style="margin-top:.5rem">Erro ao salvar: ${UI.escapeHtml(e.message)}</div>`;
+      }
     };
 
     drawPromptEditor();
@@ -214,7 +232,11 @@ window.VIEW_parametros = (() => {
           </div>
 
           <div class="full">
-            <label><strong>email_api_token</strong> ${s.hasApiToken ? '<span class="pill green" style="margin-left:.4rem">✓ token configurado</span>' : '<span class="pill amber" style="margin-left:.4rem">não configurado</span>'}</label>
+            <label><strong>email_api_token</strong>
+              ${s.hasApiToken
+                ? `<span class="pill green" style="margin-left:.4rem">✓ token salvo${s.updatedAt ? ` em ${UI.fmtDateTime(s.updatedAt)}` : ''}</span>`
+                : '<span class="pill amber" style="margin-left:.4rem">não configurado</span>'}
+            </label>
             <input type="password" name="apiToken" value="" placeholder="${s.hasApiToken ? '(deixe em branco para manter o atual)' : 'cole o x-access-token'}" autocomplete="new-password">
             <small class="muted">x-access-token da API de e-mail Saygo. Para trocar, digite o novo. Para manter, deixe em branco.</small>
           </div>

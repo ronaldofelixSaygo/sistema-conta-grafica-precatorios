@@ -108,6 +108,10 @@ a{color:inherit;text-decoration:none}
 .boot-spinner{display:inline-block;width:32px;height:32px;border:3px solid var(--bd2);border-top-color:var(--brand);border-radius:50%;animation:bootspin 0.9s linear infinite;margin-bottom:.6rem}
 @keyframes bootspin{to{transform:rotate(360deg)}}
 .view-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4rem;gap:.6rem}
+.ai-toggle{display:inline-flex !important;align-items:center;gap:.5rem;padding:.5rem .8rem;background:var(--s2);border:1px solid var(--bd);border-radius:8px;cursor:pointer;width:fit-content;transition:background .15s}
+.ai-toggle:hover{background:var(--s3)}
+.ai-toggle input[type="checkbox"]{width:18px;height:18px;margin:0;cursor:pointer}
+.ai-toggle span{font-size:13px}
 #screen-login{align-items:center;justify-content:center}
 .login-card{background:var(--s1);border:1px solid var(--bd2);border-radius:14px;padding:2.2rem 2rem;width:360px}
 .login-card h1{font-size:1.25rem;margin-bottom:.2rem}
