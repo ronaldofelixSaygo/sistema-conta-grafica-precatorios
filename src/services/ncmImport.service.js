@@ -43,7 +43,7 @@ function detectColumns(headers, modo) {
     if (!('ncm' in map) && /^(ncm|codigo|cod|sh)$/.test(h)) map.ncm = i;
     if (!('descricao' in map) && /(descric|nomencla|produto|mercador)/.test(h)) map.descricao = i;
     if (!('ipi' in map) && /^(ipi|aliquotaipi|aliqipi)$/.test(h)) map.ipi = i;
-    if (!('ii' in map)  && /(impimport|aliquotaii|^tec$|aliqii|^ii$|impostoimportac)/.test(h)) map.ii = i;
+    if (!('ii' in map)  && /(impimport|aliquotaii|^tec$|aliqii|iialiq|^ii$|impostoimportac)/.test(h)) map.ii = i;
     if (!('pis' in map) && /^(pis|aliquotapis)$/.test(h)) map.pis = i;
     if (!('cofins' in map) && /^(cofins|aliquotacofins)$/.test(h)) map.cofins = i;
     if (!('anuente' in map) && /^(anuente|orgao|orgaoanuente|controle|controla|orgaocontrolador)$/.test(h)) map.anuente = i;
@@ -128,7 +128,7 @@ export async function importNcmFile({ buffer, filename, modo = 'tributos' }) {
 
   // tributos | tec → atualiza ncm_tributos
   const lote = [];
-  const BATCH = 200;
+  const BATCH = 500;
   const flushTrib = async () => {
     if (!lote.length) return;
     if (modo === 'tributos') {
@@ -149,16 +149,33 @@ export async function importNcmFile({ buffer, filename, modo = 'tributos' }) {
         }
       }
     } else {
-      // modo TEC → atualiza só ii_aliq (preserva descrição/IPI/PIS/COFINS existentes)
-      for (const d of lote) {
-        try {
-          await prisma.ncmTributo.upsert({
-            where: { ncm: d.ncm },
-            create: { ncm: d.ncm, descricao: '', ii_aliq: d.ii_aliq, ipi_aliq: 0, pis_aliq: 2.1, cofins_aliq: 9.65 },
-            update: { ii_aliq: d.ii_aliq },
-          });
-          stats.atualizados++;
-        } catch (er) { if (stats.erros.length < 20) stats.erros.push(`${d.ncm}: ${er.message}`); }
+      // modo TEC → atualiza só ii_aliq (preserva descrição/IPI/PIS/COFINS existentes).
+      // UPSERT em lote via raw SQL: linha-a-linha estourava o timeout do proxy
+      // (Neon ~80–150 ms × ~10k linhas = vários minutos).
+      try {
+        const placeholders = lote.map((_, i) => `($${i*2+1}, $${i*2+2}::float)`).join(',');
+        const params = lote.flatMap(d => [d.ncm, d.ii_aliq]);
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO ncm_tributos (ncm, descricao, ii_aliq, ipi_aliq, pis_aliq, cofins_aliq, "updatedAt", "createdAt")
+           SELECT v.ncm, '', v.ii, 0, 2.1, 9.65, NOW(), NOW()
+           FROM (VALUES ${placeholders}) AS v(ncm, ii)
+           ON CONFLICT (ncm) DO UPDATE SET ii_aliq = EXCLUDED.ii_aliq, "updatedAt" = NOW()`,
+          ...params
+        );
+        stats.atualizados += lote.length;
+      } catch (er) {
+        if (stats.erros.length < 10) stats.erros.push(`Lote TEC: ${er.message}`);
+        // Fallback linha-a-linha caso o lote falhe
+        for (const d of lote) {
+          try {
+            await prisma.ncmTributo.upsert({
+              where: { ncm: d.ncm },
+              create: { ncm: d.ncm, descricao: '', ii_aliq: d.ii_aliq, ipi_aliq: 0, pis_aliq: 2.1, cofins_aliq: 9.65 },
+              update: { ii_aliq: d.ii_aliq },
+            });
+            stats.atualizados++;
+          } catch (er2) { if (stats.erros.length < 20) stats.erros.push(`${d.ncm}: ${er2.message}`); }
+        }
       }
     }
     lote.length = 0;

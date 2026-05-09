@@ -559,7 +559,17 @@ window['VIEW_credit-requests'] = (() => {
   }
 
   // ---------- Detail ----------
-  function openDetail(r) {
+  async function openDetail(r) {
+    // A listagem omite os campos pesados (result, inputs) por performance.
+    // Se o objeto recebido não trouxer result.total, busca o registro completo.
+    if (!r?.result?.total) {
+      try {
+        const full = await API.get(`/api/credit-requests/${r.id}`);
+        if (full) r = { ...r, ...full };
+      } catch (e) {
+        console.warn('Falha ao carregar detalhes completos:', e.message);
+      }
+    }
     const me = AUTH.user();
     const role = AUTH.role();
     const office = me?.officeName || me?.parceiroNome;
@@ -598,10 +608,11 @@ window['VIEW_credit-requests'] = (() => {
         <table class="table"><tbody>
           <tr><td>Modalidade</td><td>${r.modalidade === 'AL_NF' ? 'Alagoas NF (4%)' : 'Alagoas Dif (1.2%)'}</td></tr>
           <tr><td>Subtotal federal</td><td class="num">${UI.fmtMoney(total.subtotal||0)}</td></tr>
-          <tr><td>Custo atual</td><td class="num">${UI.fmtMoney(total.custo_atual||0)}</td></tr>
-          <tr><td>Custo Alagoas (NF)</td><td class="num">${UI.fmtMoney(total.custo_al_nf||0)}</td></tr>
-          <tr><td><strong>Créditos a comprar</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(r.creditosACompar||0)}</strong></td></tr>
-          <tr><td>Economia</td><td class="num val-pos">${UI.fmtMoney((r.modalidade==='AL_DIF'?total.economia_al_dif:total.economia_al_nf)||0)}</td></tr>
+          <tr><td>Custo atual</td><td class="num">${UI.fmtMoney(total.icms_atual||0)}</td></tr>
+          <tr><td>Custo Alagoas (NF)</td><td class="num">${UI.fmtMoney(total.icms_al_nf||0)}</td></tr>
+          <tr><td><strong>Crédito a comprar</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(r.creditosACompar||0)}</strong></td></tr>
+          <tr><td>Economia</td><td class="num val-pos">${UI.fmtMoney(((total.icms_atual||0) - (r.creditosACompar||0)))}</td></tr>
+          <tr><td><strong>Sugestão de compra (+10%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney((r.creditosACompar||0) * 1.10)}</strong></td></tr>
         </tbody></table>
         ${r.inputPdfName ? `<div class="muted small" style="margin-top:.4rem">📎 PDF original: <a href="/api/credit-requests/${r.id}/pdf" target="_blank">${UI.escapeHtml(r.inputPdfName)}</a></div>` : ''}
       </div>
