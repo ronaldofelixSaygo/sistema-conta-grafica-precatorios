@@ -121,7 +121,9 @@ a{color:inherit;text-decoration:none}
 .sidebar nav a{padding:8px 12px;border-radius:6px;color:var(--sidebar-fg);font-size:13px;opacity:.78}
 .sidebar nav a:hover{background:rgba(255,255,255,.06);opacity:1}
 .sidebar nav a.active{background:var(--brand);color:#fff;opacity:1}
-.sidebar nav a.sub-item{padding-left:24px;font-size:12px;opacity:.65}
+.sidebar nav a.sub-item{padding-left:24px;font-size:12px;opacity:.65;display:none}
+.sidebar nav a.sub-item.expanded,
+.sidebar nav a.sub-item.active{display:block}
 .sidebar nav a.sub-item.active{padding-left:24px}
 .user-box{margin-top:1rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;gap:6px}
 .user-box #me-name{color:#fff;font-weight:600}

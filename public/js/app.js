@@ -30,6 +30,12 @@ window.APP = (() => {
     document.querySelectorAll('.sidebar nav a').forEach(a => {
       a.classList.toggle('active', a.dataset.view === name);
     });
+    // Expande sub-itens cujo pai (data-parent) é a view ativa, ou cujo próprio sub-item é a view ativa
+    document.querySelectorAll('.sidebar nav a.sub-item').forEach(a => {
+      const parent = a.dataset.parent;
+      const expanded = parent === name || a.dataset.view === name;
+      a.classList.toggle('expanded', expanded);
+    });
     const fn = window['VIEW_' + name]?.render;
     if (fn) fn();
   }
