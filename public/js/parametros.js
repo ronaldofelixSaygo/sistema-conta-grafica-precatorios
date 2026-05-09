@@ -37,13 +37,77 @@ window.VIEW_parametros = (() => {
         <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
         <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail</button>
         <button class="btn ${activeTab==='ia'?'primary':''}"          data-tab="ia">IA (extração de invoice)</button>
+        <button class="btn ${activeTab==='ncm'?'primary':''}"         data-tab="ncm">NCM / Anuentes</button>
       </div>
       <div id="param-content"></div>`;
     el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { activeTab = b.dataset.tab; render(); });
     if (activeTab === 'permissoes') return loadPerms();
     if (activeTab === 'email')      return loadEmail();
     if (activeTab === 'ia')         return loadIa();
+    if (activeTab === 'ncm')        return loadNcm();
     return loadStages();
+  }
+
+  // ===== NCM / Anuentes =====
+  async function loadNcm() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = `
+      <div class="panel">
+        <h3>📋 Dataset de NCM, Anuentes e ICMS por UF</h3>
+        <p class="muted small" style="margin-bottom:1rem">
+          O sistema usa um dataset starter com ~40 NCMs comuns + ~46 regras de anuentes (ANATEL, ANVISA, MAPA, INMETRO, IBAMA, ANP, Exército) e alíquota interna de ICMS para 27 UFs.
+          O lookup faz fallback hierárquico (8→6→4→2 dígitos), então um NCM não cadastrado cai na regra do capítulo dele.
+        </p>
+        <div id="ncm-counts" class="muted small" style="margin-bottom:1rem">Carregando contagens...</div>
+        <div class="form-actions">
+          <button class="btn primary" id="ncm-seed-btn">🌱 Popular dataset (force seed)</button>
+          <button class="btn" id="ncm-test-btn">🔍 Testar lookup</button>
+        </div>
+        <div id="ncm-out" style="margin-top:.6rem"></div>
+      </div>`;
+
+    // contagens iniciais
+    refreshNcmCounts();
+
+    document.getElementById('ncm-seed-btn').onclick = async () => {
+      if (!confirm('Popular o dataset de NCM/anuentes/UF? Operação idempotente — não sobrescreve NCMs já editados, mas recria a tabela de anuentes.')) return;
+      const out = document.getElementById('ncm-out');
+      out.innerHTML = '<div class="muted">Populando dataset (até 30s)...</div>';
+      try {
+        const r = await API.post('/api/admin/seed-ncm');
+        out.innerHTML = `
+          <div class="pill green">✓ Dataset populado</div>
+          <pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px;margin-top:.4rem">${UI.escapeHtml(JSON.stringify(r, null, 2))}</pre>`;
+        refreshNcmCounts();
+      } catch (e) {
+        out.innerHTML = `<div class="err">Falhou: ${UI.escapeHtml(e.message)}</div>`;
+      }
+    };
+
+    document.getElementById('ncm-test-btn').onclick = async () => {
+      const ncm = prompt('NCM (ex: 8517.62.59):', '85176259');
+      if (!ncm) return;
+      const uf = prompt('UF (ex: AL):', 'AL') || 'AL';
+      const out = document.getElementById('ncm-out');
+      out.innerHTML = '<div class="muted">Consultando...</div>';
+      try {
+        const r = await API.get(`/api/ncm/${ncm.replace(/\D/g,'')}`, { uf });
+        out.innerHTML = `<pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px">${UI.escapeHtml(JSON.stringify(r, null, 2))}</pre>`;
+      } catch (e) {
+        out.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`;
+      }
+    };
+  }
+
+  async function refreshNcmCounts() {
+    const div = document.getElementById('ncm-counts');
+    if (!div) return;
+    try {
+      const r = await API.get('/api/ncm/00');  // qualquer; só pra forçar conexão
+      div.innerHTML = `Pronto. (Use "Testar lookup" pra consultar um NCM específico.)`;
+    } catch {
+      div.innerHTML = `<span class="err">Erro ao acessar /api/ncm — pode estar com tabelas vazias. Clique em "Popular dataset".</span>`;
+    }
   }
 
   // ===== IA (provider / model / apiKey / systemPrompt + versões do prompt) =====

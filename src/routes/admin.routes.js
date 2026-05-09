@@ -7,4 +7,5 @@ const router = Router();
 router.use(requireAuth, requireAdmin);
 router.post('/migrate-from-old', ctrl.migrateFromOld);
 router.post('/wipe-movs',         ctrl.wipeMovs);
+router.post('/seed-ncm',          ctrl.seedNcm);
 export default router;
