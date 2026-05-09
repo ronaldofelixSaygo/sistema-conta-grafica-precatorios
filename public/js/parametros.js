@@ -1,7 +1,20 @@
 window.VIEW_parametros = (() => {
   let perms = [], permsMeta = null;
   let stages = [];
-  let activeTab = 'permissoes';
+  // Persiste a aba selecionada entre re-renders e re-aberturas de tela
+  const TAB_STORAGE_KEY = 'vision.parametros.activeTab';
+  const VALID_TABS = ['permissoes', 'etapas', 'email', 'ia', 'ncm'];
+  let activeTab = (() => {
+    try {
+      const v = localStorage.getItem(TAB_STORAGE_KEY);
+      return VALID_TABS.includes(v) ? v : 'permissoes';
+    } catch { return 'permissoes'; }
+  })();
+  function setActiveTab(t) {
+    if (!VALID_TABS.includes(t)) return;
+    activeTab = t;
+    try { localStorage.setItem(TAB_STORAGE_KEY, t); } catch {}
+  }
 
   // Mapa de campos disponíveis para "restringir" por entidade.
   // Adicione aqui campos sensíveis que o Adm poderá ocultar para cada perfil.
@@ -40,7 +53,7 @@ window.VIEW_parametros = (() => {
         <button class="btn ${activeTab==='ncm'?'primary':''}"         data-tab="ncm">NCM / Anuentes</button>
       </div>
       <div id="param-content"></div>`;
-    el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { activeTab = b.dataset.tab; render(); });
+    el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { setActiveTab(b.dataset.tab); render(); });
     if (activeTab === 'permissoes') return loadPerms();
     if (activeTab === 'email')      return loadEmail();
     if (activeTab === 'ia')         return loadIa();
