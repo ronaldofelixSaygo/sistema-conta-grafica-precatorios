@@ -71,6 +71,22 @@ export async function updateUser(id, input) {
     if (input.password.length < 6) { const e=new Error('Senha mínima 6 caracteres'); e.status=400; throw e; }
     data.passwordHash = await bcrypt.hash(input.password, 10);
   }
+
+  // Limpa vínculos que não fazem sentido para o role final
+  // (mesmo que o frontend não tenha mandado, garante consistência no banco)
+  let finalRole = data.role;
+  if (finalRole === undefined) {
+    const cur = await prisma.user.findUnique({ where: { id }, select: { role: true } });
+    finalRole = cur?.role;
+  }
+  if (finalRole && finalRole !== 'PARTNER') {
+    data.parceiroId = null;
+    data.officeName = null;
+  }
+  if (finalRole && finalRole !== 'CLIENT') {
+    data.clienteId = null;
+  }
+
   return prisma.user.update({ where: { id }, data, select: userPublicSelect });
 }
 

@@ -104,9 +104,20 @@ window.VIEW_usuarios = (() => {
     const form = document.getElementById('form-us');
     document.getElementById('us-cancel').onclick = UI.closeModal;
     form.role.onchange = (e) => {
-      document.getElementById('row-parceiro').style.display = e.target.value==='PARTNER' ? '' : 'none';
-      document.getElementById('row-office').style.display   = e.target.value==='PARTNER' ? '' : 'none';
-      document.getElementById('row-cliente').style.display  = e.target.value==='CLIENT'  ? '' : 'none';
+      const v = e.target.value;
+      const showPart = v === 'PARTNER';
+      const showCli  = v === 'CLIENT';
+      document.getElementById('row-parceiro').style.display = showPart ? '' : 'none';
+      document.getElementById('row-office').style.display   = showPart ? '' : 'none';
+      document.getElementById('row-cliente').style.display  = showCli  ? '' : 'none';
+      // Zera os valores que não fazem sentido pro novo role (visual)
+      if (!showPart) {
+        const sel = form.querySelector('[name="parceiroId"]'); if (sel) sel.value = '';
+        const off = form.querySelector('[name="officeName"]'); if (off) off.value = '';
+      }
+      if (!showCli) {
+        const cli = form.querySelector('[name="clienteId"]'); if (cli) cli.value = '';
+      }
     };
     form.onsubmit = async (ev) => {
       ev.preventDefault();
@@ -114,6 +125,9 @@ window.VIEW_usuarios = (() => {
       const data = Object.fromEntries(fd.entries());
       data.active = !!fd.get('active');
       if (!data.password) delete data.password;
+      // Garantia client-side: limpa vínculos que não fazem sentido pro role
+      if (data.role !== 'PARTNER') { data.parceiroId = ''; data.officeName = ''; }
+      if (data.role !== 'CLIENT')  { data.clienteId = ''; }
       try {
         if (isNew) await API.post('/api/users', data);
         else       await API.put(`/api/users/${u.id}`, data);

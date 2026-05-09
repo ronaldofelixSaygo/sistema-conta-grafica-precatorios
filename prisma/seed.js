@@ -11,16 +11,40 @@ async function main() {
   const name  = process.env.SEED_ADMIN_NAME || 'Administrador';
 
   const exists = await prisma.user.findUnique({ where: { email } });
-  if (exists) {
+  if (!exists) {
+    const passwordHash = await bcrypt.hash(pwd, 10);
+    const user = await prisma.user.create({
+      data: { email, passwordHash, name, role: 'ADM', active: true },
+    });
+    console.log(`✓ Admin criado:  ${user.email}  (senha: ${pwd})`);
+    console.log(`  ⚠ Altere a senha após o 1º login.`);
+  } else {
     console.log(`✓ Admin já existe: ${email}`);
-    return;
   }
-  const passwordHash = await bcrypt.hash(pwd, 10);
-  const user = await prisma.user.create({
-    data: { email, passwordHash, name, role: 'ADM', active: true },
+
+  // ── Cleanup de inconsistências de vínculo ──
+  // Usuários com role != PARTNER que tenham parceiroId/officeName preenchidos:
+  // limpa os campos pra refletir o role correto.
+  const orphans = await prisma.user.updateMany({
+    where: {
+      role: { in: ['ADM', 'SAYGO', 'CLIENT'] },
+      OR: [
+        { parceiroId: { not: null } },
+        { officeName: { not: null } },
+      ],
+    },
+    data: { parceiroId: null, officeName: null },
   });
-  console.log(`✓ Admin criado:  ${user.email}  (senha: ${pwd})`);
-  console.log(`  ⚠ Altere a senha após o 1º login.`);
+  if (orphans.count > 0) {
+    console.log(`✓ Cleanup: ${orphans.count} usuário(s) tiveram parceiroId/officeName limpos (role != PARTNER)`);
+  }
+  const orphansClient = await prisma.user.updateMany({
+    where: { role: { in: ['ADM', 'SAYGO', 'PARTNER'] }, clienteId: { not: null } },
+    data: { clienteId: null },
+  });
+  if (orphansClient.count > 0) {
+    console.log(`✓ Cleanup: ${orphansClient.count} usuário(s) tiveram clienteId limpo (role != CLIENT)`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); })

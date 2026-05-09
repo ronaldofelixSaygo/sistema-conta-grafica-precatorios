@@ -309,6 +309,7 @@ window.VIEW_parametros = (() => {
 
           <div class="full form-actions">
             <button type="button" class="btn" id="email-test">Enviar e-mail de teste</button>
+            <span style="flex:1"></span>
             <button type="submit" class="btn primary">Salvar</button>
           </div>
           <div class="full" id="email-feedback"></div>
@@ -364,11 +365,12 @@ window.VIEW_parametros = (() => {
       const to = prompt('Enviar e-mail de teste para:', AUTH.user()?.email || '');
       if (!to) return;
       const fb = document.getElementById('email-feedback');
-      fb.innerHTML = '<div class="muted small" style="margin-top:.5rem">Enviando teste...</div>';
+      fb.innerHTML = `<div class="muted small" style="margin-top:.5rem">Enviando teste...</div>`;
       try {
-        await API.post('/api/email/test', { to });
+        const r = await API.post('/api/email/test', { to });
         UI.toast('E-mail enviado');
-        fb.innerHTML = `<div class="pill green" style="margin-top:.5rem">✓ Enviado para ${UI.escapeHtml(to)}</div>`;
+        fb.innerHTML = `<div class="pill green" style="margin-top:.5rem">✓ Enviado para ${UI.escapeHtml(to)}</div>
+          ${r?.response ? `<pre style="background:var(--s2);padding:.5rem;border-radius:6px;font-size:11px;margin-top:.4rem;max-height:120px;overflow:auto">${UI.escapeHtml(r.response)}</pre>` : ''}`;
         loadEmail();
       }
       catch (e) {
@@ -377,6 +379,7 @@ window.VIEW_parametros = (() => {
       }
     };
   }
+
 
 
   // ===== PERMISSOES =====

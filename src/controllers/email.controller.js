@@ -16,8 +16,8 @@ export async function updateSettings(req, res, next) {
 export async function testMail(req, res, next) {
   try {
     const to = req.body?.to || req.user.email;
-    await svc.sendTestMail(to);
-    res.json({ ok: true, to });
+    const r = await svc.sendTestMail(to);
+    res.json({ ok: true, to, ...r });
   } catch (e) { next(e); }
 }
 export async function listLogs(req, res, next) {

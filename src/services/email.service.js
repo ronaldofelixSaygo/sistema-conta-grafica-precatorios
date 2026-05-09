@@ -199,25 +199,24 @@ async function recipientsForCliente(clienteId, allowedRoles = ['ADM','SAYGO','PA
   return [...emails];
 }
 
-// Normaliza o payload pra API Saygo aceitando ambos formatos (string ou array de e-mails).
-// O lambda espera `to`/`cc`/`bcc` como arrays e `attachments` como array (mesmo vazio).
-function buildSaygoPayload({ sender, to, subject, html, text }) {
-  const toArr = Array.isArray(to) ? to : String(to || '').split(/[;,]/).map(s => s.trim()).filter(Boolean);
+// Payload da API interna Saygo (mesmo formato usado no painel-resultados-saygo):
+//   { sender, toRecipients: string[], subject, content }
+// O lambda itera `toRecipients` — por isso estourava `.map() of undefined`
+// quando mandávamos `to` em vez de `toRecipients`.
+function buildSaygoPayload({ sender, to, subject, html /*, text */ }) {
+  const toRecipients = Array.isArray(to)
+    ? to
+    : String(to || '').split(/[;,]/).map(s => s.trim()).filter(Boolean);
   return {
     sender,
-    to: toArr,
-    cc: [],
-    bcc: [],
+    toRecipients,
     subject,
-    html,
-    text: text || stripHtml(html || ''),
-    attachments: [],
+    content: html || '',
   };
 }
 
 // sendMail que NÃO engole erros — usado pelo botão "Testar"
-// Quando { debug: true }, retorna detalhes da request/response (sem o token)
-export async function sendMailStrict({ to, subject, html, text, context, contextId, payloadVariant }) {
+export async function sendMailStrict({ to, subject, html, text, context, contextId }) {
   if (!to) throw new Error('Destinatário vazio');
   const s = await getSettings();
   if (!s.enabled) {
@@ -233,29 +232,7 @@ export async function sendMailStrict({ to, subject, html, text, context, context
     await logEmail({ to, subject, status: 'error', error: err, context, contextId });
     throw new Error(err);
   }
-  // Variantes do payload pra testar formatos esperados pelo lambda
-  const variant = payloadVariant || 'arrays';
-  let body;
-  if (variant === 'string') {
-    // to/cc/bcc como strings; sem attachments
-    body = {
-      sender: s.sender,
-      to: String(to),
-      subject, html,
-      text: text || stripHtml(html || ''),
-    };
-  } else if (variant === 'minimal') {
-    // formato minimalista, só os essenciais
-    body = {
-      sender: s.sender,
-      to: String(to),
-      subject, html,
-    };
-  } else {
-    // default: arrays
-    body = buildSaygoPayload({ sender: s.sender, to, subject, html, text });
-  }
-
+  const body = buildSaygoPayload({ sender: s.sender, to, subject, html, text });
   console.log('[email] POST', s.apiUrl, '\nbody:', JSON.stringify(body));
 
   let r, respText;
@@ -274,12 +251,12 @@ export async function sendMailStrict({ to, subject, html, text, context, context
   }
 
   if (!r.ok) {
-    const err = `HTTP ${r.status} | variant=${variant} | resp=${respText.slice(0, 500)}`;
+    const err = `HTTP ${r.status} ${respText.slice(0, 500)}`;
     await logEmail({ to: String(to), subject, status: 'error', error: err, context, contextId });
     throw new Error(err);
   }
   await logEmail({ to: String(to), subject, status: 'sent', context, contextId });
-  return { ok: true, variant, response: respText.slice(0, 500) };
+  return { ok: true, response: respText.slice(0, 500) };
 }
 
 export async function notifyStageChange({ cardId, fromStage, toStage, byUser }) {
@@ -358,13 +335,13 @@ export async function notifyCreditRequest({ requestId, event = 'sent', byUser })
 
 export async function sendTestMail(to) {
   const tpl = {
-    subject: '[TESTE] Sistema Conta Gráfica',
+    subject: '[TESTE] Vision · Conta Gráfica',
     html: baseTemplate('E-mail de teste', `
       <p>Este é um e-mail de teste do envio do sistema.</p>
       <p>Se você recebeu isso, está tudo configurado certinho!</p>
       <p>Data/hora: ${new Date().toLocaleString('pt-BR')}</p>
     `),
   };
-  // Strict — propaga erro pra UI
   return sendMailStrict({ ...tpl, to, context: 'test' });
 }
+

@@ -7,32 +7,35 @@ import { callAi, extractJson } from './aiClient.service.js';
 
 const DEFAULT_SYSTEM_PROMPT = `Você é um assistente especializado em ler invoices comerciais (commercial invoices) de importação para o Brasil e extrair dados estruturados.
 
-Você receberá o TEXTO BRUTO extraído de um PDF de invoice. Sua tarefa é identificar e retornar os seguintes campos em JSON puro (sem markdown, sem explicações):
+Você receberá o TEXTO BRUTO extraído de um PDF de invoice. Sua tarefa é identificar TODOS os itens (linhas) da invoice e retornar um JSON puro (sem markdown, sem explicações) com a estrutura abaixo:
 
 {
-  "importadorNome": string,         // Nome do importador (Importer / Consignee)
-  "importadorCnpj": string,         // CNPJ do importador
-  "exportadorNome": string,         // Exportador (Shipper / Seller)
-  "exportadorPais": string,         // País do exportador
-  "ncm": string,                    // NCM principal (ou descrição da mercadoria)
-  "uf": string,                     // UF de desembaraço (default "AL" se não claro)
-  "vmle_usd": number,               // Valor FOB em USD (mercadoria)
-  "frete_usd": number,              // Frete internacional em USD (0 se não houver)
-  "seguro_usd": number,             // Seguro em USD (0 se não houver)
-  "taxa_cambio": number,            // Taxa de câmbio R$/USD (use o valor do dia se o documento não trouxer; null se desconhecido)
-  "ii_aliq": number,                // Alíquota II (%) — pode estimar pelo NCM se necessário
-  "ipi_aliq": number,               // Alíquota IPI (%) — 0 se não tributado
-  "pis_aliq": number,               // Alíquota PIS (%) — usar 2.1 se padrão
-  "cofins_aliq": number,            // Alíquota Cofins (%) — usar 9.65 se padrão
-  "icms_aliq_estado": number        // Alíquota ICMS do estado de desembaraço (%)
+  "importadorNome": string | null,
+  "importadorCnpj": string | null,
+  "exportadorNome": string | null,
+  "exportadorPais": string | null,
+  "uf": string,                     // UF de desembaraço (default "AL")
+  "taxa_cambio": number | null,     // R$/USD do dia (null se não constar)
+  "frete_usd_total": number,        // frete internacional total em USD (0 se EXW/sem frete)
+  "seguro_usd_total": number,       // seguro total em USD (0 se não houver)
+  "items": [                        // ⚠ UMA ENTRADA POR LINHA da invoice
+    {
+      "ncm": string,                // NCM com pontuação (ex.: "8517.62.59")
+      "descricao": string,          // descrição/nome do produto (Part No. + descrição)
+      "quantidade": number,
+      "unit_price_usd": number,     // preço unitário USD
+      "extension_usd": number       // total da linha (qtd × unit_price)
+    }
+  ]
 }
 
 REGRAS:
-- Retorne APENAS o JSON, sem markdown, sem texto antes ou depois.
-- Se um campo não aparece no documento, use null (em vez de adivinhar).
-- Para valores monetários, use ponto decimal (1234.56), nunca vírgula.
-- Para alíquotas, retorne apenas o número (ex: 12 para 12%, não "12%").
-- Confira que vmle_usd > 0; se zero, retorne null.`;
+- Liste TODAS as linhas de produto, mesmo que tenham o mesmo NCM. O sistema agrupa depois.
+- Não some/agregue items aqui — devolva linha-a-linha como aparecem.
+- Use ponto decimal (1234.56), nunca vírgula.
+- Se um campo não aparece, use null (em vez de adivinhar).
+- Não devolva alíquotas — o usuário preenche II/IPI/PIS/Cofins por NCM no formulário.
+- Retorne APENAS o JSON, sem markdown, sem texto antes ou depois.`;
 
 export async function getActivePromptText() {
   // 1) tenta versão ativa do prompt customizado
@@ -156,27 +159,55 @@ export async function analyzeInvoicePdf(buffer) {
     const e = new Error('IA respondeu em formato inesperado. Texto: ' + text.slice(0, 300)); e.status = 502; throw e;
   }
 
-  // Converte chaves alternativas que a IA pode mandar
-  const norm = {
+  // Suporta tanto o NOVO formato (com items[]) quanto o legado (campos flat)
+  const items = Array.isArray(parsed.items) ? parsed.items : null;
+  const cabecalho = {
     importadorNome: parsed.importadorNome ?? parsed.importador_nome ?? '',
     importadorCnpj: parsed.importadorCnpj ?? parsed.importador_cnpj ?? '',
     exportadorNome: parsed.exportadorNome ?? parsed.exportador_nome ?? '',
     exportadorPais: parsed.exportadorPais ?? parsed.exportador_pais ?? '',
-    ncm: parsed.ncm ?? '',
-    uf: parsed.uf ?? '',
-    vmle_usd: parsed.vmle_usd ?? null,
-    frete_usd: parsed.frete_usd ?? 0,
-    seguro_usd: parsed.seguro_usd ?? 0,
+    uf: parsed.uf ?? 'AL',
     taxa_cambio: parsed.taxa_cambio ?? null,
-    ii_aliq: parsed.ii_aliq ?? null,
-    ipi_aliq: parsed.ipi_aliq ?? 0,
-    pis_aliq: parsed.pis_aliq ?? 2.1,
-    cofins_aliq: parsed.cofins_aliq ?? 9.65,
-    icms_aliq_estado: parsed.icms_aliq_estado ?? null,
+    frete_usd_total: Number(parsed.frete_usd_total ?? parsed.frete_usd ?? 0),
+    seguro_usd_total: Number(parsed.seguro_usd_total ?? parsed.seguro_usd ?? 0),
   };
 
+  // Agrupa items por NCM (canonicaliza removendo pontos pra comparar, mas guarda original)
+  let ncmGroups = [];
+  if (items) {
+    const map = new Map();
+    for (const it of items) {
+      const ncm = String(it.ncm || '').trim();
+      if (!ncm) continue;
+      const key = ncm.replace(/\D/g, '');
+      const cur = map.get(key) || { ncm, items: [], extension_usd_total: 0, quantidade_total: 0 };
+      cur.items.push({
+        descricao: it.descricao || '',
+        quantidade: Number(it.quantidade) || 0,
+        unit_price_usd: Number(it.unit_price_usd) || 0,
+        extension_usd: Number(it.extension_usd) || 0,
+      });
+      cur.extension_usd_total += Number(it.extension_usd) || 0;
+      cur.quantidade_total += Number(it.quantidade) || 0;
+      map.set(key, cur);
+    }
+    ncmGroups = [...map.values()];
+  } else if (parsed.ncm && (parsed.vmle_usd ?? 0) > 0) {
+    // Legado: 1 NCM + valor total único
+    ncmGroups = [{
+      ncm: String(parsed.ncm),
+      items: [{ descricao: '', quantidade: 1, unit_price_usd: Number(parsed.vmle_usd), extension_usd: Number(parsed.vmle_usd) }],
+      extension_usd_total: Number(parsed.vmle_usd),
+      quantidade_total: 1,
+    }];
+  }
+
   const promptVersion = await getActivePromptVersionNumber();
-  return { fields: norm, raw: parsed, promptVersion };
+  return {
+    fields: { ...cabecalho, ncmGroups, itemsRaw: items || [] },
+    raw: parsed,
+    promptVersion,
+  };
 }
 
 export { DEFAULT_SYSTEM_PROMPT };

@@ -1,8 +1,10 @@
 // =====================================================================
-// Solicitação de Créditos — simulador de invoice (manual + PDF/IA)
+// Solicitação de Créditos — multi-NCM (manual + PDF/IA)
 // =====================================================================
 window['VIEW_credit-requests'] = (() => {
   let clientesCache = [];
+  let cabecalho = {};
+  let grupos = [];   // [{ ncm, valor_usd, acrescimo_usd, frete_usd, outros_usd, ii, pis, cofins, ipi, siscomex, afrmm, antidumping }]
   let lastCalc = null;
 
   async function render() {
@@ -14,7 +16,6 @@ window['VIEW_credit-requests'] = (() => {
         API.get('/api/clientes', null, { ttl: 60000 }).catch(() => []),
       ]);
       clientesCache = clientes;
-      // Quem CRIA: CLIENT (próprio) ou SAYGO/ADM. PARTNER nunca cria — só resolve.
       const role = AUTH.role();
       const canCreate = role === 'CLIENT' || role === 'SAYGO' || role === 'ADM';
       el.innerHTML = `
@@ -60,23 +61,26 @@ window['VIEW_credit-requests'] = (() => {
     const role = AUTH.role();
     let cliOpts;
     if (role === 'CLIENT') {
-      // CLIENT: vê só o próprio cliente (clientesCache deve ter apenas 1)
       const myCli = clientesCache[0];
-      cliOpts = myCli
-        ? `<option value="${myCli.id}" selected>${UI.escapeHtml(myCli.nome)}</option>`
-        : '';
+      cliOpts = myCli ? `<option value="${myCli.id}" selected>${UI.escapeHtml(myCli.nome)}</option>` : '';
     } else {
       cliOpts = clientesCache.map(c =>
         `<option value="${c.id}">${UI.escapeHtml(c.nome)}${c.escritorio?` — ${UI.escapeHtml(c.escritorio)}`:''}</option>`
       ).join('');
     }
+
+    // estado inicial
+    cabecalho = { importadorNome:'', importadorCnpj:'', exportadorNome:'', exportadorPais:'',
+                  uf:'AL', taxa_cambio:'', icms_aliq_estado: 18 };
+    grupos = [emptyGrupo()];
+    lastCalc = null;
+
     UI.openModal('Nova solicitação de créditos', `
       <div style="display:flex;gap:.4rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem;margin-bottom:1rem">
         <button class="btn primary" data-tab="manual">Preencher manualmente</button>
         <button class="btn"         data-tab="pdf">📄 Importar PDF (IA)</button>
       </div>
       <div id="cr-wiz-content"></div>`);
-    UI.openModal._currentTab = 'manual';
     const root = document.getElementById('modal-body');
     root.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
       root.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('primary', x===b));
@@ -86,87 +90,97 @@ window['VIEW_credit-requests'] = (() => {
     drawManualTab(cliOpts);
   }
 
-  function drawManualTab(cliOpts, prefill = {}) {
-    // Pré-seleciona cliente quando vier do tab PDF
-    const preselectedCliId = prefill._clienteId ? String(prefill._clienteId) : '';
+  function emptyGrupo() {
+    return {
+      ncm: '', valor_usd: 0,
+      acrescimo_usd: 0, frete_usd: 0, outros_usd: 0,
+      ii: 0, pis: 0, cofins: 0, ipi: 0,
+      siscomex: 0, afrmm: 0, antidumping: 0,
+    };
+  }
+
+  function drawManualTab(cliOpts) {
+    const me = AUTH.user();
+    const preselectedCliId = cabecalho._clienteId ? String(cabecalho._clienteId) : '';
     const cliOptsPicked = preselectedCliId
       ? cliOpts.replace(`value="${preselectedCliId}"`, `value="${preselectedCliId}" selected`)
       : cliOpts;
     document.getElementById('cr-wiz-content').innerHTML = `
-      <form id="cr-form" class="form-grid">
-        <div class="full"><label>Cliente *</label>
-          <select name="clienteId" required><option value="">—</option>${cliOptsPicked}</select>
-        </div>
-        <div><label>NCM *</label><input name="ncm" required value="${UI.escapeHtml(prefill.ncm||'')}"></div>
-        <div><label>UF *</label><input name="uf" required value="${UI.escapeHtml(prefill.uf||'AL')}" maxlength="2"></div>
+      <form id="cr-form" autocomplete="off">
+        <div class="form-grid">
+          <div class="full"><label>Cliente *</label>
+            <select name="clienteId" required><option value="">—</option>${cliOptsPicked}</select>
+          </div>
 
-        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.4rem">
-          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Importador / Exportador</strong>
+          <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.4rem">
+            <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Cabeçalho</strong>
+          </div>
+          <div><label>Importador (Nome)</label><input name="importadorNome" value="${UI.escapeHtml(cabecalho.importadorNome||'')}"></div>
+          <div><label>Importador (CNPJ)</label><input name="importadorCnpj" value="${UI.escapeHtml(cabecalho.importadorCnpj||'')}"></div>
+          <div><label>Exportador (Nome)</label><input name="exportadorNome" value="${UI.escapeHtml(cabecalho.exportadorNome||'')}"></div>
+          <div><label>Exportador (País)</label><input name="exportadorPais" value="${UI.escapeHtml(cabecalho.exportadorPais||'')}"></div>
+          <div><label>UF</label><input name="uf" value="${UI.escapeHtml(cabecalho.uf||'AL')}" maxlength="2"></div>
+          <div><label>Taxa câmbio (R$/USD) *</label><input type="number" step="0.0001" name="taxa_cambio" value="${cabecalho.taxa_cambio || ''}" required></div>
+          <div><label>ICMS estado (%)</label><input type="number" step="0.01" name="icms_aliq_estado" value="${cabecalho.icms_aliq_estado ?? 18}"></div>
         </div>
-        <div><label>Importador (Nome)</label><input name="importadorNome" value="${UI.escapeHtml(prefill.importadorNome||'')}"></div>
-        <div><label>Importador (CNPJ)</label><input name="importadorCnpj" value="${UI.escapeHtml(prefill.importadorCnpj||'')}"></div>
-        <div><label>Exportador (Nome)</label><input name="exportadorNome" value="${UI.escapeHtml(prefill.exportadorNome||'')}"></div>
-        <div><label>Exportador (País)</label><input name="exportadorPais" value="${UI.escapeHtml(prefill.exportadorPais||'')}"></div>
 
-        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.4rem">
-          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Valores em USD</strong>
+        <div style="border-top:1px solid var(--bd);padding-top:.6rem;margin-top:.8rem;display:flex;justify-content:space-between;align-items:center">
+          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Grupos por NCM</strong>
+          <button type="button" class="btn small" id="cr-add-ncm">+ Adicionar NCM</button>
         </div>
-        <div><label>Valor FOB (USD) *</label><input type="number" step="0.01" name="vmle_usd" required value="${prefill.vmle_usd ?? ''}"></div>
-        <div><label>Frete (USD)</label><input type="number" step="0.01" name="frete_usd" value="${prefill.frete_usd ?? 0}"></div>
-        <div><label>Seguro (USD)</label><input type="number" step="0.01" name="seguro_usd" value="${prefill.seguro_usd ?? 0}"></div>
-        <div><label>Taxa câmbio (R$/USD) *</label><input type="number" step="0.0001" name="taxa_cambio" required value="${prefill.taxa_cambio ?? ''}"></div>
+        <div id="cr-grupos" style="overflow-x:auto;margin-top:.4rem"></div>
 
-        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.4rem">
-          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Alíquotas (%)</strong>
+        <div class="form-grid" style="margin-top:.8rem">
+          <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem">
+            <label>Modalidade *</label>
+            <select name="modalidade">
+              <option value="AL_NF" selected>Alagoas NF (4%)</option>
+              <option value="AL_DIF">Alagoas Diferencial (1.2%)</option>
+            </select>
+          </div>
+          <div class="full"><label>Mensagem (opcional)</label><textarea name="message" rows="2"></textarea></div>
+
+          <div class="full form-actions">
+            <button type="button" class="btn" id="cr-calc">Calcular</button>
+            <button type="submit" class="btn primary">Enviar para o interveniente</button>
+          </div>
         </div>
-        <div><label>II (%) *</label><input type="number" step="0.01" name="ii_aliq" required value="${prefill.ii_aliq ?? ''}"></div>
-        <div><label>IPI (%)</label><input type="number" step="0.01" name="ipi_aliq" value="${prefill.ipi_aliq ?? 0}"></div>
-        <div><label>PIS (%)</label><input type="number" step="0.01" name="pis_aliq" value="${prefill.pis_aliq ?? 2.1}"></div>
-        <div><label>Cofins (%)</label><input type="number" step="0.01" name="cofins_aliq" value="${prefill.cofins_aliq ?? 9.65}"></div>
-        <div><label>ICMS estado (%) *</label><input type="number" step="0.01" name="icms_aliq_estado" required value="${prefill.icms_aliq_estado ?? ''}"></div>
+        <div id="cr-result"></div>
+      </form>`;
 
-        <div><label>Siscomex (R$)</label><input type="number" step="0.01" name="siscomex" value="${prefill.siscomex ?? 154.23}"></div>
-        <div><label>AFRMM (R$)</label><input type="number" step="0.01" name="afrmm" value="${prefill.afrmm ?? 0}"></div>
-        <div><label>Antidumping (R$)</label><input type="number" step="0.01" name="antidumping" value="${prefill.antidumping ?? 0}"></div>
+    drawGruposTable();
+    document.getElementById('cr-add-ncm').onclick = () => { grupos.push(emptyGrupo()); drawGruposTable(); };
 
-        <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.4rem">
-          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Modalidade</strong>
-        </div>
-        <div class="full"><label>Modalidade *</label>
-          <select name="modalidade">
-            <option value="AL_NF" selected>Alagoas NF (4%)</option>
-            <option value="AL_DIF">Alagoas Diferencial (1.2%)</option>
-          </select>
-        </div>
-        <div class="full"><label>Mensagem (opcional)</label><textarea name="message" rows="2"></textarea></div>
-
-        <div class="full form-actions">
-          <button type="button" class="btn" id="cr-calc">Calcular</button>
-          <button type="submit" class="btn primary">Enviar para Saygo</button>
-        </div>
-      </form>
-      <div id="cr-result"></div>`;
-
+    // captura mudanças no cabeçalho
     const form = document.getElementById('cr-form');
+    form.addEventListener('input', e => {
+      const t = e.target;
+      if (t.name && cabecalho.hasOwnProperty(t.name)) {
+        cabecalho[t.name] = t.type === 'number' ? Number(t.value) : t.value;
+      }
+    });
+
     document.getElementById('cr-calc').onclick = async () => {
-      const inputs = formInputs(form);
+      readGruposFromTable();
+      const payload = buildInputs();
       try {
-        const r = await API.post('/api/credit-requests/simulate', { inputs });
+        const r = await API.post('/api/credit-requests/simulate', { inputs: payload });
         lastCalc = r;
         drawResult(r);
       } catch (e) { UI.toast(e.message, 'err'); }
     };
+
     form.onsubmit = async ev => {
       ev.preventDefault();
       const submitBtn = form.querySelector('button[type="submit"]');
-      const inputs = formInputs(form);
+      readGruposFromTable();
       const fd = new FormData(form);
       const payload = {
         clienteId: fd.get('clienteId'),
         modalidade: fd.get('modalidade'),
         message: fd.get('message'),
-        inputs: JSON.stringify(inputs),
-        autoSend: 'true',  // já cria e envia numa request só
+        inputs: JSON.stringify(buildInputs()),
+        autoSend: 'true',
       };
       try {
         if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Enviando...'; }
@@ -179,21 +193,57 @@ window['VIEW_credit-requests'] = (() => {
     };
   }
 
-  function formInputs(form) {
-    const fd = new FormData(form);
-    const get = k => fd.get(k);
-    const num = k => Number(fd.get(k) || 0);
+  function buildInputs() {
     return {
-      importadorNome: get('importadorNome'), importadorCnpj: get('importadorCnpj'),
-      exportadorNome: get('exportadorNome'), exportadorPais: get('exportadorPais'),
-      ncm: get('ncm'), uf: get('uf'),
-      vmle_usd: num('vmle_usd'), frete_usd: num('frete_usd'), seguro_usd: num('seguro_usd'),
-      taxa_cambio: num('taxa_cambio'),
-      ii_aliq: num('ii_aliq'), ipi_aliq: num('ipi_aliq'),
-      pis_aliq: num('pis_aliq'), cofins_aliq: num('cofins_aliq'),
-      icms_aliq_estado: num('icms_aliq_estado'),
-      siscomex: num('siscomex'), afrmm: num('afrmm'), antidumping: num('antidumping'),
+      ...cabecalho,
+      grupos: grupos.map(g => ({ ...g })),
     };
+  }
+
+  function readGruposFromTable() {
+    const rows = document.querySelectorAll('#cr-grupos [data-grow]');
+    rows.forEach(row => {
+      const idx = Number(row.dataset.grow);
+      const g = grupos[idx];
+      if (!g) return;
+      row.querySelectorAll('input').forEach(inp => {
+        const f = inp.dataset.field;
+        if (!f) return;
+        g[f] = inp.type === 'number' ? Number(inp.value) || 0 : inp.value;
+      });
+    });
+  }
+
+  function drawGruposTable() {
+    const headers = [
+      { f: 'ncm',          l: 'NCM',         w: 130, t: 'text' },
+      { f: 'valor_usd',    l: 'Valor USD',   w: 110, t: 'number' },
+      { f: 'acrescimo_usd',l: 'Acréscimo',   w: 90,  t: 'number' },
+      { f: 'frete_usd',    l: 'Frete',       w: 90,  t: 'number' },
+      { f: 'outros_usd',   l: 'Outros',      w: 90,  t: 'number' },
+      { f: 'ii',           l: 'II R$',       w: 100, t: 'number' },
+      { f: 'pis',          l: 'PIS R$',      w: 100, t: 'number' },
+      { f: 'cofins',       l: 'COFINS R$',   w: 100, t: 'number' },
+      { f: 'ipi',          l: 'IPI R$',      w: 100, t: 'number' },
+      { f: 'siscomex',     l: 'Siscomex/AFRMM', w: 110, t: 'number' },
+    ];
+    const head = headers.map(h => `<th style="font-size:10px;padding:4px 6px;min-width:${h.w}px">${h.l}</th>`).join('') + '<th></th>';
+    const rows = grupos.map((g, idx) => `
+      <tr data-grow="${idx}">
+        ${headers.map(h => `<td style="padding:2px 4px"><input type="${h.t}" data-field="${h.f}" value="${g[h.f] ?? ''}" step="0.01" style="width:100%"></td>`).join('')}
+        <td><button type="button" class="btn small danger" data-rm-ncm="${idx}">×</button></td>
+      </tr>`).join('');
+    const div = document.getElementById('cr-grupos');
+    div.innerHTML = `
+      <table class="table" style="font-size:12px"><thead><tr>${head}</tr></thead>
+      <tbody>${rows}</tbody></table>`;
+    div.querySelectorAll('[data-rm-ncm]').forEach(b => b.onclick = () => {
+      const i = Number(b.dataset.rmNcm);
+      readGruposFromTable();
+      grupos.splice(i, 1);
+      if (!grupos.length) grupos = [emptyGrupo()];
+      drawGruposTable();
+    });
   }
 
   function drawResult(r) {
@@ -203,39 +253,60 @@ window['VIEW_credit-requests'] = (() => {
       out.innerHTML = `<div class="err">${r.warnings.join('<br>')}</div>`;
       return;
     }
-    const c = r.cenarios;
+    const headers = ['NCM', 'Valor R$', 'II', 'PIS', 'COFINS', 'IPI', 'Subtotal', 'ICMS atual', 'ICMS NF 4%', 'ICMS Pagar 1.2%'];
+    const headRow = headers.map(h => `<th style="font-size:10px">${h}</th>`).join('');
+    const ncmRows = (r.porNcm || []).map(g => {
+      const b = g.breakdown, c = g.cenarios;
+      return `<tr>
+        <td><strong>${UI.escapeHtml(g.ncm)}</strong></td>
+        <td class="num">${UI.fmtMoney(b.produtos_brl)}</td>
+        <td class="num">${UI.fmtMoney(b.ii)}</td>
+        <td class="num">${UI.fmtMoney(b.pis)}</td>
+        <td class="num">${UI.fmtMoney(b.cofins)}</td>
+        <td class="num">${UI.fmtMoney(b.ipi)}</td>
+        <td class="num"><strong>${UI.fmtMoney(b.subtotal)}</strong></td>
+        <td class="num val-neg">${UI.fmtMoney(c.atual.icms)}</td>
+        <td class="num val-pos">${UI.fmtMoney(c.al_nf.icms)}</td>
+        <td class="num val-pos">${UI.fmtMoney(c.al_dif.icms)}</td>
+      </tr>`;
+    }).join('');
+    const t = r.total;
+    const totalRow = `<tr style="background:var(--s2);font-weight:700">
+      <td>TOTAL</td>
+      <td class="num">${UI.fmtMoney(t.produtos_brl)}</td>
+      <td class="num">${UI.fmtMoney(t.ii)}</td>
+      <td class="num">${UI.fmtMoney(t.pis)}</td>
+      <td class="num">${UI.fmtMoney(t.cofins)}</td>
+      <td class="num">${UI.fmtMoney(t.ipi)}</td>
+      <td class="num">${UI.fmtMoney(t.subtotal)}</td>
+      <td class="num val-neg">${UI.fmtMoney(t.icms_atual)}</td>
+      <td class="num val-pos">${UI.fmtMoney(t.icms_al_nf)}</td>
+      <td class="num val-pos">${UI.fmtMoney(t.icms_al_dif)}</td>
+    </tr>`;
     out.innerHTML = `
-      <div class="panel" style="margin-top:1rem">
-        <h3>📊 Resultado do cálculo</h3>
-        <table class="table"><tbody>
-          <tr><td>Subtotal federal</td><td class="num"><strong>${UI.fmtMoney(r.breakdown.subtotal)}</strong></td></tr>
-          <tr><td>ICMS atual (${(c.atual.aliq*100).toFixed(2)}%)</td><td class="num val-neg">${UI.fmtMoney(c.atual.icms)}</td></tr>
-          <tr><td>Custo total atual</td><td class="num">${UI.fmtMoney(c.atual.custo_total)}</td></tr>
-        </tbody></table>
+      <div class="panel" style="margin-top:1rem;overflow-x:auto">
+        <h3>📊 Resultado por NCM</h3>
+        <table class="table" style="font-size:12px">
+          <thead><tr>${headRow}</tr></thead>
+          <tbody>${ncmRows}${totalRow}</tbody>
+        </table>
       </div>
       <div class="panel">
-        <h3>Cenário Alagoas NF 4% (por dentro)</h3>
+        <h3>Resumo</h3>
         <table class="table"><tbody>
-          <tr><td>Nota Fiscal AL</td><td class="num">${UI.fmtMoney(c.al_nf.custo_total)}</td></tr>
-          <tr><td>ICMS AL (créditos a comprar)</td><td class="num"><strong class="val-pos">${UI.fmtMoney(c.al_nf.icms)}</strong></td></tr>
-          <tr><td>Economia vs atual</td><td class="num val-pos">${UI.fmtMoney(c.al_nf.economia)}</td></tr>
-          <tr><td>Redução de ICMS</td><td class="num val-pos">${UI.fmtMoney(c.al_nf.reducao_icms)}</td></tr>
-        </tbody></table>
-      </div>
-      <div class="panel">
-        <h3>Cenário Alagoas Dif 1.2% (por dentro)</h3>
-        <table class="table"><tbody>
-          <tr><td>Nota Fiscal AL</td><td class="num">${UI.fmtMoney(c.al_dif.custo_total)}</td></tr>
-          <tr><td>ICMS AL (créditos a comprar)</td><td class="num"><strong class="val-pos">${UI.fmtMoney(c.al_dif.icms)}</strong></td></tr>
-          <tr><td>Economia vs atual</td><td class="num val-pos">${UI.fmtMoney(c.al_dif.economia)}</td></tr>
-          <tr><td>Redução de ICMS</td><td class="num val-pos">${UI.fmtMoney(c.al_dif.reducao_icms)}</td></tr>
+          <tr><td>Custo total atual (ICMS ${(r.cabecalho.icms_aliq_estado||0)}%)</td><td class="num">${UI.fmtMoney(t.custo_atual)}</td></tr>
+          <tr><td>Custo Alagoas NF (4%)</td><td class="num">${UI.fmtMoney(t.custo_al_nf)}</td></tr>
+          <tr><td>Custo Alagoas Dif (1.2%)</td><td class="num">${UI.fmtMoney(t.custo_al_dif)}</td></tr>
+          <tr><td><strong>Créditos a comprar (NF 4%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(r.creditos.al_nf)}</strong></td></tr>
+          <tr><td><strong>Créditos a comprar (Dif 1.2%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(r.creditos.al_dif)}</strong></td></tr>
+          <tr><td>Economia vs cenário atual (NF)</td><td class="num val-pos">${UI.fmtMoney(t.economia_al_nf)}</td></tr>
+          <tr><td>Economia vs cenário atual (Dif)</td><td class="num val-pos">${UI.fmtMoney(t.economia_al_dif)}</td></tr>
         </tbody></table>
       </div>`;
   }
 
   function drawPdfTab(cliOpts) {
     const role = AUTH.role();
-    // CLIENT: cliente fixo (não escolhe). SAYGO/ADM: select obrigatório.
     let cliField = '';
     if (role === 'CLIENT') {
       const myCli = clientesCache[0];
@@ -245,8 +316,7 @@ window['VIEW_credit-requests'] = (() => {
         : '<div class="err">Sem cliente vinculado.</div>';
     } else {
       cliField = `
-        <div class="full">
-          <label>Cliente *</label>
+        <div class="full"><label>Cliente *</label>
           <select id="cr-pdf-cliente" required>
             <option value="">— selecione —</option>${cliOpts}
           </select>
@@ -255,8 +325,8 @@ window['VIEW_credit-requests'] = (() => {
     document.getElementById('cr-wiz-content').innerHTML = `
       <div class="form-grid">
         <div class="full muted small">
-          Faça o upload de um PDF de invoice. A IA configurada (Parâmetros → IA) vai ler o documento e preencher os campos automaticamente.
-          Depois você revisa, calcula e envia.
+          Faça o upload de um PDF de invoice. A IA configurada vai ler todos os itens e agrupar automaticamente por NCM.
+          Depois você revisa, completa as alíquotas/impostos por NCM e envia.
         </div>
         ${cliField}
         <div class="full">
@@ -285,16 +355,46 @@ window['VIEW_credit-requests'] = (() => {
           throw new Error(errText || `HTTP ${r.status}`);
         }
         const j = await r.json();
+        const f = j.fields || {};
+        // Popula state
+        cabecalho = {
+          importadorNome: f.importadorNome || '',
+          importadorCnpj: f.importadorCnpj || '',
+          exportadorNome: f.exportadorNome || '',
+          exportadorPais: f.exportadorPais || '',
+          uf: f.uf || 'AL',
+          taxa_cambio: f.taxa_cambio || '',
+          icms_aliq_estado: 18,
+          _clienteId: cliId,
+        };
+        const ncmGroups = Array.isArray(f.ncmGroups) ? f.ncmGroups : [];
+        if (ncmGroups.length) {
+          // distribuir frete/seguro proporcionalmente ao valor de cada NCM
+          const totalUSD = ncmGroups.reduce((s,g) => s + (g.extension_usd_total||0), 0) || 1;
+          grupos = ncmGroups.map(g => {
+            const share = (g.extension_usd_total || 0) / totalUSD;
+            return {
+              ncm: g.ncm,
+              valor_usd: Number((g.extension_usd_total||0).toFixed(2)),
+              acrescimo_usd: 0,
+              frete_usd: Number(((f.frete_usd_total||0) * share).toFixed(2)),
+              outros_usd: Number(((f.seguro_usd_total||0) * share).toFixed(2)),
+              ii: 0, pis: 0, cofins: 0, ipi: 0,
+              siscomex: 0, afrmm: 0, antidumping: 0,
+            };
+          });
+        } else {
+          grupos = [emptyGrupo()];
+        }
         out.innerHTML = `
-          <div class="muted small" style="margin-bottom:.5rem">✓ Campos extraídos pela IA. Revise e clique em "Calcular".</div>
-          <pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px;max-height:160px;overflow:auto">${UI.escapeHtml(JSON.stringify(j.fields, null, 2))}</pre>
+          <div class="muted small" style="margin-bottom:.5rem">✓ ${ncmGroups.length} NCM(s) extraído(s) pela IA. Clique em "Usar esses dados" para revisar e completar os impostos.</div>
+          <pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px;max-height:200px;overflow:auto">${UI.escapeHtml(JSON.stringify({ cabecalho, grupos }, null, 2))}</pre>
           <div class="form-actions" style="margin-top:.6rem">
             <button class="btn primary" id="cr-pdf-use">Usar esses dados no formulário</button>
           </div>`;
         document.getElementById('cr-pdf-use').onclick = () => {
-          // volta pro tab manual com prefill (já com clienteId pré-selecionado)
           document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('primary', x.dataset.tab==='manual'));
-          drawManualTab(cliOpts, { ...j.fields, _clienteId: cliId });
+          drawManualTab(cliOpts);
         };
       } catch (e) {
         out.innerHTML = `<div class="err">Erro: ${UI.escapeHtml(e.message)}</div>`;
@@ -307,13 +407,22 @@ window['VIEW_credit-requests'] = (() => {
     const me = AUTH.user();
     const role = AUTH.role();
     const office = me?.officeName || me?.parceiroNome;
-    // Solicitante = quem criou (CLIENT do cliente, ou SAYGO/ADM)
     const isOwner = r.requestedById === me?.id;
-    // Resolvedor = PARTNER ESCRITORIO do escritório alvo (e SAYGO/ADM podem em fallback)
     const isResolver = role === 'PARTNER' && r.partnerOfficeName === office;
     const isStaff    = role === 'ADM' || role === 'SAYGO';
-    const inp = r.inputs || {};
-    const cen = r.result?.cenarios || {};
+    const result = r.result || {};
+    const total = result.total || {};
+
+    const ncmRows = (result.porNcm || []).map(g => {
+      const b = g.breakdown||{}, c = g.cenarios||{};
+      return `<tr>
+        <td><strong>${UI.escapeHtml(g.ncm)}</strong></td>
+        <td class="num">${UI.fmtMoney(b.subtotal)}</td>
+        <td class="num val-neg">${UI.fmtMoney(c.atual?.icms||0)}</td>
+        <td class="num val-pos">${UI.fmtMoney(c.al_nf?.icms||0)}</td>
+        <td class="num val-pos">${UI.fmtMoney(c.al_dif?.icms||0)}</td>
+      </tr>`;
+    }).join('');
 
     UI.openModal(`Solicitação — ${r.cliente?.nome || ''}`, `
       <div class="muted small" style="margin-bottom:.6rem">
@@ -322,39 +431,31 @@ window['VIEW_credit-requests'] = (() => {
         ${r.resolvedBy ? `· Resolvido por: ${UI.escapeHtml(r.resolvedBy?.name)} em ${UI.fmtDateTime(r.resolvedAt)}` : ''}
       </div>
       <div class="panel">
-        <h3>Dados da invoice</h3>
-        <table class="table"><tbody>
-          <tr><td>NCM</td><td>${UI.escapeHtml(inp.ncm||'')}</td></tr>
-          <tr><td>UF</td><td>${UI.escapeHtml(inp.uf||'')}</td></tr>
-          <tr><td>FOB (USD)</td><td>${inp.vmle_usd ?? ''}</td></tr>
-          <tr><td>Frete + Seguro (USD)</td><td>${(Number(inp.frete_usd||0) + Number(inp.seguro_usd||0)).toFixed(2)}</td></tr>
-          <tr><td>Câmbio</td><td>${inp.taxa_cambio ?? ''}</td></tr>
-          <tr><td>II / IPI / PIS / Cofins / ICMS</td>
-            <td>${inp.ii_aliq||0}% / ${inp.ipi_aliq||0}% / ${inp.pis_aliq||0}% / ${inp.cofins_aliq||0}% / ${inp.icms_aliq_estado||0}%</td>
-          </tr>
-        </tbody></table>
-        ${r.inputPdfName ? `<div class="muted small" style="margin-top:.4rem">📎 PDF original: <a href="/api/credit-requests/${r.id}/pdf" target="_blank">${UI.escapeHtml(r.inputPdfName)}</a></div>` : ''}
+        <h3>Resultado por NCM</h3>
+        <table class="table" style="font-size:12px">
+          <thead><tr><th>NCM</th><th>Subtotal</th><th>ICMS atual</th><th>ICMS NF 4%</th><th>ICMS Pagar 1.2%</th></tr></thead>
+          <tbody>${ncmRows || '<tr><td colspan="5" class="muted">Sem dados</td></tr>'}</tbody>
+        </table>
       </div>
       <div class="panel">
-        <h3>Resultado</h3>
+        <h3>Resumo</h3>
         <table class="table"><tbody>
           <tr><td>Modalidade</td><td>${r.modalidade === 'AL_NF' ? 'Alagoas NF (4%)' : 'Alagoas Dif (1.2%)'}</td></tr>
-          <tr><td>Subtotal federal</td><td class="num">${UI.fmtMoney(r.result?.breakdown?.subtotal||0)}</td></tr>
-          <tr><td>Custo atual</td><td class="num">${UI.fmtMoney(cen.atual?.custo_total||0)}</td></tr>
-          <tr><td>Custo Alagoas (NF)</td><td class="num">${UI.fmtMoney(cen.al_nf?.custo_total||0)}</td></tr>
+          <tr><td>Subtotal federal</td><td class="num">${UI.fmtMoney(total.subtotal||0)}</td></tr>
+          <tr><td>Custo atual</td><td class="num">${UI.fmtMoney(total.custo_atual||0)}</td></tr>
+          <tr><td>Custo Alagoas (NF)</td><td class="num">${UI.fmtMoney(total.custo_al_nf||0)}</td></tr>
           <tr><td><strong>Créditos a comprar</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(r.creditosACompar||0)}</strong></td></tr>
-          <tr><td>Economia</td><td class="num val-pos">${UI.fmtMoney((r.modalidade==='AL_DIF'?cen.al_dif?.economia:cen.al_nf?.economia)||0)}</td></tr>
+          <tr><td>Economia</td><td class="num val-pos">${UI.fmtMoney((r.modalidade==='AL_DIF'?total.economia_al_dif:total.economia_al_nf)||0)}</td></tr>
         </tbody></table>
+        ${r.inputPdfName ? `<div class="muted small" style="margin-top:.4rem">📎 PDF original: <a href="/api/credit-requests/${r.id}/pdf" target="_blank">${UI.escapeHtml(r.inputPdfName)}</a></div>` : ''}
       </div>
       ${r.message ? `<div class="panel"><h3>Mensagem do solicitante</h3><p>${UI.escapeHtml(r.message)}</p></div>` : ''}
       ${r.resolutionNote ? `<div class="panel"><h3>Resposta do interveniente</h3><p>${UI.escapeHtml(r.resolutionNote)}</p>
         ${r.resolutionAttachmentName ? `<div class="muted small" style="margin-top:.4rem">📎 Evidência: <a href="/api/credit-requests/${r.id}/evidence" target="_blank">${UI.escapeHtml(r.resolutionAttachmentName)}</a></div>` : ''}
       </div>` : ''}
-
       <div id="cr-actions"></div>
     `);
 
-    // Render dos botões/forms
     const actDiv = document.getElementById('cr-actions');
     let html = '';
     if (isOwner && r.status === 'DRAFT')              html += `<button class="btn primary" data-act="send">Enviar para o interveniente</button> `;
@@ -375,7 +476,6 @@ window['VIEW_credit-requests'] = (() => {
     };
   }
 
-  // Form para concluir solicitação — anexo opcional
   function openResolveForm(r) {
     const div = document.getElementById('cr-actions');
     div.innerHTML = `
@@ -387,7 +487,7 @@ window['VIEW_credit-requests'] = (() => {
           </div>
           <div class="full"><label>Evidência (opcional — PDF, imagem etc.)</label>
             <input type="file" name="file">
-            <small class="muted">Pode concluir sem anexo. Sem evidência, fica marcado "Concluído sem documentos".</small>
+            <small class="muted">Pode concluir sem anexo.</small>
           </div>
           <div class="full form-actions">
             <button type="button" class="btn" id="cr-resolve-cancel">Voltar</button>
