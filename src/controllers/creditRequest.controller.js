@@ -94,6 +94,7 @@ export async function create(req, res, next) {
       modalidade: body.modalidade,
       message: body.message,
       inputs,
+      autoSend: body.autoSend === 'true' || body.autoSend === true,
     };
     const pdfBuffer = req.file?.buffer || null;
     const pdfName   = req.file?.originalname || null;

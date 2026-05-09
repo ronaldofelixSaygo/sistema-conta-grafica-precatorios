@@ -1,8 +1,11 @@
 import { prisma } from '../config/prisma.js';
 
-export async function logAction({ user, action, entity, entityId, details, ip }) {
-  try {
-    await prisma.auditLog.create({
+// Audit log "fire and forget": não bloqueia o request response.
+// O caller pode fazer `await logAction(...)` mas a Promise resolve imediatamente —
+// o insert acontece em background e qualquer erro é apenas logado no console.
+export function logAction({ user, action, entity, entityId, details, ip }) {
+  setImmediate(() => {
+    prisma.auditLog.create({
       data: {
         userId:   user?.id   ?? null,
         userName: user?.name ?? null,
@@ -12,8 +15,7 @@ export async function logAction({ user, action, entity, entityId, details, ip })
         details:  details ?? null,
         ip:       ip ?? null,
       },
-    });
-  } catch (e) {
-    console.error('[audit] falhou:', e.message);
-  }
+    }).catch(e => console.error('[audit] falhou:', e.message));
+  });
+  return Promise.resolve();
 }

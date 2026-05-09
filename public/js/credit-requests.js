@@ -10,7 +10,7 @@ window['VIEW_credit-requests'] = (() => {
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
       const [list, clientes] = await Promise.all([
-        API.get('/api/credit-requests'),
+        API.get('/api/credit-requests', null, { ttl: 30000 }),
         API.get('/api/clientes', null, { ttl: 60000 }).catch(() => []),
       ]);
       clientesCache = clientes;
@@ -153,6 +153,7 @@ window['VIEW_credit-requests'] = (() => {
     };
     form.onsubmit = async ev => {
       ev.preventDefault();
+      const submitBtn = form.querySelector('button[type="submit"]');
       const inputs = formInputs(form);
       const fd = new FormData(form);
       const payload = {
@@ -160,13 +161,16 @@ window['VIEW_credit-requests'] = (() => {
         modalidade: fd.get('modalidade'),
         message: fd.get('message'),
         inputs: JSON.stringify(inputs),
+        autoSend: 'true',  // já cria e envia numa request só
       };
       try {
-        const created = await API.post('/api/credit-requests', payload);
-        // Envia em seguida (DRAFT → SENT)
-        await API.post(`/api/credit-requests/${created.id}/send`);
-        UI.toast('Solicitação enviada para a Saygo'); UI.closeModal(); render();
-      } catch (e) { UI.toast(e.message, 'err'); }
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Enviando...'; }
+        await API.post('/api/credit-requests', payload);
+        UI.toast('Solicitação enviada para o interveniente'); UI.closeModal(); render();
+      } catch (e) {
+        UI.toast(e.message, 'err');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Enviar para o interveniente'; }
+      }
     };
   }
 

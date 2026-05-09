@@ -46,10 +46,16 @@ export async function listRequests(user) {
     if (!office) return [];
     where.partnerOfficeName = office;
   }
+  // Listagem: exclui campos pesados (inputs/result Json grandes, PDF binário, anexo binário)
   return prisma.creditRequest.findMany({
     where,
-    include: {
-      cliente: { select: { id: true, nome: true, escritorio: true } },
+    select: {
+      id: true, clienteId: true, partnerOfficeName: true,
+      creditosACompar: true, modalidade: true, status: true,
+      message: true, inputPdfName: true,
+      requestedById: true, resolvedById: true,
+      createdAt: true, sentAt: true, resolvedAt: true,
+      cliente:     { select: { id: true, nome: true, escritorio: true } },
       requestedBy: { select: { id: true, name: true, email: true } },
       resolvedBy:  { select: { id: true, name: true } },
     },
@@ -83,7 +89,7 @@ export function simulate(input) {
   return calcularInvoice(input);
 }
 
-// Cria DRAFT (cálculo + dados, ainda não enviado)
+// Cria DRAFT (cálculo + dados). Se autoSend=true, já envia (status SENT) na mesma operação.
 // Solicitante: CLIENT (sempre) ou SAYGO/ADM (em nome de um cliente)
 export async function createDraft(user, payload, pdfBuffer = null, pdfName = null, aiPromptVersion = null) {
   ensureRequester(user);
@@ -92,8 +98,9 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
   const result = calcularInvoice(payload.inputs || {});
   const modalidade = payload.modalidade === 'AL_DIF' ? 'AL_DIF' : 'AL_NF';
   const creditosACompar = modalidade === 'AL_DIF' ? result.creditos.al_dif : result.creditos.al_nf;
+  const autoSend = !!payload.autoSend;
 
-  return prisma.creditRequest.create({
+  const created = await prisma.creditRequest.create({
     data: {
       clienteId: cli.id,
       partnerOfficeName: cli.escritorio || '',
@@ -103,13 +110,29 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
       modalidade,
       message: payload.message || null,
       requestedById: user.id,
-      status: 'DRAFT',
+      status: autoSend ? 'SENT' : 'DRAFT',
+      sentAt: autoSend ? new Date() : null,
       inputPdfName: pdfName || null,
       inputPdfBytes: pdfBuffer || null,
       aiPromptVersion: aiPromptVersion ?? null,
     },
-    include: { cliente: { select: { id: true, nome: true, escritorio: true } } },
+    select: {
+      id: true, clienteId: true, partnerOfficeName: true,
+      creditosACompar: true, modalidade: true, status: true,
+      createdAt: true, sentAt: true,
+      cliente: { select: { id: true, nome: true, escritorio: true } },
+    },
   });
+
+  // Notificação em background (não bloqueia a resposta)
+  if (autoSend) {
+    setImmediate(() => {
+      email.notifyCreditRequest({ requestId: created.id, event: 'sent', byUser: user })
+        .catch(err => console.warn('[creditRequest] notify falhou:', err.message));
+    });
+  }
+
+  return created;
 }
 
 // Envia: DRAFT → SENT — apenas o solicitante (ou STAFF)
@@ -125,7 +148,10 @@ export async function sendRequest(user, id) {
     where: { id },
     data: { status: 'SENT', sentAt: new Date() },
   });
-  email.notifyCreditRequest({ requestId: id, event: 'sent', byUser: user }).catch(()=>{});
+  setImmediate(() => {
+    email.notifyCreditRequest({ requestId: id, event: 'sent', byUser: user })
+      .catch(err => console.warn('[creditRequest] notify falhou:', err.message));
+  });
   return updated;
 }
 
@@ -180,7 +206,10 @@ export async function resolveRequest(user, id, { note, attachmentName, attachmen
     }).catch(() => {});
   }
 
-  email.notifyCreditRequest({ requestId: id, event: 'resolved', byUser: user }).catch(()=>{});
+  setImmediate(() => {
+    email.notifyCreditRequest({ requestId: id, event: 'resolved', byUser: user })
+      .catch(err => console.warn('[creditRequest] notify falhou:', err.message));
+  });
 
   return updated;
 }
