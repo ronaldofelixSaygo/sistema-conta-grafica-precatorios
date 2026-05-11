@@ -14,14 +14,24 @@ async function loadUser(uid) {
     select: {
       id: true, email: true, name: true, role: true, active: true,
       officeName: true, clienteId: true, themePref: true, parceiroId: true,
-      parceiro: { select: { id: true, type: true, nome: true } },
+      parceiro: {
+        select: {
+          id: true, type: true, nome: true, kindCode: true,
+          kind: { select: { code: true, behavior: true } },
+        },
+      },
     },
   });
   if (!user) return null;
-  // Achata o tipo do parceiro pra facilitar uso em scope/perms
+  // partnerType = capacidade do parceiro. Prioridade: kind.behavior (autoritativo)
+  // > parceiro.type (legado). Garante que mesmo se .type ficar nulo por algum motivo,
+  // ainda determinamos a capacidade pela relação com PartnerKind.
+  const partnerType = user.parceiro?.kind?.behavior || user.parceiro?.type || null;
+  const partnerKindCode = user.parceiro?.kindCode || user.parceiro?.kind?.code || null;
   return {
     ...user,
-    partnerType: user.parceiro?.type || null,
+    partnerType,
+    partnerKindCode,
     parceiroNome: user.parceiro?.nome || null,
   };
 }

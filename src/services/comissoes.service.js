@@ -233,13 +233,21 @@ export async function listCommissions(user) {
 }
 
 // Gera (cria/atualiza) a apuracao para o mes-ref e escritorio.
-// SOMENTE PARTNER ESCRITORIO pode gerar. Saygo/Adm apenas visualiza/aprova.
-export async function generateCommission(user, { monthRef } = {}) {
-  if (!(user.role === 'PARTNER' && user.partnerType === 'ESCRITORIO')) {
-    const e = new Error('Apenas parceiros do tipo Escritório podem gerar apuração'); e.status = 403; throw e;
+// PARTNER ESCRITORIO gera pro próprio escritório. ADM/SAYGO podem gerar pra
+// qualquer escritório informando `escritorio` no payload.
+export async function generateCommission(user, { monthRef, escritorio } = {}) {
+  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
+  const isPartnerEsc = user.role === 'PARTNER' && user.partnerType === 'ESCRITORIO';
+  if (!isStaff && !isPartnerEsc) {
+    const e = new Error('Sem permissão para gerar apuração'); e.status = 403; throw e;
   }
-  const escritorioName = user.officeName || user.parceiroNome;
-  if (!escritorioName) { const e = new Error('Usuário sem escritório definido'); e.status = 400; throw e; }
+  let escritorioName;
+  if (isPartnerEsc) {
+    escritorioName = user.officeName || user.parceiroNome;
+  } else {
+    escritorioName = escritorio;
+  }
+  if (!escritorioName) { const e = new Error('Escritório obrigatório'); e.status = 400; throw e; }
 
   if (!monthRef || !/^\d{4}-\d{2}$/.test(monthRef)) {
     const e = new Error('monthRef inválido (use YYYY-MM)'); e.status = 400; throw e;

@@ -124,8 +124,9 @@ window.VIEW_comissoes = (() => {
       const isStaff = AUTH.isStaff();
       const isPartnerEsc = AUTH.isPartnerEscritorio();
 
-      // Apenas PARTNER ESCRITORIO cria apurações. Saygo/Adm apenas revisa/aprova.
-      const canCreate = isPartnerEsc;
+      // PARTNER ESCRITORIO gera pro próprio escritório.
+      // ADM/SAYGO podem gerar pra qualquer escritório (escolhe no modal).
+      const canCreate = isPartnerEsc || isStaff;
       const action = canCreate
         ? `<button class="btn primary" id="ap-new">+ Nova apuração</button>`
         : '';
@@ -171,12 +172,27 @@ window.VIEW_comissoes = (() => {
 
   async function openNewApu() {
     const me = AUTH.user();
-    const esc = me?.officeName || me?.parceiroNome || '— seu escritório vinculado —';
+    const isStaff = AUTH.isStaff();
+    const isPartnerEsc = AUTH.isPartnerEscritorio();
+    const meEsc = me?.officeName || me?.parceiroNome || '';
+
+    // Admin escolhe o escritório; partner usa o próprio
+    let escField = '';
+    if (isPartnerEsc) {
+      escField = `<input value="${UI.escapeHtml(meEsc || '— seu escritório vinculado —')}" readonly>`;
+    } else if (isStaff) {
+      const ps = await loadEscritorios();
+      escField = `
+        <select name="escritorio" required>
+          <option value="">— selecione —</option>
+          ${ps.map(p => `<option value="${UI.escapeHtml(p)}">${UI.escapeHtml(p)}</option>`).join('')}
+        </select>`;
+    }
 
     UI.openModal('Nova apuração de comissão', `
       <form id="form-apu" class="form-grid">
-        <div class="full"><label>Interveniente / Escritório</label>
-          <input value="${UI.escapeHtml(esc)}" readonly>
+        <div class="full"><label>Interveniente / Escritório${isStaff ? ' *' : ''}</label>
+          ${escField}
         </div>
         <div class="full"><label>Mês de referência (YYYY-MM) *</label>
           <input name="monthRef" required placeholder="2026-05" pattern="\\d{4}-\\d{2}">
@@ -192,9 +208,11 @@ window.VIEW_comissoes = (() => {
     document.getElementById('apu-cancel').onclick = UI.closeModal;
     document.getElementById('form-apu').onsubmit = async ev => {
       ev.preventDefault();
-      const monthRef = ev.target.monthRef.value;
+      const fd = new FormData(ev.target);
+      const payload = { monthRef: fd.get('monthRef') };
+      if (isStaff && !isPartnerEsc) payload.escritorio = fd.get('escritorio');
       try {
-        await API.post('/api/comissoes', { monthRef });
+        await API.post('/api/comissoes', payload);
         UI.toast('Apuração gerada'); UI.closeModal(); render();
       } catch (e) { UI.toast(e.message, 'err'); }
     };
