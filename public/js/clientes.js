@@ -184,8 +184,12 @@ window.VIEW_clientes = (() => {
         <div><label>Interveniente IE</label><input name="parceiro_ie" value="${UI.escapeHtml(cli.parceiroIe||'')}"></div>
 
         <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Comissão</strong></div>
-        <div><label>% Comissão</label><input type="number" step="0.01" name="percentual_comissao" value="${cli.percentualComissao ?? 0}"></div>
+        <div><label>% Comissão (sobre créditos)</label><input type="number" step="0.01" name="percentual_comissao" value="${cli.percentualComissao ?? 0}"></div>
         <div><label>Dia de fechamento</label><input type="number" min="1" max="31" name="dia_fechamento" value="${cli.diaFechamento ?? 1}"></div>
+        <div class="full"><label>Valor por DI/Duimp (R$)</label>
+          <input type="number" step="0.01" min="0" name="valor_por_di" value="${cli.valorPorDi ?? 0}" placeholder="0,00 — deixe em branco se o cliente não tem esse processo">
+          <div class="muted small" style="margin-top:.2rem">Valor que o escritório recebe por cada DI/Duimp processada. Entra na apuração de comissão (bloco separado). DIs duplicadas com mesmo número contam uma vez.</div>
+        </div>
 
         <div class="full"><label>Observações</label><textarea name="observacoes" rows="3">${UI.escapeHtml(cli.observacoes||'')}</textarea></div>
         <div class="full form-actions">

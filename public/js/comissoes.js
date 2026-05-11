@@ -70,21 +70,46 @@ window.VIEW_comissoes = (() => {
         out.innerHTML = '<div class="muted small" style="padding:1rem">Sem comissões no período.</div>';
         return;
       }
-      out.innerHTML = rows.map(r => `
+      out.innerHTML = rows.map(r => {
+        const hasDi = (r.total_comissao_di || 0) > 0;
+        const hasCred = (r.total_comissao_credito || 0) > 0;
+        const detCred = (r.detalhes || []).filter(x => (x.valor_comissao || 0) > 0);
+        const detDi   = (r.detalhes || []).filter(x => (x.valor_comissao_di || 0) > 0);
+        return `
         <div class="panel">
           <h3>${UI.escapeHtml(r.parceiro)} — ${UI.escapeHtml(r.mes_ano)}
             <span style="float:right;color:var(--green)">${UI.fmtMoney(r.total_comissao)}</span></h3>
-          ${UI.table({
-            cols: [
-              { label: 'Cliente', key: 'cliente_nome' },
-              { label: 'Período', get: x => `${UI.fmtDate(x.periodo_inicio)} → ${UI.fmtDate(x.periodo_fim)}` },
-              { label: 'Créditos', align: 'right', get: x => UI.fmtMoney(x.total_creditos) },
-              { label: '%', align: 'right', get: x => `${x.percentual}%` },
-              { label: 'Comissão', align: 'right', get: x => UI.fmtMoney(x.valor_comissao) },
-            ],
-            rows: r.detalhes,
-          })}
-        </div>`).join('');
+          <div class="muted small" style="margin-bottom:.5rem">
+            ${hasCred ? `Créditos: <strong>${UI.fmtMoney(r.total_comissao_credito||0)}</strong>` : ''}
+            ${hasCred && hasDi ? ' · ' : ''}
+            ${hasDi ? `DI/Duimp: <strong>${UI.fmtMoney(r.total_comissao_di||0)}</strong>` : ''}
+          </div>
+          ${hasCred ? `
+            <h4 style="margin:.6rem 0 .3rem;font-size:13px">Comissão sobre créditos</h4>
+            ${UI.table({
+              cols: [
+                { label: 'Cliente', key: 'cliente_nome' },
+                { label: 'Período', get: x => `${UI.fmtDate(x.periodo_inicio)} → ${UI.fmtDate(x.periodo_fim)}` },
+                { label: 'Créditos', align: 'right', get: x => UI.fmtMoney(x.total_creditos) },
+                { label: '%', align: 'right', get: x => `${x.percentual}%` },
+                { label: 'Comissão', align: 'right', get: x => UI.fmtMoney(x.valor_comissao) },
+              ],
+              rows: detCred,
+            })}` : ''}
+          ${hasDi ? `
+            <h4 style="margin:.8rem 0 .3rem;font-size:13px">Comissão por DI/Duimp</h4>
+            ${UI.table({
+              cols: [
+                { label: 'Cliente', key: 'cliente_nome' },
+                { label: 'Período', get: x => `${UI.fmtDate(x.periodo_inicio)} → ${UI.fmtDate(x.periodo_fim)}` },
+                { label: 'DIs únicas', align: 'right', get: x => x.total_dis || 0 },
+                { label: 'Valor/DI', align: 'right', get: x => UI.fmtMoney(x.valor_por_di) },
+                { label: 'Comissão DI', align: 'right', get: x => UI.fmtMoney(x.valor_comissao_di) },
+              ],
+              rows: detDi,
+            })}` : ''}
+        </div>`;
+      }).join('');
     } catch (e) {
       out.innerHTML = `<div class="err">${e.message}</div>`;
     }
@@ -186,6 +211,8 @@ window.VIEW_comissoes = (() => {
     );
     const editable = (c.status === 'DRAFT' || c.status === 'REJECTED') && isOwner;
     const detalhes = Array.isArray(c.detalhes) ? c.detalhes : [];
+    const detCred = detalhes.filter(x => (x.valor_comissao || 0) > 0);
+    const detDi   = detalhes.filter(x => (x.valor_comissao_di || 0) > 0);
 
     let html = `
       <div class="muted small" style="margin-bottom:.4rem">
@@ -193,8 +220,9 @@ window.VIEW_comissoes = (() => {
         ${statusPill(c.status)}
         ${c.rejectReason ? `<div class="err small" style="margin-top:.4rem">Motivo da rejeição: ${UI.escapeHtml(c.rejectReason)}</div>` : ''}
       </div>
+      ${detCred.length ? `
       <div class="panel">
-        <h3>Detalhes do cálculo (base)</h3>
+        <h3>Comissão sobre créditos <span style="float:right;color:var(--green)">${UI.fmtMoney(c.totalBaseCredito ?? c.totalBase ?? 0)}</span></h3>
         ${UI.table({
           cols: [
             { label: 'Cliente', key: 'cliente_nome' },
@@ -202,9 +230,22 @@ window.VIEW_comissoes = (() => {
             { label: 'Créditos', align:'right', get: x => UI.fmtMoney(x.total_creditos) },
             { label: '%', align:'right', get: x => `${x.percentual}%` },
             { label: 'Comissão', align:'right', get: x => UI.fmtMoney(x.valor_comissao) },
-          ], rows: detalhes,
+          ], rows: detCred,
         })}
-      </div>
+      </div>` : ''}
+      ${detDi.length ? `
+      <div class="panel">
+        <h3>Comissão por DI/Duimp <span style="float:right;color:var(--green)">${UI.fmtMoney(c.totalBaseDi ?? 0)}</span></h3>
+        ${UI.table({
+          cols: [
+            { label: 'Cliente', key: 'cliente_nome' },
+            { label: 'Período', get: x => `${UI.fmtDate(x.periodo_inicio)} → ${UI.fmtDate(x.periodo_fim)}` },
+            { label: 'DIs únicas', align:'right', get: x => x.total_dis || 0 },
+            { label: 'Valor/DI', align:'right', get: x => UI.fmtMoney(x.valor_por_di) },
+            { label: 'Comissão DI', align:'right', get: x => UI.fmtMoney(x.valor_comissao_di) },
+          ], rows: detDi,
+        })}
+      </div>` : ''}
       <div class="panel">
         <h3>Lançamentos extras (adições/reduções)</h3>
         ${UI.table({
@@ -225,7 +266,9 @@ window.VIEW_comissoes = (() => {
       </div>
       <div class="panel">
         <table class="table"><tbody>
-          <tr><td>Base</td><td class="num">${UI.fmtMoney(c.totalBase)}</td></tr>
+          ${(c.totalBaseCredito||0) > 0 ? `<tr><td>Base (créditos)</td><td class="num">${UI.fmtMoney(c.totalBaseCredito)}</td></tr>` : ''}
+          ${(c.totalBaseDi||0) > 0 ? `<tr><td>Base (DI/Duimp)</td><td class="num">${UI.fmtMoney(c.totalBaseDi)}</td></tr>` : ''}
+          <tr><td><strong>Subtotal base</strong></td><td class="num"><strong>${UI.fmtMoney(c.totalBase)}</strong></td></tr>
           <tr><td>Extras</td><td class="num">${UI.fmtMoney(c.totalExtras)}</td></tr>
           <tr><td><strong>Total final</strong></td><td class="num"><strong>${UI.fmtMoney(c.totalFinal)}</strong></td></tr>
         </tbody></table>

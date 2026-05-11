@@ -55,6 +55,7 @@ export async function createCliente(user, data) {
       observacoes: data.observacoes || null,
       percentualComissao: toNumberOrNull(data.percentual_comissao ?? data.percentualComissao) ?? 0,
       diaFechamento:      toNumberOrNull(data.dia_fechamento      ?? data.diaFechamento)      ?? 1,
+      valorPorDi:         toNumberOrNull(data.valor_por_di        ?? data.valorPorDi)         ?? 0,
     },
   });
 }
@@ -83,6 +84,7 @@ export async function updateCliente(user, id, data) {
       ...(data.observacoes        !== undefined && { observacoes: data.observacoes || null }),
       ...((data.percentual_comissao ?? data.percentualComissao) !== undefined && { percentualComissao: toNumberOrNull(data.percentual_comissao ?? data.percentualComissao) ?? 0 }),
       ...((data.dia_fechamento ?? data.diaFechamento) !== undefined && { diaFechamento: toNumberOrNull(data.dia_fechamento ?? data.diaFechamento) ?? 1 }),
+      ...((data.valor_por_di ?? data.valorPorDi) !== undefined && { valorPorDi: toNumberOrNull(data.valor_por_di ?? data.valorPorDi) ?? 0 }),
     },
   });
 }
@@ -125,6 +127,7 @@ export async function exportClientesExcel(user, res) {
     { header: 'Parceiro IE',         key: 'parceiroIe',         width: 22 },
     { header: '% Comissão',          key: 'percentualComissao', width: 12 },
     { header: 'Dia Fechamento',      key: 'diaFechamento',      width: 14 },
+    { header: 'Valor por DI/Duimp',  key: 'valorPorDi',         width: 16 },
     { header: 'Observações',         key: 'observacoes',        width: 50 },
     { header: 'Criado em',           key: 'createdAt',          width: 18 },
     { header: 'Atualizado em',       key: 'updatedAt',          width: 18 },
@@ -153,6 +156,7 @@ export async function exportClientesExcel(user, res) {
       parceiroIe: masked.parceiroIe,
       percentualComissao: masked.percentualComissao,
       diaFechamento: masked.diaFechamento,
+      valorPorDi: masked.valorPorDi,
       observacoes: masked.observacoes,
       createdAt: fmtDateTime(masked.createdAt),
       updatedAt: fmtDateTime(masked.updatedAt),

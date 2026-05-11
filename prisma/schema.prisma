@@ -96,6 +96,10 @@ model Cliente {
   observacoes         String?  @db.Text
   percentualComissao  Float    @default(0)
   diaFechamento       Int      @default(1)
+  // Cliente com processo de execução DI/Duimp via Saygo: valor (R$) que o
+  // escritório recebe por cada DI/Duimp processada (entra na apuração de
+  // comissão como bloco separado). 0 ou null = cliente sem esse processo.
+  valorPorDi          Float    @default(0)
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -439,9 +443,11 @@ model Commission {
   parceiro      Parceiro         @relation("CommissionParceiro", fields: [parceiroId], references: [id], onDelete: Cascade)
   // mês de referência: YYYY-MM
   monthRef      String
-  totalBase     Float            @default(0) // soma calculada das comissões dos clientes
-  totalExtras   Float            @default(0) // soma de adições - reduções
-  totalFinal    Float            @default(0) // base + extras
+  totalBase         Float        @default(0) // soma total das comissões dos clientes (créditos + DIs)
+  totalBaseCredito  Float        @default(0) // bloco: comissão sobre créditos (%)
+  totalBaseDi       Float        @default(0) // bloco: comissão fixa por DI/Duimp
+  totalExtras       Float        @default(0) // adições/reduções manuais
+  totalFinal        Float        @default(0) // totalBase + totalExtras
   detalhes      Json             @default("[]") // snapshot dos cálculos por cliente
   status        CommissionStatus @default(DRAFT)
   rejectReason  String?          @db.Text
