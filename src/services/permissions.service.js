@@ -69,26 +69,30 @@ function defaults() {
   return out;
 }
 
+// Flag de boot: ensureDefaults só efetivamente roda na 1ª chamada do processo.
+// Sem isso, cada request que precisa de perms (auth/me, clientes, permissions)
+// fazia até 90 queries sequenciais — causando 15-17s no cold path com Neon distante.
+let _defaultsEnsured = false;
+let _defaultsPromise = null;
+
 export async function ensureDefaults() {
-  // Popula tudo se vazia
-  const count = await prisma.rolePermission.count();
-  if (count === 0) {
-    await prisma.rolePermission.createMany({ data: defaults() });
-    return;
-  }
-  // Caso já existam dados, adiciona somente módulos novos sem sobrescrever existentes.
-  const all = defaults();
-  for (const d of all) {
-    const exists = await prisma.rolePermission.findFirst({
-      where: { role: d.role, partnerType: d.partnerType, module: d.module },
-      select: { id: true },
-    });
-    if (!exists) {
-      try {
-        await prisma.rolePermission.create({ data: d });
-      } catch {} // ignora unique conflict
+  if (_defaultsEnsured) return;
+  if (_defaultsPromise) return _defaultsPromise; // dedup chamadas concorrentes
+  _defaultsPromise = (async () => {
+    try {
+      // 1 query só: skipDuplicates aproveita o @@unique([role, partnerType, module])
+      // pra inserir só o que falta. Custa o mesmo que um createMany normal.
+      await prisma.rolePermission.createMany({
+        data: defaults(),
+        skipDuplicates: true,
+      });
+      _defaultsEnsured = true;
+    } catch (e) {
+      _defaultsPromise = null; // permite retry no próximo request
+      throw e;
     }
-  }
+  })();
+  return _defaultsPromise;
 }
 
 export async function listAll() {
@@ -115,12 +119,16 @@ export async function update(id, data) {
       : [];
   }
   if (Object.keys(upd).length === 0) return exists; // nada a atualizar
-  return prisma.rolePermission.update({ where: { id }, data: upd });
+  const r = await prisma.rolePermission.update({ where: { id }, data: upd });
+  invalidatePermsCache();
+  return r;
 }
 
 export async function resetToDefaults() {
   await prisma.rolePermission.deleteMany({});
   await prisma.rolePermission.createMany({ data: defaults() });
+  _defaultsEnsured = true; // já estamos populando, evita re-checar no próximo
+  invalidatePermsCache();
   return { ok: true };
 }
 
@@ -137,11 +145,23 @@ function profileFromKey(key) {
   return PROFILES.find(p => p.key === key);
 }
 
+// Cache em memória das perms efetivas por chave de perfil (não por user — todos
+// os PARTNER_ESCRITORIO compartilham as mesmas perms). TTL curto pra refletir
+// mudanças do admin em até 30s sem precisar restart.
+const _permsCache = new Map(); // profileKey -> { perms, expiresAt }
+const PERMS_TTL_MS = 30_000;
+
+function invalidatePermsCache() { _permsCache.clear(); }
+
 // Retorna { modules: [], byModule: { mod: { canView, canCreate, canEdit, canDelete, restrictedFields }}}
 export async function effectivePerms(user) {
   if (!user) return { modules: [], byModule: {}, profileKey: null };
-  await ensureDefaults();
   const key = profileKeyOf(user);
+  const cached = _permsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { ...cached.perms, role: user.role, partnerType: user.partnerType || null };
+  }
+  await ensureDefaults();
   const p = profileFromKey(key);
   if (!p) return { modules: [], byModule: {}, profileKey: null };
   const rows = await prisma.rolePermission.findMany({
@@ -156,7 +176,9 @@ export async function effectivePerms(user) {
     };
     if (r.canView) modules.push(r.module);
   }
-  return { modules, byModule, profileKey: key, role: user.role, partnerType: user.partnerType || null };
+  const perms = { modules, byModule, profileKey: key };
+  _permsCache.set(key, { perms, expiresAt: Date.now() + PERMS_TTL_MS });
+  return { ...perms, role: user.role, partnerType: user.partnerType || null };
 }
 
 // Helper síncrono para lookup com perms já carregadas

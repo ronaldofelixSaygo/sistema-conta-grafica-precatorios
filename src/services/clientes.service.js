@@ -13,19 +13,24 @@ function toNumberOrNull(v) {
 }
 
 export async function listClientes(user) {
-  const items = await prisma.cliente.findMany({
-    where: clienteScope(user),
-    orderBy: { nome: 'asc' },
-  });
-  const restricted = await getRestrictedFields(user);
+  // Paralelo: a busca de items e o cálculo de restricted independem entre si.
+  const [items, restricted] = await Promise.all([
+    prisma.cliente.findMany({
+      where: clienteScope(user),
+      orderBy: { nome: 'asc' },
+    }),
+    getRestrictedFields(user),
+  ]);
   return items.map(c => applyRestrictions(c, restricted));
 }
 
 export async function getCliente(user, id) {
   const where = { ...clienteScope(user), id: Number(id) };
-  const c = await prisma.cliente.findFirst({ where });
+  const [c, restricted] = await Promise.all([
+    prisma.cliente.findFirst({ where }),
+    getRestrictedFields(user),
+  ]);
   if (!c) return null;
-  const restricted = await getRestrictedFields(user);
   return applyRestrictions(c, restricted);
 }
 
