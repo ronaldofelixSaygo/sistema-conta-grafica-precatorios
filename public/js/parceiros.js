@@ -1,13 +1,14 @@
 window.VIEW_parceiros = (() => {
-  let cache = [], stagesMeta = null;
+  let cache = [], stagesMeta = null, kinds = [];
 
   async function render() {
     const el = document.getElementById('view-parceiros');
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
-      [cache, stagesMeta] = await Promise.all([
+      [cache, stagesMeta, kinds] = await Promise.all([
         API.get('/api/parceiros', null, { ttl: 60000 }),
         API.get('/api/kanban/meta', null, { ttl: 120000 }),
+        API.get('/api/partner-kinds/active', null, { ttl: 60000 }),
       ]);
       el.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
@@ -23,12 +24,18 @@ window.VIEW_parceiros = (() => {
   function stageLabel(k) { return stagesMeta?.stageMeta?.[k]?.label || k; }
 
   function drawTable() {
+    const kindLabel = code => {
+      const k = kinds.find(x => x.code === code);
+      if (k) return k.label;
+      const fallback = { ESCRITORIO:'Escritório', ARMADOR_LOGISTICO:'Armador', OUTRO:'Outro' };
+      return fallback[code] || code || '—';
+    };
     document.getElementById('pa-table').innerHTML = UI.table({
       cols: [
         { label: 'Nome', html: true, get: r => `${UI.escapeHtml(r.nome)}${r.isSaygo?' <span class="muted small">(Saygo)</span>':''}` },
         { label: 'Tipo', html: true, get: r => {
-          const m = { ESCRITORIO:'Escritório', ARMADOR_LOGISTICO:'Armador', OUTRO:'Outro' };
-          return `<span class="pill ${r.type||'OUTRO'}">${m[r.type||'OUTRO']}</span>`;
+          const code = r.kindCode || r.type || 'OUTRO';
+          return `<span class="pill ${r.type||'OUTRO'}">${UI.escapeHtml(kindLabel(code))}</span>`;
         }},
         { label: 'CNPJ', key: 'cnpj' },
         { label: 'Telefone', key: 'telefone' },
@@ -68,11 +75,12 @@ window.VIEW_parceiros = (() => {
         <div><label>Telefone</label><input name="telefone" data-mask="phone" maxlength="15" value="${UI.escapeHtml(p.telefone||'')}"></div>
         <div class="full"><label>E-mail</label><input type="email" name="email" value="${UI.escapeHtml(p.email||'')}"></div>
         <div class="full"><label>Tipo de Interveniente *</label>
-          <select name="type" required>
-            <option value="OUTRO"             ${(p.type||'OUTRO')==='OUTRO'?'selected':''}>Outro</option>
-            <option value="ESCRITORIO"        ${p.type==='ESCRITORIO'?'selected':''}>Escritório (acessa clientes, movs, comissões)</option>
-            <option value="ARMADOR_LOGISTICO" ${p.type==='ARMADOR_LOGISTICO'?'selected':''}>Armador Logístico (somente Kanban)</option>
+          <select name="kindCode" required>
+            ${kinds.map(k =>
+              `<option value="${UI.escapeHtml(k.code)}" ${(p.kindCode||p.type||'OUTRO')===k.code?'selected':''}>${UI.escapeHtml(k.label)}</option>`
+            ).join('')}
           </select>
+          <div class="muted small" style="margin-top:.3rem">Adicione novos tipos em <strong>Parâmetros → Tipos de Interveniente</strong>.</div>
         </div>
         <div class="full"><label style="margin-bottom:.4rem">Etapas em que atua</label>
           <div class="checkbox-grid">${stagesChecks || '<div class="muted small">Cadastre etapas em Parametros antes.</div>'}</div>
@@ -91,7 +99,7 @@ window.VIEW_parceiros = (() => {
       const data = {
         nome: fd.get('nome'), cnpj: fd.get('cnpj'), telefone: fd.get('telefone'),
         email: fd.get('email'), notes: fd.get('notes'),
-        type: fd.get('type') || 'OUTRO',
+        kindCode: fd.get('kindCode') || 'OUTRO',
         isSaygo: !!fd.get('isSaygo'),
         stages: fd.getAll('stages'),
       };

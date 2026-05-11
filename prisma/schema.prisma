@@ -367,10 +367,32 @@ model PartnerRequest {
 // ============================================================
 //   PARCEIROS (cadastro de empresas que prestam serviço)
 // ============================================================
+// PartnerType permanece como "bucket de capacidades" que o código consulta pra
+// decidir o que cada parceiro pode fazer. Os TIPOS visíveis pro usuário ficam
+// no model PartnerKind abaixo (cadastráveis em Parâmetros).
 enum PartnerType {
-  ESCRITORIO          // contabilidade/escritório: vê tudo (clientes, movs, comissões)
+  ESCRITORIO          // vê tudo (clientes, movs, comissões)
   ARMADOR_LOGISTICO   // só Kanban
   OUTRO               // só Kanban (default seguro)
+}
+
+// Tipos de interveniente cadastráveis. Os 3 built-in (ESCRITORIO,
+// ARMADOR_LOGISTICO, OUTRO) são criados automaticamente no boot e não podem
+// ser deletados. O admin pode criar outros (ex.: CONTABILIDADE, DESPACHANTE).
+model PartnerKind {
+  id          String      @id @default(uuid())
+  code        String      @unique  // ex.: 'ESCRITORIO', 'CONTABILIDADE'
+  label       String                // ex.: 'Escritório', 'Contabilidade'
+  behavior    PartnerType            // capacidade herdada
+  description String?
+  active      Boolean     @default(true)
+  isBuiltin   Boolean     @default(false)
+  sort        Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  parceiros   Parceiro[]
+  @@map("partner_kinds")
 }
 
 model Parceiro {
@@ -380,6 +402,8 @@ model Parceiro {
   telefone  String?
   email     String?
   type      PartnerType @default(OUTRO)
+  kindCode  String?
+  kind      PartnerKind? @relation(fields: [kindCode], references: [code])
   stages    String[]
   isSaygo   Boolean     @default(false)
   active    Boolean     @default(true)
@@ -394,6 +418,7 @@ model Parceiro {
   @@index([nome])
   @@index([cnpj])
   @@index([type])
+  @@index([kindCode])
   @@map("parceiros")
 }
 

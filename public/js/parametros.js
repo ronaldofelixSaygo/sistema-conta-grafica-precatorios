@@ -3,7 +3,7 @@ window.VIEW_parametros = (() => {
   let stages = [];
   // Persiste a aba selecionada entre re-renders e re-aberturas de tela
   const TAB_STORAGE_KEY = 'vision.parametros.activeTab';
-  const VALID_TABS = ['permissoes', 'etapas', 'email', 'ia', 'ncm'];
+  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'email', 'ia', 'ncm'];
   let activeTab = (() => {
     try {
       const v = localStorage.getItem(TAB_STORAGE_KEY);
@@ -48,6 +48,7 @@ window.VIEW_parametros = (() => {
       <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem;flex-wrap:wrap">
         <button class="btn ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissões</button>
         <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
+        <button class="btn ${activeTab==='tipos'?'primary':''}"       data-tab="tipos">Tipos de Interveniente</button>
         <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail</button>
         <button class="btn ${activeTab==='ia'?'primary':''}"          data-tab="ia">IA (extração de invoice)</button>
         <button class="btn ${activeTab==='ncm'?'primary':''}"         data-tab="ncm">NCM / Anuentes</button>
@@ -55,10 +56,115 @@ window.VIEW_parametros = (() => {
       <div id="param-content"></div>`;
     el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { setActiveTab(b.dataset.tab); render(); });
     if (activeTab === 'permissoes') return loadPerms();
+    if (activeTab === 'tipos')      return loadKinds();
     if (activeTab === 'email')      return loadEmail();
     if (activeTab === 'ia')         return loadIa();
     if (activeTab === 'ncm')        return loadNcm();
     return loadStages();
+  }
+
+  // ===== Tipos de Interveniente =====
+  const BEHAVIOR_LABEL = {
+    ESCRITORIO:        'Escritório (acesso completo: clientes, movs, comissões)',
+    ARMADOR_LOGISTICO: 'Armador Logístico (apenas Kanban)',
+    OUTRO:             'Outro (apenas Kanban)',
+  };
+  async function loadKinds() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = '<div class="muted">Carregando...</div>';
+    let list;
+    try { list = await API.get('/api/partner-kinds'); }
+    catch (e) { c.innerHTML = `<div class="err">Falha ao carregar: ${UI.escapeHtml(e.message)}</div>`; return; }
+    c.innerHTML = `
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem">
+          <h3 style="margin:0">🏷️ Tipos de Interveniente Aduaneiro</h3>
+          <button class="btn primary" id="kind-new">+ Novo tipo</button>
+        </div>
+        <p class="muted small" style="margin-bottom:1rem">
+          Cada tipo herda as permissões de um <strong>comportamento</strong> (Escritório, Armador ou Outro).
+          Adicione tipos personalizados (ex.: Contabilidade, Despachante) e atribua aos seus intervenientes
+          em <strong>Intervenientes Aduaneiros</strong>. Os 3 tipos padrão não podem ser excluídos, só desativados.
+        </p>
+        <table class="table">
+          <thead><tr>
+            <th>Código</th><th>Nome amigável</th><th>Comportamento</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody>${list.map(k => `
+            <tr>
+              <td><code style="font-size:11px">${UI.escapeHtml(k.code)}</code> ${k.isBuiltin?'<span class="muted small">(padrão)</span>':''}</td>
+              <td>${UI.escapeHtml(k.label)}</td>
+              <td><span class="pill ${k.behavior}">${UI.escapeHtml(BEHAVIOR_LABEL[k.behavior]||k.behavior)}</span></td>
+              <td>${k.active?'<span class="pill green">Ativo</span>':'<span class="pill" style="background:var(--s3)">Inativo</span>'}</td>
+              <td><div class="actions">
+                <button class="btn small" data-edit="${k.id}">Editar</button>
+                ${k.isBuiltin?'':`<button class="btn small danger" data-del="${k.id}">x</button>`}
+              </div></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    document.getElementById('kind-new').onclick = () => openKindForm();
+    c.addEventListener('click', e => {
+      const eid = e.target.getAttribute('data-edit');
+      const did = e.target.getAttribute('data-del');
+      if (eid) openKindForm(list.find(k => k.id === eid));
+      if (did) removeKind(did);
+    });
+  }
+  function openKindForm(k = {}) {
+    const isNew = !k.id;
+    const readonlyCode = k.isBuiltin ? 'readonly' : '';
+    UI.openModal(isNew?'Novo tipo de interveniente':'Editar tipo', `
+      <form id="form-kind" class="form-grid">
+        <div><label>Código *</label>
+          <input name="code" required ${readonlyCode} value="${UI.escapeHtml(k.code||'')}" placeholder="CONTABILIDADE">
+          <div class="muted small" style="margin-top:.2rem">Maiúsculas + underscore. Ex.: CONTABILIDADE, DESPACHANTE.</div>
+        </div>
+        <div><label>Nome amigável *</label>
+          <input name="label" required value="${UI.escapeHtml(k.label||'')}" placeholder="Contabilidade">
+        </div>
+        <div class="full"><label>Comportamento *</label>
+          <select name="behavior" required ${k.isBuiltin?'disabled':''}>
+            ${['ESCRITORIO','ARMADOR_LOGISTICO','OUTRO'].map(b =>
+              `<option value="${b}" ${k.behavior===b?'selected':''}>${BEHAVIOR_LABEL[b]}</option>`
+            ).join('')}
+          </select>
+          <div class="muted small" style="margin-top:.2rem">${k.isBuiltin?'Comportamento dos tipos padrão é fixo.':'Define as permissões herdadas. Pode ajustar depois em Permissões.'}</div>
+        </div>
+        <div class="full"><label>Descrição (opcional)</label>
+          <textarea name="description" rows="2">${UI.escapeHtml(k.description||'')}</textarea>
+        </div>
+        <div><label><input type="checkbox" name="active" ${k.active!==false?'checked':''}> Ativo</label></div>
+        <div><label>Ordem</label><input type="number" name="sort" value="${k.sort ?? 99}"></div>
+        <div class="full form-actions">
+          <button type="button" class="btn" id="kind-cancel">Cancelar</button>
+          <button type="submit" class="btn primary">Salvar</button>
+        </div>
+      </form>`);
+    document.getElementById('kind-cancel').onclick = UI.closeModal;
+    document.getElementById('form-kind').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const data = {
+        code: fd.get('code'),
+        label: fd.get('label'),
+        behavior: fd.get('behavior') || k.behavior || 'OUTRO',
+        description: fd.get('description'),
+        active: !!fd.get('active'),
+        sort: parseInt(fd.get('sort'), 10) || 0,
+      };
+      try {
+        if (isNew) await API.post('/api/partner-kinds', data);
+        else       await API.put(`/api/partner-kinds/${k.id}`, data);
+        UI.toast('Tipo salvo'); UI.closeModal(); loadKinds();
+      } catch (e) { UI.toast(e.message, 'err'); }
+    };
+  }
+  async function removeKind(id) {
+    if (!confirm('Excluir esse tipo? Só funciona se nenhum interveniente estiver usando.')) return;
+    try { await API.del(`/api/partner-kinds/${id}`); UI.toast('Excluído'); loadKinds(); }
+    catch (e) { UI.toast(e.message, 'err'); }
   }
 
   // ===== NCM / Anuentes =====
