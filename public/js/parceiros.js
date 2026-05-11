@@ -57,7 +57,7 @@ window.VIEW_parceiros = (() => {
     const isNew = !p.id;
     const stagesList = stagesMeta?.stagesOrder || [];
     const stagesChecks = stagesList.map(k => `
-      <label style="display:flex;align-items:center;gap:.4rem;padding:4px 8px;background:var(--s2);border-radius:6px;border:1px solid var(--bd);cursor:pointer">
+      <label title="${UI.escapeHtml(stageLabel(k))}">
         <input type="checkbox" name="stages" value="${k}" ${p.stages?.includes(k)?'checked':''}>
         <span>${UI.escapeHtml(stageLabel(k))}</span>
       </label>`).join('');
@@ -75,7 +75,7 @@ window.VIEW_parceiros = (() => {
           </select>
         </div>
         <div class="full"><label style="margin-bottom:.4rem">Etapas em que atua</label>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">${stagesChecks || '<div class="muted small">Cadastre etapas em Parametros antes.</div>'}</div>
+          <div class="checkbox-grid">${stagesChecks || '<div class="muted small">Cadastre etapas em Parametros antes.</div>'}</div>
         </div>
         <div class="full"><label><input type="checkbox" name="isSaygo" ${p.isSaygo?'checked':''}> E a propria Saygo</label></div>
         <div class="full"><label>Observacoes</label><textarea name="notes" rows="2">${UI.escapeHtml(p.notes||'')}</textarea></div>

@@ -6,6 +6,7 @@ import { requireStaffOrPartnerEscritorio } from '../middlewares/role.middleware.
 const router = Router();
 router.use(requireAuth);
 
+router.get   ('/export/excel',           ctrl.exportExcel);
 router.get   ('/',                       ctrl.list);
 router.get   ('/:id',                    ctrl.get);
 router.post  ('/',                       requireStaffOrPartnerEscritorio, ctrl.create);

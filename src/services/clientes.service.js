@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import { prisma } from '../config/prisma.js';
 import { clienteScope, canMutateCliente } from '../utils/scope.js';
 import { effectivePerms, applyRestrictions } from './permissions.service.js';
@@ -89,6 +90,82 @@ export async function updateCliente(user, id, data) {
 export async function deleteCliente(user, id) {
   if (!canMutateCliente(user)) { const e=new Error('Sem permissão'); e.status=403; throw e; }
   return prisma.cliente.delete({ where: { id: Number(id) } });
+}
+
+// Exporta TODOS os clientes do escopo do usuário pra Excel.
+// Inclui todas as colunas da tabela, respeitando os restrictedFields do perfil.
+export async function exportClientesExcel(user, res) {
+  const [items, restricted] = await Promise.all([
+    prisma.cliente.findMany({
+      where: clienteScope(user),
+      orderBy: { nome: 'asc' },
+    }),
+    getRestrictedFields(user),
+  ]);
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Vision — Conta Gráfica';
+  wb.created = new Date();
+  const ws = wb.addWorksheet('Clientes');
+
+  // Define todas as colunas (mesma ordem do schema Cliente)
+  const allColumns = [
+    { header: 'ID',                  key: 'id',                 width: 8  },
+    { header: 'Nome',                key: 'nome',               width: 40 },
+    { header: 'CNPJ',                key: 'cnpj',               width: 20 },
+    { header: 'CNPJ Filial',         key: 'cnpjFilial',         width: 20 },
+    { header: 'Escritório',          key: 'escritorio',         width: 22 },
+    { header: 'Locação Sala',        key: 'locacaoSala',        width: 14 },
+    { header: 'Abertura Filial',     key: 'aberturaFilial',     width: 14 },
+    { header: 'Reativação IE',       key: 'reativacaoIe',       width: 14 },
+    { header: 'Conta Gráfica',       key: 'contaGrafica',       width: 14 },
+    { header: 'Cliente Certificado', key: 'clienteCertificado', width: 18 },
+    { header: 'Parceiro Sala',       key: 'parceiroSala',       width: 22 },
+    { header: 'Parceiro Filial',     key: 'parceiroFilial',     width: 22 },
+    { header: 'Parceiro IE',         key: 'parceiroIe',         width: 22 },
+    { header: '% Comissão',          key: 'percentualComissao', width: 12 },
+    { header: 'Dia Fechamento',      key: 'diaFechamento',      width: 14 },
+    { header: 'Observações',         key: 'observacoes',        width: 50 },
+    { header: 'Criado em',           key: 'createdAt',          width: 18 },
+    { header: 'Atualizado em',       key: 'updatedAt',          width: 18 },
+  ];
+  // Remove colunas restritas para o perfil do usuário
+  ws.columns = allColumns.filter(c => !restricted.includes(c.key));
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
+
+  const fmtDateTime = d => d ? new Date(d).toLocaleString('pt-BR') : '';
+  for (const c of items) {
+    const masked = applyRestrictions(c, restricted);
+    ws.addRow({
+      id: masked.id,
+      nome: masked.nome,
+      cnpj: masked.cnpj,
+      cnpjFilial: masked.cnpjFilial,
+      escritorio: masked.escritorio,
+      locacaoSala: masked.locacaoSala,
+      aberturaFilial: masked.aberturaFilial,
+      reativacaoIe: masked.reativacaoIe,
+      contaGrafica: masked.contaGrafica,
+      clienteCertificado: masked.clienteCertificado,
+      parceiroSala: masked.parceiroSala,
+      parceiroFilial: masked.parceiroFilial,
+      parceiroIe: masked.parceiroIe,
+      percentualComissao: masked.percentualComissao,
+      diaFechamento: masked.diaFechamento,
+      observacoes: masked.observacoes,
+      createdAt: fmtDateTime(masked.createdAt),
+      updatedAt: fmtDateTime(masked.updatedAt),
+    });
+  }
+  // Freeze a primeira linha pra ficar sticky na rolagem
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+  const filename = `clientes-${new Date().toISOString().slice(0,10)}.xlsx`;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  await wb.xlsx.write(res);
+  res.end();
 }
 
 // Atualização em lote de comissão e dia de fechamento

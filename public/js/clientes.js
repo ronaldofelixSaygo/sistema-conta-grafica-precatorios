@@ -82,7 +82,10 @@ window.VIEW_clientes = (() => {
           <option value="">Todos os escritórios</option>
           ${escritorios.map(e => `<option value="${UI.escapeHtml(e)}">${UI.escapeHtml(e)}</option>`).join('')}
         </select>
-        ${canMutate ? '<button class="btn primary" id="btn-new-cli" style="margin-left:auto">+ Novo Cliente</button>' : ''}
+        <div style="margin-left:auto;display:flex;gap:.5rem">
+          <button class="btn" id="btn-export-cli" title="Exportar todos os clientes para Excel">⤓ Excel</button>
+          ${canMutate ? '<button class="btn primary" id="btn-new-cli">+ Novo Cliente</button>' : ''}
+        </div>
       </div>
       <div id="cli-table"></div>`;
 
@@ -118,6 +121,28 @@ window.VIEW_clientes = (() => {
     draw();
     document.getElementById('cli-search').addEventListener('input', draw);
     document.getElementById('cli-esc').addEventListener('change', draw);
+
+    document.getElementById('btn-export-cli').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-export-cli');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Gerando...';
+      try {
+        const r = await fetch('/api/clientes/export/excel', { credentials: 'include' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `clientes-${new Date().toISOString().slice(0,10)}.xlsx`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        UI.toast('Excel exportado');
+      } catch (e) {
+        UI.toast('Falha ao exportar: ' + e.message, 'err');
+      } finally {
+        btn.disabled = false; btn.textContent = orig;
+      }
+    });
 
     if (canMutate) {
       document.getElementById('btn-new-cli').addEventListener('click', () => openForm());

@@ -44,3 +44,10 @@ export async function bulkComissao(req, res, next) {
     res.json(r);
   } catch (e) { next(e); }
 }
+
+export async function exportExcel(req, res, next) {
+  try {
+    await svc.exportClientesExcel(req.user, res);
+    await logAction({ user: req.user, action: 'EXPORT', entity: 'cliente', details: 'excel', ip: req.ip });
+  } catch (e) { next(e); }
+}
