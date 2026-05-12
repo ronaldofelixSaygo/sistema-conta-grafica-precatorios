@@ -35,6 +35,16 @@ export async function createUser(input) {
     const e = new Error('Para CLIENT, informe clienteId'); e.status = 400; throw e;
   }
 
+  // Checa duplicidade de e-mail antes de chamar o Prisma (mensagem melhor)
+  const emailNorm = String(email).trim().toLowerCase();
+  const existing = await prisma.user.findUnique({ where: { email: emailNorm }, select: { id: true, active: true } });
+  if (existing) {
+    const e = new Error(existing.active
+      ? `Já existe um usuário ativo com o e-mail ${emailNorm}.`
+      : `Já existe um usuário (inativo) com o e-mail ${emailNorm}. Reative em vez de criar.`);
+    e.status = 409; throw e;
+  }
+
   // Se PARTNER, deriva officeName do nome do parceiro (se nao fornecido)
   let finalOfficeName = officeName || null;
   if (role === 'PARTNER' && parceiroId) {
@@ -46,7 +56,7 @@ export async function createUser(input) {
   const passwordHash = await bcrypt.hash(password, 10);
   return prisma.user.create({
     data: {
-      email: email.trim().toLowerCase(),
+      email: emailNorm,
       passwordHash, name, role,
       officeName: finalOfficeName,
       clienteId: clienteId ? Number(clienteId) : null,
