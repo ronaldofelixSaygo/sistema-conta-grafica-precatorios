@@ -11,6 +11,9 @@ window.VIEW_clientes = (() => {
       return codeOuType === 'ESCRITORIO';
     });
   }
+  function despachantesDisponiveis() {
+    return parceirosCache.filter(p => (p.kindCode || '').toUpperCase() === 'DESPACHANTE');
+  }
 
   function isYes(v) {
     if (v == null) return false;
@@ -194,6 +197,17 @@ window.VIEW_clientes = (() => {
               ${current && !inList ? `<option value="${UI.escapeHtml(current)}" selected>${UI.escapeHtml(current)} (não cadastrado como Escritório)</option>` : ''}
             </select>
             <div class="muted small" style="margin-top:.2rem">Apenas Intervenientes do tipo <strong>Escritório</strong>. Cadastre/edite em Intervenientes Aduaneiros.</div>`;
+          })()}
+        </div>
+        <div class="full"><label>Despachante (responsável por subir docs nas Desonerações)</label>
+          ${(() => {
+            const opts = despachantesDisponiveis();
+            const current = cli.despachanteId || '';
+            return `<select name="despachante_id">
+              <option value="">— sem despachante (cliente sobe documentos) —</option>
+              ${opts.map(p => `<option value="${UI.escapeHtml(p.id)}" ${p.id===current?'selected':''}>${UI.escapeHtml(p.nome)}</option>`).join('')}
+            </select>
+            <div class="muted small" style="margin-top:.2rem">Apenas Intervenientes do tipo <strong>Despachante</strong>. Se não houver, o próprio cliente fica responsável pela etapa de documentos da importação.</div>`;
           })()}
         </div>
 

@@ -9,34 +9,40 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 
 const router = Router();
 router.use(requireAuth);
 
-// Helpers
-router.get('/meta',             ctrl.meta);
-router.get('/required-docs',    ctrl.getRequiredDocsForUI);
+// Helpers (qualquer logado)
+router.get('/meta',          ctrl.meta);
+router.get('/required-docs', ctrl.getRequiredDocsForUI);
 
-// Config docs obrigatórios (gerenciada em Parâmetros)
+// Config docs obrigatórios (só admin/escritório edita; ler é aberto)
 router.get('/doc-configs',                  ctrl.listDocConfigs);
 router.post('/doc-configs',                 requireStaffOrPartnerEscritorio, ctrl.upsertDocConfig);
 router.delete('/doc-configs/:id',           requireStaffOrPartnerEscritorio, ctrl.removeDocConfig);
 
-// CRUD principal
+// Config de responsável por etapa
+router.get('/step-configs',                 ctrl.listStepConfigs);
+router.post('/step-configs',                requireStaffOrPartnerEscritorio, ctrl.upsertStepConfig);
+
+// CRUD principal — scope é aplicado no service (cada user vê só o que pode).
+// Criação só pra staff/escritório (cliente não inicia processo por enquanto).
 router.get('/',                  ctrl.list);
 router.post('/',                 requireStaffOrPartnerEscritorio, ctrl.create);
 router.get('/:id',               ctrl.get);
 router.put('/:id',               requireStaffOrPartnerEscritorio, ctrl.update);
 router.post('/:id/step/:etapa',  requireStaffOrPartnerEscritorio, ctrl.setStepParceiro);
-router.post('/:id/advance',      requireStaffOrPartnerEscritorio, ctrl.advance);
+// Advance e demais ações: autorização granular no service (canActOnStep)
+router.post('/:id/advance',      ctrl.advance);
 router.post('/:id/approve',      requireStaffOrPartnerEscritorio, ctrl.approve);
 router.post('/:id/cancel',       requireStaffOrPartnerEscritorio, ctrl.cancel);
 
-// Notas
-router.post('/:id/notas',                    requireStaffOrPartnerEscritorio, ctrl.addNota);
-router.post('/notas/:notaId/validar',        requireStaffOrPartnerEscritorio, ctrl.validarNota);
-router.post('/notas/:notaId/oficial', upload.single('file'), requireStaffOrPartnerEscritorio, ctrl.anexarOficial);
+// Notas — cliente também precisa adicionar/anexar na sua etapa
+router.post('/:id/notas',                    ctrl.addNota);
+router.post('/notas/:notaId/validar',        ctrl.validarNota);
+router.post('/notas/:notaId/oficial', upload.single('file'), ctrl.anexarOficial);
 router.get('/notas/:notaId/oficial',         ctrl.downloadOficial);
 router.delete('/notas/:notaId',              requireStaffOrPartnerEscritorio, ctrl.removeNota);
 
 // Documentos
-router.post('/:id/documentos', upload.single('file'), requireStaffOrPartnerEscritorio, ctrl.addDocumento);
+router.post('/:id/documentos', upload.single('file'), ctrl.addDocumento);
 router.get('/documentos/:docId',            ctrl.downloadDoc);
 router.delete('/documentos/:docId',         requireStaffOrPartnerEscritorio, ctrl.removeDoc);
 

@@ -2,10 +2,16 @@ import * as svc from '../services/desoneracoes.service.js';
 import { logAction } from '../services/audit.service.js';
 
 export async function list(req, res, next) {
-  try { res.json(await svc.listDesoneracoes(req.query || {})); } catch (e) { next(e); }
+  try { res.json(await svc.listDesoneracoes(req.user, req.query || {})); } catch (e) { next(e); }
 }
 export async function get(req, res, next) {
-  try { res.json(await svc.getDesoneracao(req.params.id)); } catch (e) { next(e); }
+  try { res.json(await svc.getDesoneracao(req.params.id, req.user)); } catch (e) { next(e); }
+}
+export async function listStepConfigs(_req, res, next) {
+  try { res.json(await svc.listStepConfigs()); } catch (e) { next(e); }
+}
+export async function upsertStepConfig(req, res, next) {
+  try { res.json(await svc.upsertStepConfig(req.body || {})); } catch (e) { next(e); }
 }
 export async function create(req, res, next) {
   try {

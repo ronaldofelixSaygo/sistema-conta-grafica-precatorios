@@ -17,8 +17,22 @@ window.UI = (() => {
     modalBg.classList.remove('hidden');
   }
   function closeModal() { modalBg.classList.add('hidden'); modalBody.innerHTML = ''; }
+  // Fechar SÓ via:
+  //   - botão ✕ do header (intenção explícita)
+  //   - botão Cancelar/Salvar do form (chamam closeModal programaticamente)
+  // ESC e clique fora do modal NÃO fecham, pra evitar perda acidental de dados.
   document.getElementById('modal-close').onclick = closeModal;
-  modalBg.addEventListener('click', e => { if (e.target === modalBg) closeModal(); });
+  modalBg.addEventListener('click', e => {
+    // intencionalmente vazio: clique no backdrop não fecha
+    // (se quiser permitir, troque pra: if (e.target === modalBg) closeModal();)
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (modalBg.classList.contains('hidden')) return;
+    // Modal aberto + ESC → impede fechar e qualquer side-effect do navegador
+    e.preventDefault();
+    e.stopPropagation();
+  }, true /* capture phase: roda antes de qualquer outro handler */);
 
   const fmtMoney = v => (v === null || v === undefined || isNaN(v))
     ? '—'

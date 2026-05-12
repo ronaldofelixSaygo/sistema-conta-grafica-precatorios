@@ -106,6 +106,10 @@ model Cliente {
   // escritório recebe por cada DI/Duimp processada (entra na apuração de
   // comissão como bloco separado). 0 ou null = cliente sem esse processo.
   valorPorDi          Float    @default(0)
+  // Parceiro despachante associado a esse cliente (usado em Desonerações
+  // pra pré-vincular como responsável da etapa DOCS_DESPACHANTE).
+  despachanteId       String?
+  despachante         Parceiro? @relation("ClienteDespachante", fields: [despachanteId], references: [id], onDelete: SetNull)
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -428,6 +432,7 @@ model Parceiro {
   kanbanStages    KanbanStageProgress[]
   commissions     Commission[] @relation("CommissionParceiro")
   desoneracaoSteps DesoneracaoStep[] @relation("DesoneracaoStepParceiro")
+  clientesDespachante Cliente[] @relation("ClienteDespachante")
 
   @@index([nome])
   @@index([cnpj])
@@ -763,7 +768,7 @@ model Desoneracao {
   concludedAt   DateTime?
 
   // Movimentação gerada na conclusão (opcional — aprovada pelo parceiro do protocolo)
-  movimentacaoId Int?
+  movimentacaoId Int?     @unique
   movimentacao   Movimentacao? @relation("DesoneracaoMovimentacao", fields: [movimentacaoId], references: [id], onDelete: SetNull)
 
   createdById   String
@@ -871,4 +876,25 @@ model DesoneracaoDocConfig {
 
   @@unique([modal, etapa, tipoDocumento])
   @@map("desoneracao_doc_config")
+}
+
+// Config admin: define o TIPO DE RESPONSÁVEL por etapa. Determina quem
+// pode avançar cada etapa via permissão runtime (cliente, parceiro de um
+// kind específico, ou ambos como fallback).
+//
+// responsavelTipo:
+//   - 'CLIENTE'             → só o cliente do processo
+//   - 'PARCEIRO_KIND'       → parceiro do kindCode informado, vinculado ao processo
+//   - 'CLIENTE_OU_PARCEIRO' → CLIENTE ou parceiro do kindCode (DOCS_DESPACHANTE usa isso)
+//   - 'SAYGO'               → só ADM/SAYGO
+model DesoneracaoStepConfig {
+  id              String   @id @default(uuid())
+  etapa           String   @unique
+  responsavelTipo String   @default("SAYGO")
+  kindCode        String?  // quando relevante: ESCRITORIO, DESPACHANTE, etc.
+  label           String?  // texto exibido na UI
+  sort            Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@map("desoneracao_step_config")
 }

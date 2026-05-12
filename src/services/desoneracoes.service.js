@@ -5,11 +5,59 @@
 //   DOCS_DESPACHANTE → EMISSAO_DMI → EMISSAO_NF → VALIDACAO_NF →
 //   ENVIO_NF_OFICIAL → PROTOCOLO_ICMS → (AGUARDANDO_APROVACAO) → CONCLUIDA
 //
-// Cada etapa registra o parceiro responsável, permitindo consolidação por
-// parceiro (DesoneracaoStep). Documentos obrigatórios são configuráveis em
-// DesoneracaoDocConfig por (modal, etapa).
+// Multi-actor: cada etapa tem um responsável determinado pela DesoneracaoStepConfig
+// (CLIENTE / PARCEIRO_KIND / CLIENTE_OU_PARCEIRO / SAYGO). Auto-vínculo:
+//   - DOCS_DESPACHANTE → cliente.despachanteId (se houver) ou cliente
+//   - EMISSAO_DMI, VALIDACAO_NF, PROTOCOLO_ICMS → parceiro com nome = cliente.escritorio
+//   - EMISSAO_NF, ENVIO_NF_OFICIAL → cliente (não tem parceiroId)
 // =====================================================================
 import { prisma } from '../config/prisma.js';
+
+// Defaults da config de responsáveis por etapa (semeadas no boot).
+const STEP_CONFIG_DEFAULTS = [
+  { etapa: 'DOCS_DESPACHANTE', responsavelTipo: 'CLIENTE_OU_PARCEIRO', kindCode: 'DESPACHANTE', label: 'Cliente ou Despachante', sort: 1 },
+  { etapa: 'EMISSAO_DMI',      responsavelTipo: 'PARCEIRO_KIND',       kindCode: 'ESCRITORIO',  label: 'Escritório',              sort: 2 },
+  { etapa: 'EMISSAO_NF',       responsavelTipo: 'CLIENTE',             kindCode: null,          label: 'Cliente',                 sort: 3 },
+  { etapa: 'VALIDACAO_NF',     responsavelTipo: 'PARCEIRO_KIND',       kindCode: 'ESCRITORIO',  label: 'Escritório',              sort: 4 },
+  { etapa: 'ENVIO_NF_OFICIAL', responsavelTipo: 'CLIENTE',             kindCode: null,          label: 'Cliente',                 sort: 5 },
+  { etapa: 'PROTOCOLO_ICMS',   responsavelTipo: 'PARCEIRO_KIND',       kindCode: 'ESCRITORIO',  label: 'Escritório',              sort: 6 },
+];
+
+let _stepConfigEnsured = false;
+async function ensureStepConfigDefaults() {
+  if (_stepConfigEnsured) return;
+  try {
+    for (const cfg of STEP_CONFIG_DEFAULTS) {
+      await prisma.desoneracaoStepConfig.upsert({
+        where: { etapa: cfg.etapa },
+        create: cfg,
+        update: {}, // não sobrescreve config customizada
+      });
+    }
+    _stepConfigEnsured = true;
+  } catch (e) {
+    console.warn('[desoneracoes] seed stepConfig falhou:', e.message);
+  }
+}
+
+export async function listStepConfigs() {
+  await ensureStepConfigDefaults();
+  return prisma.desoneracaoStepConfig.findMany({ orderBy: { sort: 'asc' } });
+}
+export async function getStepConfig(etapa) {
+  await ensureStepConfigDefaults();
+  return prisma.desoneracaoStepConfig.findUnique({ where: { etapa } });
+}
+export async function upsertStepConfig({ etapa, responsavelTipo, kindCode, label, sort }) {
+  if (!etapa) throw new Error('Etapa obrigatória');
+  const valid = ['CLIENTE','PARCEIRO_KIND','CLIENTE_OU_PARCEIRO','SAYGO'];
+  if (!valid.includes(responsavelTipo)) throw new Error('Tipo de responsável inválido');
+  return prisma.desoneracaoStepConfig.upsert({
+    where: { etapa },
+    create: { etapa, responsavelTipo, kindCode: kindCode || null, label: label || null, sort: Number(sort) || 0 },
+    update: { responsavelTipo, kindCode: kindCode || null, label: label || null, sort: Number(sort) || 0 },
+  });
+}
 
 const STEPS_ORDER = [
   'DOCS_DESPACHANTE',
@@ -61,17 +109,41 @@ async function getRequiredDocs(modal, etapa) {
 
 // === CRUD principal ===
 
-export async function listDesoneracoes(filters = {}) {
+export async function listDesoneracoes(user, filters = {}) {
   const where = {};
   if (filters.clienteId) where.clienteId = Number(filters.clienteId);
   if (filters.status) where.status = filters.status;
   if (filters.currentStep) where.currentStep = filters.currentStep;
   if (filters.from) where.createdAt = { ...(where.createdAt || {}), gte: new Date(filters.from) };
   if (filters.to)   where.createdAt = { ...(where.createdAt || {}), lte: new Date(filters.to) };
-  // Filtro por parceiro: aparece em alguma etapa
   if (filters.parceiroId) {
     where.steps = { some: { parceiroId: filters.parceiroId } };
   }
+
+  // Scope por papel:
+  // - CLIENT: só do próprio cliente
+  // - PARTNER ESCRITORIO: clientes vinculados ao escritório dele (cliente.escritorio = user.officeName)
+  // - PARTNER DESPACHANTE (ou qualquer kind não-Escritório): processos onde aparece em alguma etapa
+  // - SAYGO/ADM: tudo
+  if (user) {
+    if (user.role === 'CLIENT' && user.clienteId) {
+      where.clienteId = user.clienteId;
+    } else if (user.role === 'PARTNER') {
+      const isEscritorio = (user.partnerKindCode || user.partnerType) === 'ESCRITORIO';
+      if (isEscritorio) {
+        const escNome = user.officeName || user.parceiroNome;
+        if (escNome) where.cliente = { is: { escritorio: escNome } };
+        else where.id = '__none__'; // nenhum
+      } else if (user.parceiroId) {
+        // Despachante ou outros: vê desonerações onde é responsável de alguma etapa
+        const existingSteps = where.steps || {};
+        where.steps = { some: { ...((existingSteps && existingSteps.some) || {}), parceiroId: user.parceiroId } };
+      } else {
+        where.id = '__none__';
+      }
+    }
+  }
+
   return prisma.desoneracao.findMany({
     where,
     include: {
@@ -83,11 +155,11 @@ export async function listDesoneracoes(filters = {}) {
   });
 }
 
-export async function getDesoneracao(id) {
+export async function getDesoneracao(id, user = null) {
   const r = await prisma.desoneracao.findUnique({
     where: { id },
     include: {
-      cliente: { select: { id: true, nome: true, escritorio: true, cnpj: true } },
+      cliente: { select: { id: true, nome: true, escritorio: true, cnpj: true, despachanteId: true } },
       creditRequest: { select: { id: true, creditosACompar: true, modalidade: true } },
       createdBy: { select: { id: true, name: true } },
       movimentacao: true,
@@ -111,7 +183,47 @@ export async function getDesoneracao(id) {
     },
   });
   if (!r) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
+
+  // Anexa configs das etapas + flag "podeAtuar" pra cada etapa (se user fornecido)
+  await ensureStepConfigDefaults();
+  const configs = await prisma.desoneracaoStepConfig.findMany();
+  const cfgByEtapa = new Map(configs.map(c => [c.etapa, c]));
+  r.steps = await Promise.all(r.steps.map(async (s) => {
+    const cfg = cfgByEtapa.get(s.etapa) || null;
+    let podeAtuar = false;
+    if (user) {
+      const auth = await canActOnStep(user, r, s);
+      podeAtuar = auth.ok;
+    }
+    return { ...s, config: cfg, podeAtuar };
+  }));
   return r;
+}
+
+// Resolve automaticamente o parceiro responsável de cada etapa com base no
+// cliente (despachante associado + escritório vinculado pelo nome).
+async function resolveDefaultParceirosForCliente(cliente) {
+  // Escritório: busca parceiro com nome = cliente.escritorio (kindCode preferencial ESCRITORIO)
+  let escritorioParceiroId = null;
+  if (cliente.escritorio) {
+    const escritorio = await prisma.parceiro.findFirst({
+      where: {
+        nome: cliente.escritorio,
+        active: true,
+        OR: [{ kindCode: 'ESCRITORIO' }, { type: 'ESCRITORIO' }],
+      },
+      select: { id: true },
+    });
+    escritorioParceiroId = escritorio?.id || null;
+  }
+  return {
+    DOCS_DESPACHANTE: cliente.despachanteId || null, // pode ser null → cliente assume
+    EMISSAO_DMI:      escritorioParceiroId,
+    EMISSAO_NF:       null, // cliente
+    VALIDACAO_NF:     escritorioParceiroId,
+    ENVIO_NF_OFICIAL: null, // cliente
+    PROTOCOLO_ICMS:   escritorioParceiroId,
+  };
 }
 
 export async function createDesoneracao(user, data) {
@@ -121,8 +233,34 @@ export async function createDesoneracao(user, data) {
   }
   const cliente = await prisma.cliente.findUnique({ where: { id: Number(data.clienteId) } });
   if (!cliente) { const e = new Error('Cliente não encontrado'); e.status = 404; throw e; }
+  await ensureStepConfigDefaults();
 
-  // Cria a desoneração + todos os steps em branco numa transação
+  // Auto-vínculo dos parceiros com base no cadastro do cliente.
+  // Overrides explícitos (data.parceiros[etapa]) têm prioridade.
+  const autoParceiros = await resolveDefaultParceirosForCliente(cliente);
+  const finalParceiros = { ...autoParceiros, ...(data.parceiros || {}) };
+
+  // Valida que toda etapa onde o responsável NÃO é CLIENTE tem parceiro definido.
+  const configs = await prisma.desoneracaoStepConfig.findMany();
+  const cfgByEtapa = new Map(configs.map(c => [c.etapa, c]));
+  const erros = [];
+  for (const etapa of STEPS_ORDER.filter(s => s !== 'CONCLUIDO')) {
+    const cfg = cfgByEtapa.get(etapa);
+    if (!cfg) continue;
+    // CLIENTE-only: não precisa de parceiroId
+    if (cfg.responsavelTipo === 'CLIENTE') continue;
+    // CLIENTE_OU_PARCEIRO: parceiro é opcional (cliente assume se faltar)
+    if (cfg.responsavelTipo === 'CLIENTE_OU_PARCEIRO') continue;
+    // PARCEIRO_KIND / SAYGO: exige parceiro definido
+    if (cfg.responsavelTipo === 'PARCEIRO_KIND' && !finalParceiros[etapa]) {
+      erros.push(`Parceiro responsável obrigatório na etapa ${etapa} (${cfg.label || cfg.kindCode})`);
+    }
+  }
+  if (erros.length) {
+    const msg = erros.join('; ') + '. Cadastre o escritório do cliente e o despachante (em Clientes) antes de criar a desoneração.';
+    const e = new Error(msg); e.status = 400; throw e;
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const d = await tx.desoneracao.create({
       data: {
@@ -138,11 +276,10 @@ export async function createDesoneracao(user, data) {
         createdById: user.id,
       },
     });
-    // Cria 1 row por etapa do fluxo (CONCLUIDO é estado final, não tem step ativo)
     const stepsToCreate = STEPS_ORDER.filter(s => s !== 'CONCLUIDO').map(etapa => ({
       desoneracaoId: d.id,
       etapa,
-      parceiroId: data.parceiros?.[etapa] || null,
+      parceiroId: finalParceiros[etapa] || null,
     }));
     await tx.desoneracaoStep.createMany({ data: stepsToCreate });
     await tx.desoneracaoEvento.create({
@@ -189,7 +326,45 @@ export async function setStepParceiro(user, id, etapa, parceiroId) {
   return getDesoneracao(id);
 }
 
-// Avança a etapa atual. Valida obrigatoriedades (docs/NFs) antes.
+// Checa se um user pode atuar numa etapa específica. Retorna { ok, motivo }.
+export async function canActOnStep(user, desoneracao, step) {
+  // ADM e SAYGO podem tudo (override administrativo)
+  if (user.role === 'ADM' || user.role === 'SAYGO') return { ok: true };
+  await ensureStepConfigDefaults();
+  const cfg = await prisma.desoneracaoStepConfig.findUnique({ where: { etapa: step.etapa } });
+  if (!cfg) return { ok: false, motivo: 'Configuração da etapa não encontrada' };
+
+  const isCliente = user.role === 'CLIENT' && user.clienteId === desoneracao.clienteId;
+  const userPartnerKind = user.partnerKindCode || user.partnerType || null;
+  const isParceiroDaEtapa = step.parceiroId && user.parceiroId === step.parceiroId;
+  const isParceiroDoKind  = userPartnerKind && cfg.kindCode && userPartnerKind === cfg.kindCode;
+
+  if (cfg.responsavelTipo === 'CLIENTE') {
+    return isCliente
+      ? { ok: true }
+      : { ok: false, motivo: 'Apenas o cliente desse processo pode avançar esta etapa' };
+  }
+  if (cfg.responsavelTipo === 'PARCEIRO_KIND') {
+    if (!step.parceiroId) return { ok: false, motivo: 'Parceiro responsável não definido nesta etapa' };
+    return (isParceiroDoKind && isParceiroDaEtapa)
+      ? { ok: true }
+      : { ok: false, motivo: `Apenas o parceiro do tipo ${cfg.kindCode} vinculado a esta etapa pode avançar` };
+  }
+  if (cfg.responsavelTipo === 'CLIENTE_OU_PARCEIRO') {
+    // Cliente sempre pode. Parceiro do kind também, se vinculado.
+    if (isCliente) return { ok: true };
+    if (isParceiroDoKind && isParceiroDaEtapa) return { ok: true };
+    // Se a etapa não tem parceiro vinculado, o cliente assume — então parceiro não pode mexer
+    if (!step.parceiroId) return { ok: false, motivo: 'Apenas o cliente pode avançar (não há parceiro vinculado a esta etapa)' };
+    return { ok: false, motivo: 'Sem permissão pra atuar nesta etapa' };
+  }
+  if (cfg.responsavelTipo === 'SAYGO') {
+    return { ok: false, motivo: 'Apenas Saygo/Admin pode avançar esta etapa' };
+  }
+  return { ok: false, motivo: 'Tipo de responsável desconhecido' };
+}
+
+// Avança a etapa atual. Valida obrigatoriedades (docs/NFs) e autorização do user.
 export async function advanceStep(user, id, { parceiroId, notes } = {}) {
   const cur = await prisma.desoneracao.findUnique({
     where: { id },
@@ -204,6 +379,11 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
     const e = new Error(`Status ${cur.status} não permite avanço`); e.status = 400; throw e;
   }
   const etapaAtual = cur.currentStep;
+  const stepObj = cur.steps.find(s => s.etapa === etapaAtual);
+
+  // Autorização do user pra atuar nessa etapa
+  const auth = await canActOnStep(user, cur, stepObj || { etapa: etapaAtual, parceiroId: null });
+  if (!auth.ok) { const e = new Error(auth.motivo); e.status = 403; throw e; }
 
   // === Validações específicas por etapa ===
   const tipos = new Set(cur.documentos.map(d => d.tipo));

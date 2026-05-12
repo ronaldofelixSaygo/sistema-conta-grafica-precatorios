@@ -35,18 +35,25 @@ const BUILTIN = [
     sort: 1,
   },
   {
+    code: 'DESPACHANTE',
+    label: 'Despachante',
+    behavior: 'OUTRO',
+    description: 'Despachante aduaneiro — responsável por enviar documentos da importação desembaraçada nas Desonerações.',
+    sort: 2,
+  },
+  {
     code: 'ARMADOR_LOGISTICO',
     label: 'Armador Logístico (somente Kanban)',
     behavior: 'ARMADOR_LOGISTICO',
     description: 'Acesso restrito ao quadro Kanban e Chat.',
-    sort: 2,
+    sort: 3,
   },
   {
     code: 'OUTRO',
     label: 'Outro',
     behavior: 'OUTRO',
     description: 'Tipo genérico — apenas Kanban e Chat por padrão.',
-    sort: 3,
+    sort: 4,
   },
 ];
 

@@ -181,23 +181,49 @@ window.VIEW_parametros = (() => {
   async function loadDesonConfig() {
     const c = document.getElementById('param-content');
     c.innerHTML = '<div class="muted">Carregando…</div>';
-    let list;
-    try { list = await API.get('/api/desoneracoes/doc-configs'); }
-    catch (e) { c.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`; return; }
+    let docList, stepList;
+    try {
+      [docList, stepList] = await Promise.all([
+        API.get('/api/desoneracoes/doc-configs'),
+        API.get('/api/desoneracoes/step-configs'),
+      ]);
+    } catch (e) { c.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`; return; }
+
+    const TIPO_LABEL = {
+      CLIENTE: 'Cliente',
+      PARCEIRO_KIND: 'Parceiro (tipo X)',
+      CLIENTE_OU_PARCEIRO: 'Cliente OU Parceiro',
+      SAYGO: 'Saygo / Admin',
+    };
+
     c.innerHTML = `
+      <div class="panel">
+        <h3>👤 Responsável por etapa</h3>
+        <p class="muted small" style="margin-bottom:.6rem">
+          Quem pode avançar cada etapa do processo. Saygo/ADM sempre podem avançar como override.
+        </p>
+        <table class="table">
+          <thead><tr><th>Etapa</th><th>Tipo de responsável</th><th>Tipo de parceiro</th><th></th></tr></thead>
+          <tbody>${stepList.map(r => `<tr>
+            <td><strong>${UI.escapeHtml(r.etapa)}</strong></td>
+            <td>${UI.escapeHtml(TIPO_LABEL[r.responsavelTipo] || r.responsavelTipo)}</td>
+            <td>${r.kindCode ? `<span class="pill">${UI.escapeHtml(r.kindCode)}</span>` : '—'}</td>
+            <td><button class="btn small" data-step-edit="${r.id}" data-etapa="${r.etapa}" data-tipo="${r.responsavelTipo}" data-kind="${r.kindCode||''}">Editar</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
       <div class="panel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
           <h3 style="margin:0">📋 Documentos obrigatórios por etapa</h3>
           <button class="btn primary" id="dcfg-new">+ Adicionar regra</button>
         </div>
         <p class="muted small" style="margin-bottom:1rem">
-          Define quais documentos são obrigatórios pra avançar cada etapa de uma desoneração.
-          Se houver alguma regra aqui pra uma etapa, ela <strong>substitui</strong> o padrão do sistema —
-          então cadastre tudo que precisa. Modal "TODOS" vale pra qualquer modal de transporte.
+          Define quais documentos são obrigatórios pra avançar cada etapa. Se há regra customizada,
+          ela substitui o padrão. Modal "TODOS" vale pra qualquer transporte.
         </p>
         <table class="table">
           <thead><tr><th>Etapa</th><th>Modal</th><th>Documento</th><th>Status</th><th>Ordem</th><th></th></tr></thead>
-          <tbody>${list.map(r => `<tr>
+          <tbody>${docList.map(r => `<tr>
             <td>${UI.escapeHtml(r.etapa)}</td>
             <td>${UI.escapeHtml(r.modal)}</td>
             <td><strong>${UI.escapeHtml(r.tipoDocumento)}</strong></td>
@@ -213,6 +239,43 @@ window.VIEW_parametros = (() => {
       try { await API.del(`/api/desoneracoes/doc-configs/${b.dataset.cfgDel}`); UI.toast('Excluído'); loadDesonConfig(); }
       catch (e) { UI.toast(e.message, 'err'); }
     });
+    c.querySelectorAll('[data-step-edit]').forEach(b => b.onclick = () => openStepConfigForm({
+      etapa: b.dataset.etapa, responsavelTipo: b.dataset.tipo, kindCode: b.dataset.kind,
+    }));
+  }
+  function openStepConfigForm(cfg) {
+    UI.openModal(`Responsável: ${cfg.etapa}`, `
+      <form id="form-step-cfg" class="form-grid">
+        <input type="hidden" name="etapa" value="${cfg.etapa}">
+        <div class="full"><label>Tipo de responsável *</label>
+          <select name="responsavelTipo" required>
+            <option value="CLIENTE"             ${cfg.responsavelTipo==='CLIENTE'?'selected':''}>Cliente</option>
+            <option value="PARCEIRO_KIND"       ${cfg.responsavelTipo==='PARCEIRO_KIND'?'selected':''}>Parceiro (de um tipo específico)</option>
+            <option value="CLIENTE_OU_PARCEIRO" ${cfg.responsavelTipo==='CLIENTE_OU_PARCEIRO'?'selected':''}>Cliente OU Parceiro (fallback no cliente)</option>
+            <option value="SAYGO"               ${cfg.responsavelTipo==='SAYGO'?'selected':''}>Saygo / Admin</option>
+          </select>
+        </div>
+        <div class="full"><label>Tipo de parceiro (kindCode) — só quando aplicável</label>
+          <input name="kindCode" value="${UI.escapeHtml(cfg.kindCode||'')}" placeholder="ex: ESCRITORIO, DESPACHANTE">
+        </div>
+        <div class="full form-actions">
+          <button type="button" class="btn" id="step-cancel">Cancelar</button>
+          <button type="submit" class="btn primary">Salvar</button>
+        </div>
+      </form>`);
+    document.getElementById('step-cancel').onclick = UI.closeModal;
+    document.getElementById('form-step-cfg').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        await API.post('/api/desoneracoes/step-configs', {
+          etapa: fd.get('etapa'),
+          responsavelTipo: fd.get('responsavelTipo'),
+          kindCode: fd.get('kindCode') || null,
+        });
+        UI.toast('Atualizado'); UI.closeModal(); loadDesonConfig();
+      } catch (e) { UI.toast(e.message, 'err'); }
+    };
   }
   function openDesonCfgForm() {
     UI.openModal('Nova regra de documento', `

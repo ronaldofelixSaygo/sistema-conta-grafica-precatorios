@@ -211,25 +211,35 @@ window.VIEW_desoneracoes = (() => {
   }
 
   function renderStepper(d) {
-    const idx = STEP_ORDER.indexOf(d.currentStep);
-    const items = [...STEP_ORDER, 'CONCLUIDO'].map((s, i) => {
+    const items = [...STEP_ORDER, 'CONCLUIDO'].map((s) => {
       const step = (d.steps || []).find(x => x.etapa === s);
-      const done = step?.completedAt || s === 'CONCLUIDO' && d.status === 'CONCLUIDA';
+      const done = step?.completedAt || (s === 'CONCLUIDO' && d.status === 'CONCLUIDA');
       const active = d.currentStep === s && d.status === 'EM_ANDAMENTO';
       const aguardando = s === 'CONCLUIDO' && d.status === 'AGUARDANDO_APROVACAO';
       const cor = done ? 'green' : (active || aguardando) ? 'blue' : 'gray';
       const icon = done ? '✓' : (active || aguardando) ? '●' : '○';
-      const parc = step?.parceiro?.nome || '';
+      const responsavelLabel = renderRespLabel(d, step);
       return `<div style="display:flex;gap:.5rem;padding:.4rem;align-items:flex-start">
         <div style="color:var(--${cor});font-weight:700">${icon}</div>
         <div style="flex:1;font-size:11px">
           <div style="font-weight:600">${STEP_LABELS[s]}</div>
-          ${parc ? `<div class="muted">${UI.escapeHtml(parc)}</div>` : ''}
+          ${responsavelLabel ? `<div class="muted">👤 ${responsavelLabel}</div>` : ''}
           ${step?.completedAt ? `<div class="muted small">${UI.fmtDate(step.completedAt)}</div>` : ''}
         </div>
       </div>`;
     }).join('');
     return `<div class="panel" style="padding:.4rem">${items}</div>`;
+  }
+
+  // Retorna o label do responsável: parceiro do step (se houver) ou "Cliente" se
+  // a config diz que é o cliente.
+  function renderRespLabel(d, step) {
+    if (!step) return '';
+    if (step.parceiro?.nome) return UI.escapeHtml(step.parceiro.nome);
+    const cfg = step.config;
+    if (cfg?.responsavelTipo === 'CLIENTE') return `Cliente: ${UI.escapeHtml(d.cliente?.nome || '')}`;
+    if (cfg?.responsavelTipo === 'CLIENTE_OU_PARCEIRO') return `Cliente${cfg.kindCode ? ` ou ${cfg.kindCode}` : ''}`;
+    return cfg?.label || '';
   }
 
   function renderPainel(d, isStaff) {
@@ -260,23 +270,26 @@ window.VIEW_desoneracoes = (() => {
     }
     // EM_ANDAMENTO
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
-    const parceiros = parceirosCache;
+    const podeAvancar = !!cur?.podeAtuar;
+    const respLabel = renderRespLabel(d, cur);
     return `<div class="panel">
       <h3>Etapa atual: ${STEP_LABELS[d.currentStep]}</h3>
-      <div style="display:flex;gap:.6rem;align-items:center;margin:.5rem 0">
-        <label class="muted small">Parceiro responsável:</label>
-        <select id="step-parc" ${isStaff?'':'disabled'} style="flex:1">
-          <option value="">—</option>
-          ${parceiros.map(p => `<option value="${p.id}" ${cur?.parceiroId===p.id?'selected':''}>${UI.escapeHtml(p.nome)}</option>`).join('')}
-        </select>
-      </div>
+      <div class="muted small" style="margin:.3rem 0">Responsável: <strong>${respLabel || '—'}</strong></div>
       ${isStaff ? `
-        <div class="form-actions">
-          <button class="btn danger" id="des-cancel-btn">Cancelar</button>
-          <button class="btn primary" id="des-advance-btn">Avançar etapa →</button>
+        <div style="display:flex;gap:.6rem;align-items:center;margin:.5rem 0">
+          <label class="muted small">Trocar parceiro:</label>
+          <select id="step-parc" style="flex:1">
+            <option value="">—</option>
+            ${parceirosCache.map(p => `<option value="${p.id}" ${cur?.parceiroId===p.id?'selected':''}>${UI.escapeHtml(p.nome)}</option>`).join('')}
+          </select>
         </div>
-        <div class="muted small" style="margin-top:.4rem">Verifica documentos obrigatórios antes de avançar. Se faltar algo, aparece um erro com a lista de pendências.</div>
       ` : ''}
+      <div class="form-actions">
+        ${isStaff ? '<button class="btn danger" id="des-cancel-btn">Cancelar processo</button>' : ''}
+        ${podeAvancar ? '<button class="btn primary" id="des-advance-btn">Avançar etapa →</button>' : ''}
+      </div>
+      ${!podeAvancar ? `<div class="muted small" style="margin-top:.4rem">⚠ Esta etapa precisa ser avançada pelo responsável: <strong>${respLabel}</strong>.</div>` : ''}
+      <div class="muted small" style="margin-top:.4rem">Documentos obrigatórios são verificados ao avançar.</div>
     </div>`;
   }
 
@@ -288,10 +301,13 @@ window.VIEW_desoneracoes = (() => {
         <td>${n.dataEmissao ? UI.fmtDate(n.dataEmissao) : '—'}</td>
         <td class="num">${UI.fmtMoney(n.valor)}</td>
         <td>${n.validada ? '<span class="pill green">Validada</span>' : '<span class="pill amber">Pendente</span>'}</td>
-        <td>${n.oficialBytes || n.oficialNome ? `<a href="/api/desoneracoes/notas/${n.id}/oficial" target="_blank">📎 PDF</a>` : '—'}</td>
+        <td>${(n.oficialBytes || n.oficialNome) ? `
+          <a class="btn small" href="/api/desoneracoes/notas/${n.id}/oficial" target="_blank" title="Visualizar">👁</a>
+          <a class="btn small" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>
+        ` : '—'}</td>
         ${isStaff ? `<td>
           ${!n.validada ? `<button class="btn small" data-nf-validar="${n.id}">Validar</button>` : ''}
-          <label class="btn small" style="cursor:pointer">📎<input type="file" data-nf-oficial="${n.id}" style="display:none" accept=".pdf,.xml,image/*"></label>
+          <label class="btn small" style="cursor:pointer" title="Anexar oficial">📎<input type="file" data-nf-oficial="${n.id}" style="display:none" accept=".pdf,.xml,image/*"></label>
           <button class="btn small danger" data-nf-del="${n.id}">x</button>
         </td>` : ''}
       </tr>`).join('');
@@ -300,7 +316,11 @@ window.VIEW_desoneracoes = (() => {
       ${linhas ? `<table class="table"><thead><tr>
         <th>Tipo</th><th>Número</th><th>Data</th><th>Valor</th><th>Validação</th><th>Oficial</th>${isStaff?'<th></th>':''}
       </tr></thead><tbody>${linhas}</tbody></table>` : '<div class="muted small">Sem NFs cadastradas.</div>'}
-      ${isStaff && d.status === 'EM_ANDAMENTO' ? '<div style="margin-top:.5rem"><button class="btn" id="nf-add">+ Adicionar NF</button></div>' : ''}
+      ${(() => {
+        const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
+        const podeAdicionar = (isStaff || cur?.podeAtuar) && d.status === 'EM_ANDAMENTO';
+        return podeAdicionar ? '<div style="margin-top:.5rem"><button class="btn" id="nf-add">+ Adicionar NF</button></div>' : '';
+      })()}
     </div>`;
   }
 
@@ -311,15 +331,20 @@ window.VIEW_desoneracoes = (() => {
     const html = grouped.map(g => `
       <div style="margin-bottom:.4rem">
         <strong class="muted small">${g.t}</strong>
-        ${g.items.map(d2 => `<div style="display:flex;justify-content:space-between;padding:2px 0">
-          <a href="/api/desoneracoes/documentos/${d2.id}" target="_blank">${UI.escapeHtml(d2.nome)}</a>
-          ${isStaff ? `<button class="btn small danger" data-doc-del="${d2.id}">x</button>` : ''}
+        ${g.items.map(d2 => `<div style="display:flex;justify-content:space-between;padding:2px 0;align-items:center;gap:.4rem">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escapeHtml(d2.nome)}</span>
+          <a class="btn small" href="/api/desoneracoes/documentos/${d2.id}" target="_blank" title="Visualizar">👁</a>
+          <a class="btn small" href="/api/desoneracoes/documentos/${d2.id}" download="${UI.escapeHtml(d2.nome)}" title="Baixar">⬇</a>
+          ${isStaff ? `<button class="btn small danger" data-doc-del="${d2.id}" title="Excluir">x</button>` : ''}
         </div>`).join('')}
       </div>`).join('');
+    // Quem pode anexar? Saygo/Escritório sempre; demais (despachante, cliente) se podeAtuar na etapa atual
+    const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
+    const podeAnexar = isStaff || cur?.podeAtuar;
     return `<div class="panel" style="margin-top:.6rem">
       <h3>Documentos</h3>
       ${html || '<div class="muted small">Nenhum documento anexado.</div>'}
-      ${isStaff && d.status === 'EM_ANDAMENTO' ? `
+      ${podeAnexar && d.status === 'EM_ANDAMENTO' ? `
         <div style="display:flex;gap:.5rem;margin-top:.5rem;align-items:center;flex-wrap:wrap">
           <select id="doc-tipo">${TIPOS.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
           <label class="btn primary" style="cursor:pointer">📎 Anexar
@@ -344,7 +369,6 @@ window.VIEW_desoneracoes = (() => {
   }
 
   function bindDetailActions(d, isStaff) {
-    if (!isStaff) return;
     const id = d.id;
     // Avançar etapa
     document.getElementById('des-advance-btn')?.addEventListener('click', async () => {
