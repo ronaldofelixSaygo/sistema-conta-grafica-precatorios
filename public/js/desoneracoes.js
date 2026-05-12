@@ -394,34 +394,42 @@ window.VIEW_desoneracoes = (() => {
     function renderLinha(etapa, tipo) {
       const reached = isStepReached(d, etapa);
       const isCurrent = d.currentStep === etapa;
-      const isPast = reached && !isCurrent;
       const arquivos = docs.filter(x => x.tipo === tipo);
       const tem = arquivos.length > 0;
       const podeAnexarNessaEtapa = isCurrent && podeAtuarAgora;
+      const podeExcluir = isStaff && isCurrent && d.status === 'EM_ANDAMENTO';
 
-      // Linha cinza quando ainda não chegou nessa etapa e não tem arquivo
       const disabled = !reached && !tem;
-      const statusText = !reached ? (isCurrent ? '' : '⏳ Aguardando etapa anterior')
+      const statusText = !reached ? (isCurrent ? 'Aguardando anexo' : '⏳ Aguardando etapa anterior')
                        : tem ? '' : (isCurrent ? 'Aguardando anexo' : 'Não anexado');
 
-      const arquivosHtml = arquivos.map(a => `
-        <div style="display:flex;align-items:center;gap:.3rem;font-size:11px">
-          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">${UI.escapeHtml(a.nome)}</span>
-          <a class="btn small" href="/api/desoneracoes/documentos/${a.id}" target="_blank" title="Visualizar">👁</a>
-          <a class="btn small" href="/api/desoneracoes/documentos/${a.id}" download="${UI.escapeHtml(a.nome)}" title="Baixar">⬇</a>
-          ${isStaff && isCurrent && d.status === 'EM_ANDAMENTO' ? `<button class="btn small danger" data-doc-del="${a.id}" title="Excluir">x</button>` : ''}
-        </div>`).join('');
+      // Bloco do(s) arquivo(s): nome + ícone de download inline
+      const arquivosHtml = arquivos.length
+        ? arquivos.map(a => `
+            <div class="doc-file-item">
+              <span class="doc-name" title="${UI.escapeHtml(a.nome)}">📄 ${UI.escapeHtml(a.nome)}</span>
+              <a class="doc-download" href="/api/desoneracoes/documentos/${a.id}" download="${UI.escapeHtml(a.nome)}" title="Baixar">⬇</a>
+            </div>`).join('')
+        : `<span class="muted small">${statusText || '—'}</span>`;
+
+      // Ações fixas à direita
+      const acoesHtml = (() => {
+        if (!reached) return ''; // etapa futura: nenhum botão
+        const primeiro = arquivos[0];
+        return `
+          ${tem ? `<a class="btn small" href="/api/desoneracoes/documentos/${primeiro.id}" target="_blank" title="Visualizar">👁</a>` : ''}
+          ${tem && podeExcluir ? `<button class="btn small danger" data-doc-del="${primeiro.id}" title="Excluir">✕</button>` : ''}
+          ${podeAnexarNessaEtapa ? `
+            <label class="btn primary small btn-anexar" style="cursor:pointer" title="${tem?'Adicionar outro':'Anexar'} ${tipo}">
+              📎 ${tem?'Adicionar':'Anexar'}
+              <input type="file" data-doc-upload="${tipo}" style="display:none" accept=".pdf,.xml,image/*,.zip">
+            </label>` : ''}`;
+      })();
 
       return `<div class="doc-row ${disabled?'disabled':''}">
         <div class="doc-tipo">${tipo}</div>
-        <div class="doc-file">${tem ? arquivosHtml : `<span class="muted small">${statusText || '—'}</span>`}</div>
-        <div class="doc-actions">
-          ${podeAnexarNessaEtapa ? `
-            <label class="btn primary small" style="cursor:pointer" title="Anexar ${tipo}">
-              📎 Anexar
-              <input type="file" data-doc-upload="${tipo}" style="display:none" accept=".pdf,.xml,image/*,.zip">
-            </label>` : ''}
-        </div>
+        <div class="doc-file">${arquivosHtml}</div>
+        <div class="doc-actions">${acoesHtml}</div>
       </div>`;
     }
 
