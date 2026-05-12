@@ -46,11 +46,11 @@ export async function createUser(input) {
   }
 
   // Se PARTNER, deriva officeName do nome do parceiro (se nao fornecido)
-  let finalOfficeName = officeName || null;
+  let finalOfficeName = officeName ? String(officeName).trim() : null;
   if (role === 'PARTNER' && parceiroId) {
     const parc = await prisma.parceiro.findUnique({ where: { id: parceiroId } });
     if (!parc) { const e = new Error('Parceiro nao encontrado'); e.status = 400; throw e; }
-    if (!finalOfficeName) finalOfficeName = parc.nome;
+    if (!finalOfficeName) finalOfficeName = String(parc.nome || '').trim() || null;
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
@@ -73,7 +73,7 @@ export async function updateUser(id, input) {
     if (!VALID_ROLES.includes(input.role)) { const e=new Error('role inválido'); e.status=400; throw e; }
     data.role = input.role;
   }
-  if (input.officeName !== undefined)  data.officeName  = input.officeName || null;
+  if (input.officeName !== undefined)  data.officeName  = input.officeName ? String(input.officeName).trim() : null;
   if (input.clienteId  !== undefined)  data.clienteId   = input.clienteId  ? Number(input.clienteId) : null;
   if (input.parceiroId !== undefined)  data.parceiroId  = input.parceiroId || null;
   if (input.active     !== undefined)  data.active      = !!input.active;

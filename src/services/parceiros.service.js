@@ -41,7 +41,9 @@ export async function createParceiro(data) {
   const { kindCode, type } = await resolveKindAndBehavior(data);
   return prisma.parceiro.create({
     data: {
-      nome: data.nome,
+      // .trim() preventivo: o `nome` vira o "escritorio" string nos clientes,
+      // e qualquer espaço invisível quebra o match no scope (case PARTNER).
+      nome: String(data.nome).trim(),
       cnpj: data.cnpj || null,
       telefone: data.telefone || null,
       email: data.email || null,
@@ -57,7 +59,7 @@ export async function createParceiro(data) {
 
 export async function updateParceiro(id, data) {
   const upd = {};
-  if (data.nome     !== undefined) upd.nome = data.nome;
+  if (data.nome     !== undefined) upd.nome = String(data.nome).trim();
   if (data.cnpj     !== undefined) upd.cnpj = data.cnpj || null;
   if (data.telefone !== undefined) upd.telefone = data.telefone || null;
   if (data.email    !== undefined) upd.email = data.email || null;
