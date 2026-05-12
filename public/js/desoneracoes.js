@@ -58,7 +58,9 @@ window.VIEW_desoneracoes = (() => {
 
   function drawList() {
     const el = document.getElementById('view-desoneracoes');
-    const canCreate = AUTH.isStaff() || AUTH.isPartnerEscritorio();
+    // REGRA: só CLIENTE (do próprio cadastro) ou STAFF (ADM/SAYGO) podem criar
+    // uma nova desoneração. Parceiros só atuam nas etapas atribuídas a eles.
+    const canCreate = AUTH.isStaff() || AUTH.role() === 'CLIENT';
     const escritorios = [...new Set(parceirosCache.filter(p => (p.kindCode||p.type)==='ESCRITORIO').map(p => p.nome))];
     const despachantes = parceirosCache.filter(p => (p.kindCode||p.type) !== 'ESCRITORIO');
 
@@ -185,9 +187,15 @@ window.VIEW_desoneracoes = (() => {
     try { d = await API.get(`/api/desoneracoes/${id}`); }
     catch (e) { return UI.toast(e.message, 'err'); }
 
-    const isStaff = AUTH.isStaff() || AUTH.isPartnerEscritorio();
+    // ⚠ ATENÇÃO: isStaff aqui é só ADM/SAYGO. Antes incluía PARTNER ESCRITORIO,
+    // o que vazava poderes que devem ser exclusivos do staff (excluir documento,
+    // aprovar, trocar parceiro da etapa). Parceiros agem nas etapas deles via
+    // `step.podeAtuar` retornado pelo backend.
+    const isStaff = AUTH.isStaff();
+    // Cliente dono do processo pode também cancelar e participar como solicitante.
+    const isOwnerClient = AUTH.role() === 'CLIENT' && AUTH.user()?.clienteId === d.clienteId;
     const stepperHtml = renderStepperHorizontal(d);
-    const painelHtml = renderPainel(d, isStaff);
+    const painelHtml = renderPainel(d, isStaff, isOwnerClient);
     const notasHtml = renderNotas(d, isStaff);
     const docsHtml = renderDocs(d, isStaff);
     const histHtml = renderHistorico(d);
@@ -264,7 +272,8 @@ window.VIEW_desoneracoes = (() => {
     return cfg?.label || '';
   }
 
-  function renderPainel(d, isStaff) {
+  function renderPainel(d, isStaff, isOwnerClient = false) {
+    const canCancel = isStaff || isOwnerClient;
     if (d.status === 'CONCLUIDA') {
       return `<div class="panel">
         <h3>Concluída em ${UI.fmtDateTime(d.concludedAt)}</h3>
@@ -283,10 +292,10 @@ window.VIEW_desoneracoes = (() => {
           <tr><td>DUIMP/DI</td><td>${UI.escapeHtml(d.duimpDi || '—')}</td></tr>
           <tr><td>Valor ICMS desonerado</td><td class="num">${UI.fmtMoney(d.valorIcmsDesonerado)}</td></tr>
         </tbody></table>
-        ${isStaff ? `
+        ${(isStaff || canCancel) ? `
           <div class="form-actions" style="margin-top:.6rem">
-            <button class="btn danger" id="des-cancel-btn">Cancelar desoneração</button>
-            <button class="btn primary" id="des-approve-btn">✓ Aprovar e criar movimentação</button>
+            ${canCancel ? '<button class="btn danger" id="des-cancel-btn">Cancelar desoneração</button>' : ''}
+            ${isStaff ? '<button class="btn primary" id="des-approve-btn">✓ Aprovar e criar movimentação</button>' : ''}
           </div>` : ''}
       </div>`;
     }
@@ -316,7 +325,7 @@ window.VIEW_desoneracoes = (() => {
         </div>
       ` : ''}
       <div class="form-actions">
-        ${isStaff ? '<button class="btn danger" id="des-cancel-btn">Cancelar processo</button>' : ''}
+        ${canCancel ? '<button class="btn danger" id="des-cancel-btn">Cancelar processo</button>' : ''}
         ${podeAvancar ? '<button class="btn primary" id="des-advance-btn">Avançar etapa →</button>' : ''}
       </div>
       ${!podeAvancar ? `<div class="muted small" style="margin-top:.4rem">⚠ Esta etapa precisa ser avançada pelo responsável: <strong>${respLabel}</strong>.</div>` : ''}

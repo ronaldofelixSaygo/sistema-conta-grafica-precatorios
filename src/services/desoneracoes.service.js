@@ -227,12 +227,24 @@ async function resolveDefaultParceirosForCliente(cliente) {
 }
 
 export async function createDesoneracao(user, data) {
+  // REGRA: só CLIENTE (do próprio cadastro) ou STAFF (ADM/SAYGO) cria desoneração.
+  // Parceiros são responsáveis por etapas, não pela abertura do processo.
+  const isStaff  = user.role === 'ADM' || user.role === 'SAYGO';
+  const isClient = user.role === 'CLIENT';
+  if (!isStaff && !isClient) {
+    const e = new Error('Apenas cliente ou usuário Saygo pode criar uma desoneração');
+    e.status = 403; throw e;
+  }
   if (!data.clienteId) { const e = new Error('clienteId obrigatório'); e.status = 400; throw e; }
   if (!data.modal || !['MARITIMO','AEREO','RODOVIARIO'].includes(data.modal)) {
     const e = new Error('Modal de transporte obrigatório'); e.status = 400; throw e;
   }
   const cliente = await prisma.cliente.findUnique({ where: { id: Number(data.clienteId) } });
   if (!cliente) { const e = new Error('Cliente não encontrado'); e.status = 404; throw e; }
+  // CLIENTE só pode criar pra si próprio
+  if (isClient && cliente.id !== user.clienteId) {
+    const e = new Error('Cliente só pode criar desoneração pra si próprio'); e.status = 403; throw e;
+  }
   await ensureStepConfigDefaults();
 
   // Auto-vínculo dos parceiros com base no cadastro do cliente.
@@ -515,6 +527,14 @@ export async function approveAndCreateMovimentacao(user, id) {
 export async function cancelDesoneracao(user, id, reason) {
   const cur = await prisma.desoneracao.findUnique({ where: { id } });
   if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
+  // REGRA: só STAFF (ADM/SAYGO) ou o próprio CLIENTE dono do processo pode cancelar.
+  // Parceiro responsável por etapa NÃO pode cancelar o processo como um todo.
+  const isStaff  = user.role === 'ADM' || user.role === 'SAYGO';
+  const isOwnerClient = user.role === 'CLIENT' && user.clienteId === cur.clienteId;
+  if (!isStaff && !isOwnerClient) {
+    const e = new Error('Apenas cliente ou usuário Saygo pode cancelar uma desoneração');
+    e.status = 403; throw e;
+  }
   if (cur.status === 'CONCLUIDA' || cur.status === 'CANCELADA') {
     const e = new Error('Status atual não permite cancelar'); e.status = 400; throw e;
   }
