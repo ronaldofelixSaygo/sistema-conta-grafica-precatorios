@@ -179,6 +179,27 @@ a{color:inherit;text-decoration:none}
 /* ── modal ── */
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50}
 .modal{background:var(--s1);border:1px solid var(--bd2);border-radius:12px;width:min(640px,90vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+.modal.modal-large{width:min(1200px,96vw);max-height:94vh}
+
+/* Stepper horizontal — régua de etapas no topo do detalhe da desoneração */
+.stepper-h{display:flex;align-items:stretch;gap:0;margin:0 0 1rem;flex-wrap:nowrap;overflow-x:auto;padding:.4rem 0}
+.stepper-h .step{flex:1;min-width:120px;text-align:center;padding:.4rem .3rem;position:relative}
+.stepper-h .step.pending{opacity:.45}
+.stepper-h .step .ico{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;font-weight:700;font-size:14px;border:2px solid var(--bd2);background:var(--s2);color:var(--t2)}
+.stepper-h .step.done .ico{background:var(--green,#1fa066);color:#fff;border-color:var(--green,#1fa066)}
+.stepper-h .step.active .ico{background:var(--primary);color:#fff;border-color:var(--primary)}
+.stepper-h .step .label{font-size:11px;font-weight:600;margin-top:.3rem;line-height:1.2}
+.stepper-h .step .sub{font-size:10px;color:var(--t2);margin-top:2px;line-height:1.2}
+.stepper-h .step:not(:last-child)::after{content:'';position:absolute;top:18px;left:calc(50% + 22px);right:calc(-50% + 22px);height:2px;background:var(--bd)}
+.stepper-h .step.done:not(:last-child)::after{background:var(--green,#1fa066)}
+
+/* Documentos linha-a-linha por etapa */
+.doc-grid{display:flex;flex-direction:column;gap:.4rem}
+.doc-row{display:flex;align-items:center;gap:.6rem;padding:.5rem .7rem;background:var(--s2);border:1px solid var(--bd);border-radius:8px}
+.doc-row.disabled{opacity:.45}
+.doc-row .doc-tipo{font-weight:600;min-width:88px;font-size:12px;letter-spacing:.4px}
+.doc-row .doc-file{flex:1;font-size:12px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-row .doc-actions{display:flex;gap:.3rem;align-items:center}
 .modal header{padding:.9rem 1.1rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
 .modal #modal-body{padding:1rem 1.1rem;overflow:auto}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem 1rem}

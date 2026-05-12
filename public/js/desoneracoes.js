@@ -13,6 +13,21 @@ window.VIEW_desoneracoes = (() => {
     CONCLUIDO:         '✓ Concluído',
   };
   const STEP_ORDER = ['DOCS_DESPACHANTE','EMISSAO_DMI','EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL','PROTOCOLO_ICMS'];
+  const ETAPA_DOC_TIPOS = {
+    DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL','CCT','OUTRO'],
+    EMISSAO_DMI:      ['DMI','OUTRO'],
+    EMISSAO_NF:       ['OUTRO'],
+    VALIDACAO_NF:     ['OUTRO'],
+    ENVIO_NF_OFICIAL: ['OUTRO'],
+    PROTOCOLO_ICMS:   ['DESPACHO','OUTRO'],
+  };
+  function isStepReached(d, target) {
+    // True se a desoneração já alcançou (ou passou) a etapa "target"
+    if (d.status === 'CONCLUIDA' || d.status === 'AGUARDANDO_APROVACAO') return true;
+    const curIdx = STEP_ORDER.indexOf(d.currentStep);
+    const tgtIdx = STEP_ORDER.indexOf(target);
+    return curIdx >= tgtIdx;
+  }
 
   const MODAL_LABELS = { MARITIMO:'Marítimo', AEREO:'Aéreo', RODOVIARIO:'Rodoviário' };
 
@@ -163,7 +178,7 @@ window.VIEW_desoneracoes = (() => {
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Tela de detalhe
+  // Tela de detalhe (modal grande, stepper horizontal)
   // ─────────────────────────────────────────────────────────────────────
   async function openDetail(id) {
     let d;
@@ -171,27 +186,50 @@ window.VIEW_desoneracoes = (() => {
     catch (e) { return UI.toast(e.message, 'err'); }
 
     const isStaff = AUTH.isStaff() || AUTH.isPartnerEscritorio();
-    const stepperHtml = renderStepper(d);
+    const stepperHtml = renderStepperHorizontal(d);
     const painelHtml = renderPainel(d, isStaff);
     const notasHtml = renderNotas(d, isStaff);
     const docsHtml = renderDocs(d, isStaff);
     const histHtml = renderHistorico(d);
 
     UI.openModal(`Desoneração — ${UI.escapeHtml(d.cliente?.nome || '')}`, `
-      <div class="muted small" style="margin-bottom:.4rem">
+      <div class="muted small" style="margin-bottom:.6rem">
         ${UI.escapeHtml(d.cliente?.nome || '')} · DUIMP ${UI.escapeHtml(d.duimpDi || '—')} · Modal ${MODAL_LABELS[d.modal]} · ${statusPill(d.status)}
+        ${d.valorIcmsDesonerado ? ` · ICMS desonerar: <strong>${UI.fmtMoney(d.valorIcmsDesonerado)}</strong>` : ''}
         ${d.cancelReason ? `<div class="err small" style="margin-top:.3rem">Cancelada: ${UI.escapeHtml(d.cancelReason)}</div>` : ''}
       </div>
-      <div style="display:grid;grid-template-columns:200px 1fr;gap:1rem;align-items:flex-start">
-        <div>${stepperHtml}</div>
+      ${stepperHtml}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:flex-start">
         <div>
           ${painelHtml}
           ${notasHtml}
+        </div>
+        <div>
           ${docsHtml}
           ${histHtml}
         </div>
-      </div>`);
+      </div>`, { large: true });
     bindDetailActions(d, isStaff);
+  }
+
+  // Stepper horizontal — régua de etapas no topo
+  function renderStepperHorizontal(d) {
+    const all = [...STEP_ORDER, 'CONCLUIDO'];
+    const items = all.map((etapa, i) => {
+      const step = (d.steps || []).find(x => x.etapa === etapa);
+      const done = step?.completedAt || (etapa === 'CONCLUIDO' && d.status === 'CONCLUIDA');
+      const active = d.currentStep === etapa && d.status === 'EM_ANDAMENTO';
+      const aguardando = etapa === 'CONCLUIDO' && d.status === 'AGUARDANDO_APROVACAO';
+      const cls = done ? 'done' : (active || aguardando) ? 'active' : 'pending';
+      const icon = done ? '✓' : (i + 1);
+      const responsavel = renderRespLabel(d, step);
+      return `<div class="step ${cls}">
+        <div class="ico">${icon}</div>
+        <div class="label">${STEP_LABELS[etapa]}</div>
+        ${responsavel ? `<div class="sub">${responsavel}</div>` : ''}
+      </div>`;
+    }).join('');
+    return `<div class="stepper-h">${items}</div>`;
   }
 
   function renderStepper(d) {
@@ -287,6 +325,23 @@ window.VIEW_desoneracoes = (() => {
   }
 
   function renderNotas(d, isStaff) {
+    // Esta seção só faz sentido a partir da etapa EMISSAO_NF (etapa 3).
+    // Antes disso, mostra apenas um aviso explicativo.
+    const reached = isStepReached(d, 'EMISSAO_NF');
+    if (!reached) {
+      return `<div class="panel" style="margin-top:.6rem">
+        <h3>Notas Fiscais</h3>
+        <div class="muted small">⏳ Disponível após a etapa <strong>Emissão DMI</strong>. O cliente cadastra as NFs aqui quando a DMI for devolvida pelo escritório.</div>
+      </div>`;
+    }
+
+    const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
+    const podeAtuarAgora = !!cur?.podeAtuar || isStaff;
+    const podeAdicionar = podeAtuarAgora && d.currentStep === 'EMISSAO_NF';
+    const podeValidar   = podeAtuarAgora && d.currentStep === 'VALIDACAO_NF';
+    const podeOficial   = podeAtuarAgora && d.currentStep === 'ENVIO_NF_OFICIAL';
+    const podeRemover   = isStaff && d.currentStep === 'EMISSAO_NF';
+
     const linhas = (d.notas || []).map(n => `
       <tr>
         <td><span class="pill ${n.tipo==='ENTRADA'?'green':'amber'}">${n.tipo}</span></td>
@@ -298,52 +353,90 @@ window.VIEW_desoneracoes = (() => {
           <a class="btn small" href="/api/desoneracoes/notas/${n.id}/oficial" target="_blank" title="Visualizar">👁</a>
           <a class="btn small" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>
         ` : '—'}</td>
-        ${isStaff ? `<td>
-          ${!n.validada ? `<button class="btn small" data-nf-validar="${n.id}">Validar</button>` : ''}
-          <label class="btn small" style="cursor:pointer" title="Anexar oficial">📎<input type="file" data-nf-oficial="${n.id}" style="display:none" accept=".pdf,.xml,image/*"></label>
-          <button class="btn small danger" data-nf-del="${n.id}">x</button>
-        </td>` : ''}
+        <td>
+          ${podeValidar && !n.validada ? `<button class="btn small" data-nf-validar="${n.id}">Validar</button>` : ''}
+          ${podeOficial ? `<label class="btn small" style="cursor:pointer" title="Anexar oficial">📎<input type="file" data-nf-oficial="${n.id}" style="display:none" accept=".pdf,.xml,image/*"></label>` : ''}
+          ${podeRemover ? `<button class="btn small danger" data-nf-del="${n.id}">x</button>` : ''}
+        </td>
       </tr>`).join('');
     return `<div class="panel" style="margin-top:.6rem">
       <h3>Notas Fiscais</h3>
       ${linhas ? `<table class="table"><thead><tr>
-        <th>Tipo</th><th>Número</th><th>Data</th><th>Valor</th><th>Validação</th><th>Oficial</th>${isStaff?'<th></th>':''}
+        <th>Tipo</th><th>Número</th><th>Data</th><th>Valor</th><th>Validação</th><th>Oficial</th><th></th>
       </tr></thead><tbody>${linhas}</tbody></table>` : '<div class="muted small">Sem NFs cadastradas.</div>'}
-      ${(() => {
-        const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
-        const podeAdicionar = (isStaff || cur?.podeAtuar) && d.status === 'EM_ANDAMENTO';
-        return podeAdicionar ? '<div style="margin-top:.5rem"><button class="btn" id="nf-add">+ Adicionar NF</button></div>' : '';
-      })()}
+      ${podeAdicionar ? '<div style="margin-top:.5rem"><button class="btn" id="nf-add">+ Adicionar NF</button></div>' : ''}
     </div>`;
   }
 
+  // Documentos previstos por ETAPA (linha-a-linha). A ordem aqui define a
+  // sequência visual. OUTRO é sempre opcional/extra e fica no fim quando aplicável.
+  const DOCS_PREVISTOS_POR_ETAPA = {
+    DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL'],  // CCT é condicional ao modal
+    EMISSAO_DMI:      ['DMI'],
+    PROTOCOLO_ICMS:   ['DESPACHO'],
+  };
   function renderDocs(d, isStaff) {
-    const TIPOS = ['DUIMP','PL','PI','AFRMM','BL','CCT','DMI','DESPACHO','OUTRO'];
     const docs = d.documentos || [];
-    const grouped = TIPOS.map(t => ({ t, items: docs.filter(x => x.tipo === t) })).filter(g => g.items.length);
-    const html = grouped.map(g => `
-      <div style="margin-bottom:.4rem">
-        <strong class="muted small">${g.t}</strong>
-        ${g.items.map(d2 => `<div style="display:flex;justify-content:space-between;padding:2px 0;align-items:center;gap:.4rem">
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escapeHtml(d2.nome)}</span>
-          <a class="btn small" href="/api/desoneracoes/documentos/${d2.id}" target="_blank" title="Visualizar">👁</a>
-          <a class="btn small" href="/api/desoneracoes/documentos/${d2.id}" download="${UI.escapeHtml(d2.nome)}" title="Baixar">⬇</a>
-          ${isStaff ? `<button class="btn small danger" data-doc-del="${d2.id}" title="Excluir">x</button>` : ''}
-        </div>`).join('')}
-      </div>`).join('');
-    // Quem pode anexar? Saygo/Escritório sempre; demais (despachante, cliente) se podeAtuar na etapa atual
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
-    const podeAnexar = isStaff || cur?.podeAtuar;
-    return `<div class="panel" style="margin-top:.6rem">
+    const podeAtuarAgora = (isStaff || cur?.podeAtuar) && d.status === 'EM_ANDAMENTO';
+
+    // Lista de "linhas a renderizar": uma por tipo previsto em cada etapa documental.
+    const rowsByEtapa = {};
+    for (const etapa of ['DOCS_DESPACHANTE','EMISSAO_DMI','PROTOCOLO_ICMS']) {
+      const previstos = [...DOCS_PREVISTOS_POR_ETAPA[etapa]];
+      // CCT é obrigatório só pra modal AEREO. Em outros modais aparece também
+      // mas como opcional (linha cinza com botão Anexar).
+      if (etapa === 'DOCS_DESPACHANTE' && d.modal === 'AEREO') previstos.push('CCT');
+      else if (etapa === 'DOCS_DESPACHANTE') previstos.push('CCT'); // opcional
+      rowsByEtapa[etapa] = previstos;
+    }
+
+    function renderLinha(etapa, tipo) {
+      const reached = isStepReached(d, etapa);
+      const isCurrent = d.currentStep === etapa;
+      const isPast = reached && !isCurrent;
+      const arquivos = docs.filter(x => x.tipo === tipo);
+      const tem = arquivos.length > 0;
+      const podeAnexarNessaEtapa = isCurrent && podeAtuarAgora;
+
+      // Linha cinza quando ainda não chegou nessa etapa e não tem arquivo
+      const disabled = !reached && !tem;
+      const statusText = !reached ? (isCurrent ? '' : '⏳ Aguardando etapa anterior')
+                       : tem ? '' : (isCurrent ? 'Aguardando anexo' : 'Não anexado');
+
+      const arquivosHtml = arquivos.map(a => `
+        <div style="display:flex;align-items:center;gap:.3rem;font-size:11px">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">${UI.escapeHtml(a.nome)}</span>
+          <a class="btn small" href="/api/desoneracoes/documentos/${a.id}" target="_blank" title="Visualizar">👁</a>
+          <a class="btn small" href="/api/desoneracoes/documentos/${a.id}" download="${UI.escapeHtml(a.nome)}" title="Baixar">⬇</a>
+          ${isStaff && isCurrent && d.status === 'EM_ANDAMENTO' ? `<button class="btn small danger" data-doc-del="${a.id}" title="Excluir">x</button>` : ''}
+        </div>`).join('');
+
+      return `<div class="doc-row ${disabled?'disabled':''}">
+        <div class="doc-tipo">${tipo}</div>
+        <div class="doc-file">${tem ? arquivosHtml : `<span class="muted small">${statusText || '—'}</span>`}</div>
+        <div class="doc-actions">
+          ${podeAnexarNessaEtapa ? `
+            <label class="btn primary small" style="cursor:pointer" title="Anexar ${tipo}">
+              📎 Anexar
+              <input type="file" data-doc-upload="${tipo}" style="display:none" accept=".pdf,.xml,image/*,.zip">
+            </label>` : ''}
+        </div>
+      </div>`;
+    }
+
+    // Renderiza separado por etapa com cabeçalho leve
+    const sections = ['DOCS_DESPACHANTE','EMISSAO_DMI','PROTOCOLO_ICMS'].map(etapa => {
+      const linhas = rowsByEtapa[etapa].map(t => renderLinha(etapa, t)).join('');
+      return `<div style="margin-bottom:.6rem">
+        <div class="muted small" style="text-transform:uppercase;font-weight:600;margin-bottom:.3rem">${STEP_LABELS[etapa]}</div>
+        <div class="doc-grid">${linhas}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="panel">
       <h3>Documentos</h3>
-      ${html || '<div class="muted small">Nenhum documento anexado.</div>'}
-      ${podeAnexar && d.status === 'EM_ANDAMENTO' ? `
-        <div style="display:flex;gap:.5rem;margin-top:.5rem;align-items:center;flex-wrap:wrap">
-          <select id="doc-tipo">${TIPOS.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
-          <label class="btn primary" style="cursor:pointer">📎 Anexar
-            <input type="file" id="doc-upload" style="display:none" accept=".pdf,.xml,image/*,.zip">
-          </label>
-        </div>` : ''}
+      ${sections}
     </div>`;
   }
 
@@ -430,17 +523,22 @@ window.VIEW_desoneracoes = (() => {
         UI.toast('PDF oficial anexado'); openDetail(id);
       } catch (e2) { UI.toast(e2.message, 'err'); }
     });
-    // Upload documento
-    document.getElementById('doc-upload')?.addEventListener('change', async e => {
+    // Upload documento — agora cada linha tem seu próprio input com data-doc-upload="TIPO"
+    document.querySelectorAll('[data-doc-upload]').forEach(inp => inp.onchange = async e => {
       const file = e.target.files[0];
       if (!file) return;
-      const tipo = document.getElementById('doc-tipo').value;
+      const tipo = inp.dataset.docUpload;
       const fd = new FormData();
       fd.append('file', file); fd.append('tipo', tipo);
       try {
         const resp = await fetch(`/api/desoneracoes/${id}/documentos`, { method: 'POST', credentials: 'include', body: fd });
-        if (!resp.ok) throw new Error(await resp.text());
-        UI.toast('Documento anexado'); openDetail(id);
+        if (!resp.ok) {
+          const txt = await resp.text();
+          let msg = txt;
+          try { msg = JSON.parse(txt).error || msg; } catch {}
+          throw new Error(msg);
+        }
+        UI.toast(`${tipo} anexado`); openDetail(id);
       } catch (e2) { UI.toast(e2.message, 'err'); }
     });
     // Excluir doc

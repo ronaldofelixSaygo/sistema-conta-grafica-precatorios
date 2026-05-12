@@ -12,10 +12,13 @@ export function clienteScope(user) {
     case 'ADM':
     case 'SAYGO':
       return {};
-    case 'PARTNER':
-      return user.officeName
-        ? { escritorio: user.officeName }
-        : { id: -1 }; // parceiro sem escritório definido não vê nada
+    case 'PARTNER': {
+      // officeName (preenchido na criação do usuário) é o canônico.
+      // Fallback pra parceiroNome (sempre presente se há parceiroId) cobre users
+      // antigos criados antes do auto-fill ou com officeName limpo manualmente.
+      const office = user.officeName || user.parceiroNome;
+      return office ? { escritorio: office } : { id: -1 };
+    }
     case 'CLIENT':
       return user.clienteId ? { id: user.clienteId } : { id: -1 };
     default:
@@ -30,10 +33,10 @@ export function movimentacaoScope(user) {
     case 'ADM':
     case 'SAYGO':
       return {};
-    case 'PARTNER':
-      return user.officeName
-        ? { cliente: { escritorio: user.officeName } }
-        : { id: -1 };
+    case 'PARTNER': {
+      const office = user.officeName || user.parceiroNome;
+      return office ? { cliente: { escritorio: office } } : { id: -1 };
+    }
     case 'CLIENT':
       return user.clienteId ? { clienteId: user.clienteId } : { id: -1 };
     default:

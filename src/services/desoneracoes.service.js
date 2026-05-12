@@ -531,10 +531,27 @@ export async function cancelDesoneracao(user, id, reason) {
   return getDesoneracao(id);
 }
 
+// Tabela de qual etapa habilita qual ação. Backend valida + frontend usa pra UX.
+const ETAPA_DOC_TIPOS = {
+  DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL','CCT','OUTRO'],
+  EMISSAO_DMI:      ['DMI','OUTRO'],
+  EMISSAO_NF:       ['OUTRO'],
+  VALIDACAO_NF:     ['OUTRO'],
+  ENVIO_NF_OFICIAL: ['OUTRO'],
+  PROTOCOLO_ICMS:   ['DESPACHO','OUTRO'],
+};
+export function getTiposDocPermitidos(etapa) {
+  return ETAPA_DOC_TIPOS[etapa] || ['OUTRO'];
+}
+
 // === Notas Fiscais ===
 export async function addNota(user, id, data) {
   const cur = await prisma.desoneracao.findUnique({ where: { id } });
   if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
+  if (cur.currentStep !== 'EMISSAO_NF') {
+    const e = new Error('Notas Fiscais só podem ser cadastradas na etapa "Emissão NFs" (após a DMI ser devolvida pelo escritório).');
+    e.status = 400; throw e;
+  }
   if (!['ENTRADA','SAIDA'].includes(data.tipo)) {
     const e = new Error("Tipo deve ser 'ENTRADA' ou 'SAIDA'"); e.status = 400; throw e;
   }
@@ -556,6 +573,12 @@ export async function addNota(user, id, data) {
 }
 
 export async function validarNota(user, notaId) {
+  const cur = await prisma.desoneracaoNota.findUnique({ where: { id: notaId }, include: { desoneracao: true } });
+  if (!cur) { const e = new Error('NF não encontrada'); e.status = 404; throw e; }
+  if (cur.desoneracao.currentStep !== 'VALIDACAO_NF') {
+    const e = new Error('Validação só pode ser feita na etapa "Validação NFs"');
+    e.status = 400; throw e;
+  }
   const n = await prisma.desoneracaoNota.update({
     where: { id: notaId },
     data: { validada: true, validadaAt: new Date(), validadaPorId: user.id },
@@ -568,6 +591,12 @@ export async function validarNota(user, notaId) {
 
 export async function anexarOficialNota(user, notaId, { name, mime, bytes }) {
   if (!bytes) { const e = new Error('Arquivo obrigatório'); e.status = 400; throw e; }
+  const cur = await prisma.desoneracaoNota.findUnique({ where: { id: notaId }, include: { desoneracao: true } });
+  if (!cur) { const e = new Error('NF não encontrada'); e.status = 404; throw e; }
+  if (cur.desoneracao.currentStep !== 'ENVIO_NF_OFICIAL') {
+    const e = new Error('PDF oficial da NF só pode ser anexado na etapa "NFs Oficiais"');
+    e.status = 400; throw e;
+  }
   const n = await prisma.desoneracaoNota.update({
     where: { id: notaId },
     data: { oficialNome: name, oficialMime: mime, oficialBytes: bytes },
@@ -597,8 +626,19 @@ export async function removeNota(user, notaId) {
 // === Documentos ===
 export async function addDocumento(user, id, { tipo, name, mime, bytes }) {
   if (!bytes) { const e = new Error('Arquivo obrigatório'); e.status = 400; throw e; }
+  const cur = await prisma.desoneracao.findUnique({ where: { id }, select: { currentStep: true, status: true } });
+  if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
+  if (cur.status !== 'EM_ANDAMENTO') {
+    const e = new Error('Não é possível anexar documentos com a desoneração nesse status'); e.status = 400; throw e;
+  }
+  const permitidos = getTiposDocPermitidos(cur.currentStep);
+  const tipoFinal = tipo || 'OUTRO';
+  if (!permitidos.includes(tipoFinal)) {
+    const e = new Error(`Documento "${tipoFinal}" não é esperado nesta etapa. Permitidos: ${permitidos.join(', ')}`);
+    e.status = 400; throw e;
+  }
   const doc = await prisma.desoneracaoDocumento.create({
-    data: { desoneracaoId: id, tipo: tipo || 'OUTRO', nome: name, mime, bytes, uploadedById: user.id },
+    data: { desoneracaoId: id, tipo: tipoFinal, nome: name, mime, bytes, uploadedById: user.id },
   });
   await prisma.desoneracaoEvento.create({
     data: { desoneracaoId: id, acao: 'DOC_ANEXADO', descricao: `${tipo}: ${name}`, byUserId: user.id },
@@ -649,4 +689,4 @@ export async function getRequiredDocsForUI(modal) {
   return out;
 }
 
-export const META = { STEPS: STEPS_ORDER, DEFAULT_DOCS_BY_STEP };
+export const META = { STEPS: STEPS_ORDER, DEFAULT_DOCS_BY_STEP, ETAPA_DOC_TIPOS };

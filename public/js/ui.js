@@ -11,12 +11,21 @@ window.UI = (() => {
     setTimeout(() => toastEl.className = 'toast', 3000);
   }
 
-  function openModal(title, html) {
+  function openModal(title, html, opts = {}) {
     modalTitle.textContent = title;
     modalBody.innerHTML = html;
     modalBg.classList.remove('hidden');
+    const modalEl = document.getElementById('modal');
+    if (modalEl) {
+      modalEl.classList.toggle('modal-large', !!opts.large);
+    }
   }
-  function closeModal() { modalBg.classList.add('hidden'); modalBody.innerHTML = ''; }
+  function closeModal() {
+    modalBg.classList.add('hidden');
+    modalBody.innerHTML = '';
+    const modalEl = document.getElementById('modal');
+    if (modalEl) modalEl.classList.remove('modal-large');
+  }
   // Fechar SÓ via:
   //   - botão ✕ do header (intenção explícita)
   //   - botão Cancelar/Salvar do form (chamam closeModal programaticamente)
