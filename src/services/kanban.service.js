@@ -58,7 +58,37 @@ async function ensureStages(cardId, stageParceiros = {}) {
   }
 }
 
-function cardScopeWhere(user) { return { cliente: clienteScope(user) }; }
+// Verdadeiro se o user é responsável pela stage, seja diretamente como
+// User (responsibleUserId), seja indiretamente como Parceiro (parceiroId).
+// Necessário pros kinds operacionais de etapa (ARMADOR_LOGISTICO, etc) que
+// são atribuídos via parceiroId, sem User específico.
+function isStageResponsible(user, sp) {
+  if (!user || !sp) return false;
+  if (sp.responsibleUserId && sp.responsibleUserId === user.id) return true;
+  if (user.role === 'PARTNER' && user.parceiroId && sp.parceiroId === user.parceiroId) return true;
+  return false;
+}
+
+// Scope dos cards do Kanban.
+// Regras:
+//  ADM/SAYGO        → vê todos.
+//  CLIENT           → vê só os cards do próprio cliente.
+//  PARTNER          → vê (a) cards dos clientes vinculados a ele (escritório,
+//                     contabilidade, despachante) OR (b) cards onde ele é
+//                     parceiro responsável por alguma stage (caso típico do
+//                     ARMADOR_LOGISTICO e outros kinds operacionais de etapa).
+function cardScopeWhere(user) {
+  if (!user) return { id: -1 };
+  if (user.role === 'PARTNER' && user.parceiroId) {
+    return {
+      OR: [
+        { cliente: clienteScope(user) },
+        { stages: { some: { parceiroId: user.parceiroId } } },
+      ],
+    };
+  }
+  return { cliente: clienteScope(user) };
+}
 
 export async function listCards(user) {
   const cards = await prisma.kanbanCard.findMany({
@@ -156,7 +186,7 @@ export async function updateStage(user, cardId, stage, payload) {
   if (!sp) { const e = new Error('Etapa nao encontrada'); e.status = 404; throw e; }
 
   const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
-  const isResponsible = sp.responsibleUserId === user.id;
+  const isResponsible = isStageResponsible(user, sp);
   const data = {};
 
   if (isStaff) {
@@ -191,7 +221,7 @@ export async function completeStage(user, cardId, stage, { force = false } = {})
   if (!sp) { const e = new Error('Etapa nao encontrada'); e.status = 404; throw e; }
 
   const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
-  const isResponsible = sp.responsibleUserId === user.id;
+  const isResponsible = isStageResponsible(user, sp);
   if (!isStaff && !isResponsible) {
     const e = new Error('Sem permissao para concluir esta etapa'); e.status = 403; throw e;
   }

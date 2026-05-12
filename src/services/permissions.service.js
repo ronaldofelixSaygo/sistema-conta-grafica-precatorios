@@ -7,6 +7,7 @@ const MODULES = [
   'dashboard','clientes','movimentacoes','saldos','comissoes',
   'relatorios','alertas','kanban','acionamentos','credit-requests','desoneracoes','parceiros',
   'usuarios','auditoria','chat','parametros',
+  'consulta-ncm',
 ];
 
 // Default restrictions por COMPORTAMENTO (cada kind herda o default do behavior dele).
@@ -30,14 +31,14 @@ function defaultsFor(role, behavior, mod) {
     canDelete: ['clientes','movimentacoes','kanban','acionamentos','credit-requests','desoneracoes','parceiros','comissoes'].includes(mod),
   };
   if (role === 'CLIENT') return {
-    canView:   ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','credit-requests','desoneracoes','chat'].includes(mod),
+    canView:   ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','credit-requests','desoneracoes','chat','consulta-ncm'].includes(mod),
     canCreate: ['acionamentos','credit-requests'].includes(mod),
     canEdit:   false,
     canDelete: false,
   };
   if (role === 'PARTNER') {
     if (behavior === 'ESCRITORIO') return {
-      canView:   ['dashboard','clientes','movimentacoes','saldos','comissoes','relatorios','alertas','kanban','acionamentos','credit-requests','desoneracoes','chat'].includes(mod),
+      canView:   ['dashboard','clientes','movimentacoes','saldos','comissoes','relatorios','alertas','kanban','acionamentos','credit-requests','desoneracoes','chat','consulta-ncm'].includes(mod),
       canCreate: ['clientes','movimentacoes','kanban','acionamentos','desoneracoes','comissoes'].includes(mod),
       canEdit:   ['clientes','movimentacoes','kanban','acionamentos','credit-requests','desoneracoes','comissoes'].includes(mod),
       canDelete: ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(mod),

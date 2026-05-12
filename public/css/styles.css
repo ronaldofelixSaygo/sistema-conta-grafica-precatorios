@@ -377,6 +377,55 @@ html[data-theme="light"] .page-toolbar select{background:var(--s1) !important;co
 .param-act-add{display:flex;gap:.4rem;align-items:center;margin-top:.4rem;padding-top:.4rem;border-top:1px dashed var(--bd2)}
 .param-act-add input{flex:1;background:var(--s1);border:1px solid var(--bd2);color:var(--t1);padding:6px 10px;border-radius:6px}
 
+/* Consulta NCM — visual rico de impostos e anuentes */
+.cn-form{display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap;margin-top:.6rem}
+.cn-input-group{display:flex;flex-direction:column;gap:.2rem;flex:1;min-width:160px;max-width:240px}
+.cn-input-group label{font-size:11px;color:var(--t2);text-transform:uppercase;font-weight:600;letter-spacing:.04em}
+.cn-input-group input,.cn-input-group select{background:var(--s1);border:1px solid var(--bd2);color:var(--t1);padding:8px 10px;border-radius:6px;font:inherit;width:100%;box-sizing:border-box}
+.cn-input-group input:focus,.cn-input-group select:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 2px rgba(255,140,0,.15)}
+
+.cn-result{animation:cnFadeIn .25s ease-out}
+@keyframes cnFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.cn-header-card{display:flex;align-items:center;gap:1.2rem;background:linear-gradient(135deg,rgba(255,140,0,.08),rgba(80,80,160,.06));border:1px solid var(--bd2);border-radius:12px;padding:1rem 1.2rem;margin-bottom:1rem;flex-wrap:wrap}
+.cn-ncm-display{display:flex;flex-direction:column;gap:.2rem;min-width:140px;border-right:1px solid var(--bd);padding-right:1.2rem}
+.cn-ncm-big{font-size:28px;font-weight:700;color:var(--ac);letter-spacing:.05em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.cn-header-desc{flex:1;min-width:200px}
+.cn-descricao{font-size:14px;line-height:1.4;color:var(--t1)}
+
+.cn-section-title{font-size:12px;color:var(--t2);text-transform:uppercase;font-weight:700;letter-spacing:.06em;margin:0 0 .5rem;display:flex;align-items:center;gap:.5rem}
+
+.cn-tax-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem}
+.cn-tax-card{background:var(--s1);border:1px solid var(--bd2);border-left-width:3px;border-radius:8px;padding:.7rem .9rem;display:flex;flex-direction:column;gap:.15rem;transition:transform .15s ease}
+.cn-tax-card:hover{transform:translateY(-2px)}
+.cn-tax-card.blue   {border-left-color:#3b82f6}
+.cn-tax-card.purple {border-left-color:#a855f7}
+.cn-tax-card.teal   {border-left-color:#14b8a6}
+.cn-tax-card.orange {border-left-color:#f97316}
+.cn-tax-label{font-size:11px;color:var(--t2);text-transform:uppercase;font-weight:600;letter-spacing:.05em}
+.cn-tax-value{font-size:22px;font-weight:700;color:var(--t1);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.cn-tax-hint{font-size:10px;color:var(--t3)}
+
+.cn-icms-card{background:linear-gradient(135deg,rgba(255,140,0,.06),transparent);border:1px solid var(--bd2);border-left:3px solid var(--ac);border-radius:8px;padding:.7rem .9rem;display:flex;flex-direction:column;gap:.15rem}
+.cn-icms-head{display:flex;align-items:center;gap:.5rem;justify-content:space-between}
+.cn-icms-label{font-size:11px;color:var(--t2);text-transform:uppercase;font-weight:600;letter-spacing:.05em}
+.cn-icms-value{font-size:22px;font-weight:700;color:var(--ac);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+.cn-anuentes-list{display:flex;flex-direction:column;gap:.5rem}
+.cn-anuente{background:var(--s1);border:1px solid var(--bd2);border-radius:8px;padding:.7rem .9rem}
+.cn-anuente.obrig{border-left:3px solid #ef4444}
+.cn-anuente.opcional{border-left:3px solid #6b7280}
+.cn-anuente-head{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.cn-anuente-tag{background:rgba(255,140,0,.15);color:var(--ac);padding:2px 8px;border-radius:6px;font-weight:700;font-size:12px;letter-spacing:.04em}
+.cn-anuente-desc{margin-top:.3rem;color:var(--t1);font-size:13px;line-height:1.4}
+
+.cn-badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;letter-spacing:.03em}
+.cn-badge.green{background:rgba(34,197,94,.15);color:#22c55e}
+.cn-badge.amber{background:rgba(245,158,11,.15);color:#f59e0b}
+.cn-badge.red  {background:rgba(239,68,68,.15);color:#ef4444}
+.cn-badge.gray {background:rgba(107,114,128,.15);color:#9ca3af}
+.cn-badge.dark {background:rgba(0,0,0,.25);color:var(--t1);border:1px solid var(--bd2)}
+
 /* Combobox pesquisável (substitui <select> longos) */
 .combo-wrap{position:relative;display:block;width:100%}
 .combo-hidden{display:none !important}

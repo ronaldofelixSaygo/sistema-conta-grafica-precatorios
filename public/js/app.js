@@ -12,6 +12,7 @@ window.APP = (() => {
     comissoes: 'Comissões',
     relatorios: 'Relatórios',
     alertas: 'Alertas',
+    'consulta-ncm': 'Consulta NCM',
     parceiros: 'Intervenientes Aduaneiros',
     usuarios: 'Usuários',
     auditoria: 'Auditoria',
