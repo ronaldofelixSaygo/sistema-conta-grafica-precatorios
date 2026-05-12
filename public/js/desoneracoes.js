@@ -350,7 +350,7 @@ window.VIEW_desoneracoes = (() => {
         <td class="num">${UI.fmtMoney(n.valor)}</td>
         <td>${n.validada ? '<span class="pill green">Validada</span>' : '<span class="pill amber">Pendente</span>'}</td>
         <td>${(n.oficialBytes || n.oficialNome) ? `
-          <a class="btn small" href="/api/desoneracoes/notas/${n.id}/oficial" target="_blank" title="Visualizar">👁</a>
+          <button class="btn small" data-nf-view="${n.id}" data-nf-name="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Visualizar">👁</button>
           <a class="btn small" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>
         ` : '—'}</td>
         <td>
@@ -417,7 +417,7 @@ window.VIEW_desoneracoes = (() => {
         if (!reached) return ''; // etapa futura: nenhum botão
         const primeiro = arquivos[0];
         return `
-          ${tem ? `<a class="btn small" href="/api/desoneracoes/documentos/${primeiro.id}" target="_blank" title="Visualizar">👁</a>` : ''}
+          ${tem ? `<button class="btn small" data-doc-view="${primeiro.id}" data-doc-name="${UI.escapeHtml(primeiro.nome)}" title="Visualizar">👁</button>` : ''}
           ${tem && podeExcluir ? `<button class="btn small danger" data-doc-del="${primeiro.id}" title="Excluir">✕</button>` : ''}
           ${podeAnexarNessaEtapa ? `
             <label class="btn primary small btn-anexar" style="cursor:pointer" title="${tem?'Adicionar outro':'Anexar'} ${tipo}">
@@ -554,6 +554,20 @@ window.VIEW_desoneracoes = (() => {
       if (!confirm('Excluir documento?')) return;
       try { await API.del(`/api/desoneracoes/documentos/${b.dataset.docDel}`); openDetail(id); }
       catch (e) { UI.toast(e.message, 'err'); }
+    });
+    // Visualizar doc inline (usa o VIEWER do viewer.js — overlay com iframe pra PDF)
+    document.querySelectorAll('[data-doc-view]').forEach(b => b.onclick = () => {
+      VIEWER.open({
+        url: `/api/desoneracoes/documentos/${b.dataset.docView}`,
+        filename: b.dataset.docName,
+      });
+    });
+    // Visualizar NF oficial inline
+    document.querySelectorAll('[data-nf-view]').forEach(b => b.onclick = () => {
+      VIEWER.open({
+        url: `/api/desoneracoes/notas/${b.dataset.nfView}/oficial`,
+        filename: b.dataset.nfName,
+      });
     });
     // Mudar parceiro responsável da etapa atual (auto-save ao mudar)
     document.getElementById('step-parc')?.addEventListener('change', async e => {
