@@ -99,6 +99,45 @@ window['VIEW_consulta-ncm'] = (() => {
     return c.slice(0, 4) + '.' + c.slice(4);
   }
 
+  // Paleta de cores distintas pra anuentes. Mapeia órgãos conhecidos pra cores
+  // estáveis (sempre o mesmo órgão fica com a mesma cor entre consultas), e usa
+  // hash do nome pra ordens desconhecidas — assim a UI fica consistente sem ter
+  // que manter uma tabela enorme.
+  const ANUENTE_COLORS = {
+    ANVISA:   { bg:'rgba(236,72,153,.15)', border:'#ec4899', text:'#ec4899' }, // rosa
+    MAPA:     { bg:'rgba(34,197,94,.15)',  border:'#22c55e', text:'#22c55e' }, // verde
+    IBAMA:    { bg:'rgba(132,204,22,.15)', border:'#84cc16', text:'#84cc16' }, // verde-lima
+    ANATEL:   { bg:'rgba(59,130,246,.15)', border:'#3b82f6', text:'#3b82f6' }, // azul
+    INMETRO:  { bg:'rgba(168,85,247,.15)', border:'#a855f7', text:'#a855f7' }, // roxo
+    DNRC:     { bg:'rgba(20,184,166,.15)', border:'#14b8a6', text:'#14b8a6' }, // teal
+    DPF:      { bg:'rgba(100,116,139,.15)',border:'#64748b', text:'#94a3b8' }, // cinza
+    DECEX:    { bg:'rgba(249,115,22,.15)', border:'#f97316', text:'#f97316' }, // laranja
+    DNPM:     { bg:'rgba(217,119,6,.15)',  border:'#d97706', text:'#d97706' }, // âmbar
+    ANP:      { bg:'rgba(234,179,8,.15)',  border:'#eab308', text:'#eab308' }, // amarelo
+    'COMANDO DO EXERCITO': { bg:'rgba(120,53,15,.2)',  border:'#92400e', text:'#a16207' },
+    SUFRAMA:  { bg:'rgba(244,114,182,.15)',border:'#f472b6', text:'#f472b6' },
+    DECEA:    { bg:'rgba(56,189,248,.15)', border:'#38bdf8', text:'#38bdf8' },
+    MCTI:     { bg:'rgba(192,132,252,.15)',border:'#c084fc', text:'#c084fc' },
+  };
+  const PALETTE_FALLBACK = [
+    { bg:'rgba(236,72,153,.15)', border:'#ec4899', text:'#ec4899' },
+    { bg:'rgba(34,197,94,.15)',  border:'#22c55e', text:'#22c55e' },
+    { bg:'rgba(59,130,246,.15)', border:'#3b82f6', text:'#3b82f6' },
+    { bg:'rgba(168,85,247,.15)', border:'#a855f7', text:'#a855f7' },
+    { bg:'rgba(249,115,22,.15)', border:'#f97316', text:'#f97316' },
+    { bg:'rgba(20,184,166,.15)', border:'#14b8a6', text:'#14b8a6' },
+    { bg:'rgba(234,179,8,.15)',  border:'#eab308', text:'#eab308' },
+    { bg:'rgba(244,114,182,.15)',border:'#f472b6', text:'#f472b6' },
+  ];
+  function colorForAnuente(nome) {
+    const key = String(nome || '').toUpperCase();
+    if (ANUENTE_COLORS[key]) return ANUENTE_COLORS[key];
+    // Hash simples (djb2-ish) pra picar uma cor estável da paleta fallback
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 33 + key.charCodeAt(i)) >>> 0;
+    return PALETTE_FALLBACK[h % PALETTE_FALLBACK.length];
+  }
+
   function matchBadge(level, tipo) {
     if (!level) return '<span class="cn-badge gray">não encontrado</span>';
     if (level === 8) return '<span class="cn-badge green">match exato (8 dígitos)</span>';
@@ -125,17 +164,22 @@ window['VIEW_consulta-ncm'] = (() => {
 
     const anuentesHtml = d.anuentes?.length
       ? `<div class="cn-anuentes-list">
-          ${d.anuentes.map(a => `
-            <div class="cn-anuente ${a.obrigatorio ? 'obrig' : 'opcional'}">
+          ${d.anuentes.map(a => {
+            const c = colorForAnuente(a.anuente);
+            const style = `background:${c.bg};border-left-color:${c.border}`;
+            const tagStyle = `background:${c.bg};color:${c.text};border:1px solid ${c.border}`;
+            return `
+            <div class="cn-anuente ${a.obrigatorio ? 'obrig' : 'opcional'}" style="${style}">
               <div class="cn-anuente-head">
-                <span class="cn-anuente-tag">${UI.escapeHtml(a.anuente)}</span>
+                <span class="cn-anuente-tag" style="${tagStyle}">${UI.escapeHtml(a.anuente)}</span>
                 ${a.obrigatorio
                   ? '<span class="cn-badge red">obrigatório</span>'
                   : '<span class="cn-badge gray">condicional</span>'}
                 <span class="muted small" style="margin-left:auto">match NCM: ${UI.escapeHtml(a.ncm_match || '—')}</span>
               </div>
               ${a.descricao ? `<div class="cn-anuente-desc">${UI.escapeHtml(a.descricao)}</div>` : ''}
-            </div>`).join('')}
+            </div>`;
+          }).join('')}
         </div>`
       : `<div class="muted">Nenhum órgão anuente associado a este NCM. A importação não exige autorização prévia.</div>`;
 
