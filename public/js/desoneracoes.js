@@ -114,14 +114,13 @@ window.VIEW_desoneracoes = (() => {
   // Formulário de criação
   // ─────────────────────────────────────────────────────────────────────
   async function openCreateForm() {
-    const escritorios = parceirosCache.filter(p => (p.kindCode||p.type)==='ESCRITORIO');
-    const despachantes = parceirosCache.filter(p => (p.kindCode||p.type) !== 'ESCRITORIO');
     UI.openModal('Nova desoneração', `
       <form id="form-des" class="form-grid">
         <div class="full"><label>Cliente *</label>
           <select name="clienteId" required><option value="">—</option>
             ${clientesCache.map(c => `<option value="${c.id}">${UI.escapeHtml(c.nome)}</option>`).join('')}
           </select>
+          <div class="muted small" style="margin-top:.2rem">O escritório responsável e o despachante são vinculados automaticamente pelo cadastro do cliente.</div>
         </div>
         <div><label>Modal *</label>
           <select name="modal" required>
@@ -133,17 +132,9 @@ window.VIEW_desoneracoes = (() => {
         </div>
         <div><label>DUIMP/DI</label><input name="duimpDi" placeholder="ex: 26/0123456-7"></div>
         <div><label>Nº Processo</label><input name="numeroProcesso" placeholder="opcional"></div>
-        <div><label>Valor mercadoria (R$)</label><input type="number" step="0.01" name="valorMercadoria"></div>
-        <div class="full"><label>Valor ICMS a desonerar (R$) *</label><input type="number" step="0.01" name="valorIcmsDesonerado" required></div>
-        <div class="full" style="border-top:1px solid var(--bd);padding-top:.4rem;margin-top:.2rem">
-          <strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Parceiros responsáveis (opcional — pode definir depois)</strong>
-        </div>
-        <div><label>Despachante</label>
-          <select name="parc_DOCS_DESPACHANTE"><option value="">—</option>${despachantes.map(p => `<option value="${p.id}">${UI.escapeHtml(p.nome)}</option>`).join('')}</select>
-        </div>
-        <div><label>DMI / Validação / Protocolo</label>
-          <select name="parc_EMISSAO_DMI"><option value="">—</option>${escritorios.map(p => `<option value="${p.id}">${UI.escapeHtml(p.nome)}</option>`).join('')}</select>
-          <div class="muted small" style="margin-top:.2rem">Será aplicado pras 3 etapas Saygo (DMI + Validação + Protocolo). Pode trocar individualmente no detalhe.</div>
+        <div><label>Valor mercadoria (R$)</label><input type="number" step="0.01" name="valorMercadoria" placeholder="opcional"></div>
+        <div class="full muted small" style="border-top:1px solid var(--bd);padding-top:.4rem;margin-top:.2rem">
+          ℹ O <strong>valor do ICMS a desonerar</strong> é preenchido na etapa <strong>Emissão DMI</strong>, quando o escritório devolve a DMI com o valor calculado.
         </div>
         <div class="full form-actions">
           <button type="button" class="btn" id="des-cancel">Cancelar</button>
@@ -154,20 +145,13 @@ window.VIEW_desoneracoes = (() => {
     document.getElementById('form-des').onsubmit = async ev => {
       ev.preventDefault();
       const fd = new FormData(ev.target);
-      const escritorioId = fd.get('parc_EMISSAO_DMI') || null;
       const payload = {
         clienteId: Number(fd.get('clienteId')),
         modal: fd.get('modal'),
         duimpDi: fd.get('duimpDi') || null,
         numeroProcesso: fd.get('numeroProcesso') || null,
         valorMercadoria: fd.get('valorMercadoria') ? Number(fd.get('valorMercadoria')) : null,
-        valorIcmsDesonerado: fd.get('valorIcmsDesonerado') ? Number(fd.get('valorIcmsDesonerado')) : null,
-        parceiros: {
-          DOCS_DESPACHANTE: fd.get('parc_DOCS_DESPACHANTE') || null,
-          EMISSAO_DMI:      escritorioId,
-          VALIDACAO_NF:     escritorioId,
-          PROTOCOLO_ICMS:   escritorioId,
-        },
+        // Sem valorIcmsDesonerado nem parceiros — backend resolve automaticamente.
       };
       try {
         const r = await API.post('/api/desoneracoes', payload);
@@ -272,9 +256,18 @@ window.VIEW_desoneracoes = (() => {
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
     const podeAvancar = !!cur?.podeAtuar;
     const respLabel = renderRespLabel(d, cur);
+    // Painel especial: na etapa EMISSAO_DMI o responsável preenche o valor ICMS desonerado.
+    const isEtapaDmi = d.currentStep === 'EMISSAO_DMI';
     return `<div class="panel">
       <h3>Etapa atual: ${STEP_LABELS[d.currentStep]}</h3>
       <div class="muted small" style="margin:.3rem 0">Responsável: <strong>${respLabel || '—'}</strong></div>
+      ${isEtapaDmi ? `
+        <div style="background:var(--s2);padding:.6rem .8rem;border-radius:6px;margin:.5rem 0">
+          <label style="font-size:11px;text-transform:uppercase;color:var(--t3)">Valor ICMS a desonerar (R$) — vem da DMI devolvida pelo escritório</label>
+          <input id="des-valor-icms" type="number" step="0.01" min="0" value="${d.valorIcmsDesonerado ?? ''}" style="width:100%;padding:8px 10px;background:var(--s1);border:1px solid var(--bd2);border-radius:6px" ${podeAvancar?'':'readonly'}>
+          <div class="muted small" style="margin-top:.3rem">Obrigatório pra avançar dessa etapa. Será usado pra criar a movimentação no extrato do cliente ao concluir.</div>
+        </div>
+      ` : ''}
       ${isStaff ? `
         <div style="display:flex;gap:.6rem;align-items:center;margin:.5rem 0">
           <label class="muted small">Trocar parceiro:</label>
@@ -373,6 +366,14 @@ window.VIEW_desoneracoes = (() => {
     // Avançar etapa
     document.getElementById('des-advance-btn')?.addEventListener('click', async () => {
       const parc = document.getElementById('step-parc')?.value || null;
+      // Se está na etapa DMI, salva o valor ICMS antes de avançar (responsável preencheu).
+      if (d.currentStep === 'EMISSAO_DMI') {
+        const inp = document.getElementById('des-valor-icms');
+        const valor = inp ? Number(inp.value) : 0;
+        if (!valor || valor <= 0) { UI.toast('Informe o Valor ICMS a desonerar (vem da DMI)', 'err'); return; }
+        try { await API.put(`/api/desoneracoes/${id}`, { valorIcmsDesonerado: valor }); }
+        catch (e) { UI.toast('Falha ao salvar valor ICMS: ' + e.message, 'err'); return; }
+      }
       try {
         await API.post(`/api/desoneracoes/${id}/advance`, { parceiroId: parc });
         UI.toast('Etapa avançada');

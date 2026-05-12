@@ -396,6 +396,13 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
     e.status = 400; throw e;
   }
 
+  // EMISSAO_DMI: precisa preencher valor ICMS desonerado antes de avançar.
+  if (etapaAtual === 'EMISSAO_DMI') {
+    if (!cur.valorIcmsDesonerado || cur.valorIcmsDesonerado <= 0) {
+      const e = new Error('Informe o Valor ICMS a desonerar (vem da DMI devolvida pelo escritório) antes de avançar');
+      e.status = 400; throw e;
+    }
+  }
   // NFs: na EMISSAO_NF precisa pelo menos 1 entrada e 1 saída.
   if (etapaAtual === 'EMISSAO_NF') {
     const tem = (t) => cur.notas.some(n => n.tipo === t);
