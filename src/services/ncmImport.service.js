@@ -34,36 +34,57 @@ function parseBool(v, defaultVal = true) {
   return defaultVal;
 }
 
-// Detecção de colunas por modo
-function detectColumns(headers, modo) {
+// Detecção de colunas pelos nomes dos headers (com fold de acentos/case).
+// NÃO inclui fallback posicional aqui — o caller decide se aplica.
+// Retorna o map + namedScore (quantos campos foram casados por nome).
+function detectColumnsByName(headers, modo) {
   const map = {};
+  let namedScore = 0;
+  function set(key, idx) { if (!(key in map)) { map[key] = idx; namedScore++; } }
   for (let i = 0; i < headers.length; i++) {
     const h = fold(headers[i]);
     if (!h) continue;
-    if (!('ncm' in map) && /^(ncm|codigo|cod|sh)$/.test(h)) map.ncm = i;
-    if (!('descricao' in map) && /(descric|nomencla|produto|mercador)/.test(h)) map.descricao = i;
-    if (!('ipi' in map) && /^(ipi|aliquotaipi|aliqipi)$/.test(h)) map.ipi = i;
-    if (!('ii' in map)  && /(impimport|aliquotaii|^tec$|aliqii|iialiq|^ii$|impostoimportac)/.test(h)) map.ii = i;
-    if (!('pis' in map) && /^(pis|aliquotapis)$/.test(h)) map.pis = i;
-    if (!('cofins' in map) && /^(cofins|aliquotacofins)$/.test(h)) map.cofins = i;
-    if (!('anuente' in map) && /^(anuente|orgao|orgaoanuente|controle|controla|orgaocontrolador)$/.test(h)) map.anuente = i;
-    if (!('obrigatorio' in map) && /(obrig|tipo|natureza)/.test(h)) map.obrigatorio = i;
+    if (/^(ncm|codigo|cod|sh)$/.test(h)) set('ncm', i);
+    if (/(descric|nomencla|produto|mercador)/.test(h)) set('descricao', i);
+    // 'aliquota' isolado vira IPI no modo tributos (header padrão da TIPI é "ALÍQUOTA (%)")
+    if (/^(ipi|aliquotaipi|aliqipi)$/.test(h)) set('ipi', i);
+    else if (modo === 'tributos' && /^aliquota$/.test(h)) set('ipi', i);
+    if (/(impimport|aliquotaii|^tec$|aliqii|iialiq|^ii$|impostoimportac)/.test(h)) set('ii', i);
+    if (/^(pis|aliquotapis)$/.test(h)) set('pis', i);
+    if (/^(cofins|aliquotacofins)$/.test(h)) set('cofins', i);
+    if (/^(anuente|orgao|orgaoanuente|controle|controla|orgaocontrolador)$/.test(h)) set('anuente', i);
+    if (/(obrig|tipo|natureza)/.test(h)) set('obrigatorio', i);
   }
-  // Fallback posicional
+  map._namedScore = namedScore;
+  return map;
+}
+
+// Fallback posicional — só usado se nenhum header foi achado pelo nome.
+function positionalColumns(headersLen, modo) {
+  const map = { _namedScore: 0 };
   if (modo === 'tributos') {
-    if (!('ncm' in map) && headers.length) map.ncm = 0;
-    if (!('descricao' in map) && headers.length > 1) map.descricao = 1;
-    if (!('ipi' in map) && headers.length > 2) map.ipi = 2;
+    if (headersLen >= 1) map.ncm = 0;
+    if (headersLen >= 2) map.descricao = 1;
+    if (headersLen >= 3) map.ipi = 2;
   } else if (modo === 'tec') {
-    if (!('ncm' in map) && headers.length) map.ncm = 0;
-    if (!('ii' in map) && headers.length > 1) map.ii = 1;
+    if (headersLen >= 1) map.ncm = 0;
+    if (headersLen >= 2) map.ii = 1;
   } else if (modo === 'anuentes') {
-    if (!('ncm' in map) && headers.length) map.ncm = 0;
-    if (!('anuente' in map) && headers.length > 1) map.anuente = 1;
-    if (!('descricao' in map) && headers.length > 2) map.descricao = 2;
-    if (!('obrigatorio' in map) && headers.length > 3) map.obrigatorio = 3;
+    if (headersLen >= 1) map.ncm = 0;
+    if (headersLen >= 2) map.anuente = 1;
+    if (headersLen >= 3) map.descricao = 2;
+    if (headersLen >= 4) map.obrigatorio = 3;
   }
   return map;
+}
+
+// Verdadeiro se o map tem o mínimo de campos requeridos pra cada modo.
+function hasRequiredCols(map, modo) {
+  if (typeof map.ncm !== 'number') return false;
+  if (modo === 'tributos') return true; // ncm é o único obrigatório (descricao/ipi opcionais)
+  if (modo === 'tec')      return typeof map.ii === 'number';
+  if (modo === 'anuentes') return typeof map.anuente === 'number';
+  return false;
 }
 
 export async function importNcmFile({ buffer, filename, modo = 'tributos' }) {
@@ -80,16 +101,29 @@ export async function importNcmFile({ buffer, filename, modo = 'tributos' }) {
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
   if (rows.length < 2) { const e = new Error('Arquivo vazio'); e.status = 400; throw e; }
 
-  // Tenta achar a linha do header nas primeiras 8 linhas
+  // Acha o header pela maior pontuação de matches nomeados nas primeiras 15
+  // linhas (a TIPI da Receita tem 7 linhas de metadados antes do header real).
+  // Só cai pro fallback posicional se NENHUM header nomeado for achado.
   let headerRowIdx = 0;
-  let cols = detectColumns(rows[0].map(String), modo);
-  if (typeof cols.ncm !== 'number' || !cleanNcm(rows[1]?.[cols.ncm])) {
-    for (let i = 1; i < Math.min(8, rows.length); i++) {
-      const tryCols = detectColumns(rows[i].map(String), modo);
-      if (typeof tryCols.ncm === 'number' && cleanNcm(rows[i+1]?.[tryCols.ncm])?.length >= 2) {
-        cols = tryCols; headerRowIdx = i; break;
-      }
+  let cols = null;
+  let bestScore = 0;
+  for (let i = 0; i < Math.min(15, rows.length); i++) {
+    const tryCols = detectColumnsByName(rows[i].map(String), modo);
+    if (!hasRequiredCols(tryCols, modo)) continue;
+    // Confere que a próxima linha (i+1) tem um NCM válido — evita pegar uma
+    // linha de subtítulo que casualmente tenha a palavra "NCM".
+    const nextNcm = cleanNcm(rows[i+1]?.[tryCols.ncm]);
+    if (!nextNcm || nextNcm.length < 2) continue;
+    if (tryCols._namedScore > bestScore) {
+      bestScore = tryCols._namedScore;
+      cols = tryCols;
+      headerRowIdx = i;
     }
+  }
+  // Sem header nomeado em nenhuma das primeiras 15 linhas → cai pra posicional.
+  if (!cols) {
+    cols = positionalColumns(rows[0].length, modo);
+    headerRowIdx = 0;
   }
 
   const stats = { modo, totalLinhas: rows.length, headerRow: headerRowIdx, mapeamento: cols, importados: 0, atualizados: 0, ignorados: 0, erros: [] };
