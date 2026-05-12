@@ -396,6 +396,7 @@ model PartnerKind {
   updatedAt   DateTime    @updatedAt
 
   parceiros   Parceiro[]
+  rolePermissions RolePermission[]
   @@map("partner_kinds")
 }
 
@@ -673,23 +674,25 @@ model EmailLog {
 // ============================================================
 //   PERMISSÕES POR PERFIL (parâmetros)
 // ============================================================
-// Matriz role × tipo-de-parceiro × módulo. ADM gerencia na tela Parâmetros.
-// Para roles que não são PARTNER, partnerType é null.
-// Para PARTNER, há uma linha por tipo (ESCRITORIO, ARMADOR_LOGISTICO, OUTRO).
+// Matriz role × kind × módulo. ADM gerencia na tela Parâmetros.
+// Para roles que não são PARTNER (ADM/SAYGO/CLIENT), partnerKindCode é null.
+// Para PARTNER, há uma linha por PartnerKind (incluindo customizados como Contabilidade).
 model RolePermission {
-  id          String       @id @default(uuid())
-  role        Role
-  partnerType PartnerType?
-  module      String
-  canView     Boolean      @default(true)
-  canCreate   Boolean      @default(false)
-  canEdit     Boolean      @default(false)
-  canDelete   Boolean      @default(false)
+  id              String        @id @default(uuid())
+  role            Role
+  partnerType     PartnerType?  // legado — derivado do kind.behavior, mantido por compat
+  partnerKindCode String?       // primário pra PARTNER — referencia PartnerKind.code
+  partnerKind     PartnerKind?  @relation(fields: [partnerKindCode], references: [code], onDelete: Cascade, onUpdate: Cascade)
+  module          String
+  canView         Boolean       @default(true)
+  canCreate       Boolean       @default(false)
+  canEdit         Boolean       @default(false)
+  canDelete       Boolean       @default(false)
   // Campos da entidade que devem ser ocultados do retorno (lista de strings).
-  // Ex.: para PARTNER ARMADOR_LOGISTICO + clientes, ['percentualComissao','diaFechamento']
-  restrictedFields Json    @default("[]")
-  updatedAt   DateTime     @updatedAt
+  restrictedFields Json         @default("[]")
+  updatedAt       DateTime      @updatedAt
 
-  @@unique([role, partnerType, module])
+  @@unique([role, partnerKindCode, module])
+  @@index([partnerKindCode])
   @@map("role_permissions")
 }

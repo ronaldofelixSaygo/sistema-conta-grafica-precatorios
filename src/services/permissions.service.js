@@ -1,113 +1,186 @@
 import { prisma } from '../config/prisma.js';
+import { ensureBuiltin as ensureBuiltinKinds } from './partnerKind.service.js';
 
 const ROLES = ['ADM','SAYGO','PARTNER','CLIENT'];
-const PARTNER_TYPES = ['ESCRITORIO','ARMADOR_LOGISTICO','OUTRO'];
+const BEHAVIORS = ['ESCRITORIO','ARMADOR_LOGISTICO','OUTRO'];
 const MODULES = [
   'dashboard','clientes','movimentacoes','saldos','comissoes',
   'relatorios','alertas','kanban','acionamentos','credit-requests','parceiros',
   'usuarios','auditoria','chat','parametros',
 ];
 
-// Coluns "perfis" exibidas no frontend = combinação role+partnerType
-export const PROFILES = [
-  { key: 'ADM',                   role: 'ADM',     partnerType: null },
-  { key: 'SAYGO',                 role: 'SAYGO',   partnerType: null },
-  { key: 'PARTNER_ESCRITORIO',    role: 'PARTNER', partnerType: 'ESCRITORIO' },
-  { key: 'PARTNER_ARMADOR',       role: 'PARTNER', partnerType: 'ARMADOR_LOGISTICO' },
-  { key: 'PARTNER_OUTRO',         role: 'PARTNER', partnerType: 'OUTRO' },
-  { key: 'CLIENT',                role: 'CLIENT',  partnerType: null },
-];
-
-// Default: sensitive fields por (perfil, módulo) — chave inicial movível pra UI
-const DEFAULT_RESTRICTIONS = {
-  PARTNER_ARMADOR: { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
-  PARTNER_OUTRO:   { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
-  CLIENT:          { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
+// Default restrictions por COMPORTAMENTO (cada kind herda o default do behavior dele).
+const DEFAULT_RESTRICTIONS_BY_BEHAVIOR = {
+  ARMADOR_LOGISTICO: { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
+  OUTRO:             { clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'] },
+};
+// CLIENT tem suas próprias restrições
+const DEFAULT_RESTRICTIONS_CLIENT = {
+  clientes: ['percentualComissao','diaFechamento','parceiroSala','parceiroFilial','parceiroIe'],
 };
 
-function defaults() {
+// Defaults por COMBINAÇÃO (role, behavior, módulo). Retorna { canView, canCreate, canEdit, canDelete }.
+// PARTNER usa o behavior do kind dele.
+function defaultsFor(role, behavior, mod) {
+  if (role === 'ADM') return { canView:true, canCreate:true, canEdit:true, canDelete:true };
+  if (role === 'SAYGO') return {
+    canView:   !['parametros'].includes(mod),
+    canCreate: ['clientes','movimentacoes','kanban','acionamentos','credit-requests','parceiros','comissoes'].includes(mod),
+    canEdit:   ['clientes','movimentacoes','kanban','acionamentos','credit-requests','parceiros','comissoes'].includes(mod),
+    canDelete: ['clientes','movimentacoes','kanban','acionamentos','credit-requests','parceiros','comissoes'].includes(mod),
+  };
+  if (role === 'CLIENT') return {
+    canView:   ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','credit-requests','chat'].includes(mod),
+    canCreate: ['acionamentos','credit-requests'].includes(mod),
+    canEdit:   false,
+    canDelete: false,
+  };
+  if (role === 'PARTNER') {
+    if (behavior === 'ESCRITORIO') return {
+      canView:   ['dashboard','clientes','movimentacoes','saldos','comissoes','relatorios','alertas','kanban','acionamentos','credit-requests','chat'].includes(mod),
+      canCreate: ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(mod),
+      canEdit:   ['clientes','movimentacoes','kanban','acionamentos','credit-requests','comissoes'].includes(mod),
+      canDelete: ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(mod),
+    };
+    // ARMADOR_LOGISTICO e OUTRO: só Kanban e Chat
+    return {
+      canView:   ['kanban','chat'].includes(mod),
+      canCreate: ['kanban'].includes(mod),
+      canEdit:   ['kanban'].includes(mod),
+      canDelete: false,
+    };
+  }
+  return { canView:false, canCreate:false, canEdit:false, canDelete:false };
+}
+
+function defaultRestrictionsFor(role, behavior, mod) {
+  if (role === 'CLIENT') return DEFAULT_RESTRICTIONS_CLIENT[mod] || [];
+  if (role === 'PARTNER' && behavior && behavior !== 'ESCRITORIO') {
+    return DEFAULT_RESTRICTIONS_BY_BEHAVIOR[behavior]?.[mod] || [];
+  }
+  return [];
+}
+
+// Constrói o array completo de defaults: 1 row por (ADM/SAYGO/CLIENT × módulo) +
+// 1 row por (PARTNER × cada kind ativo × módulo).
+async function buildDefaults() {
+  await ensureBuiltinKinds();
+  const kinds = await prisma.partnerKind.findMany({ orderBy: { sort: 'asc' } });
   const out = [];
-  for (const p of PROFILES) {
-    for (const m of MODULES) {
-      let canView=false, canCreate=false, canEdit=false, canDelete=false;
-      if (p.key === 'ADM') { canView=canCreate=canEdit=canDelete=true; }
-      else if (p.key === 'SAYGO') {
-        canView   = !['parametros'].includes(m);
-        canCreate = ['clientes','movimentacoes','kanban','acionamentos','credit-requests','parceiros','comissoes'].includes(m);
-        canEdit   = canCreate;
-        canDelete = canCreate;
-      } else if (p.key === 'PARTNER_ESCRITORIO') {
-        canView   = ['dashboard','clientes','movimentacoes','saldos','comissoes','relatorios','alertas','kanban','acionamentos','credit-requests','chat'].includes(m);
-        // Não cria solicitação de crédito — ele apenas resolve as que recebe
-        canCreate = ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(m);
-        canEdit   = ['clientes','movimentacoes','kanban','acionamentos','credit-requests','comissoes'].includes(m); // edita pra resolver
-        canDelete = ['clientes','movimentacoes','kanban','acionamentos','comissoes'].includes(m);
-      } else if (p.key === 'PARTNER_ARMADOR') {
-        canView   = ['kanban','chat'].includes(m);  // armador: só Kanban e Chat por padrão
-        canCreate = ['kanban'].includes(m);
-        canEdit   = canCreate;
-        canDelete = false;
-      } else if (p.key === 'PARTNER_OUTRO') {
-        canView   = ['kanban','chat'].includes(m);
-        canCreate = ['kanban'].includes(m);
-        canEdit   = canCreate;
-        canDelete = false;
-      } else if (p.key === 'CLIENT') {
-        canView   = ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','credit-requests','chat'].includes(m);
-        canCreate = ['acionamentos','credit-requests'].includes(m);
-        canEdit   = false;
-        canDelete = false;
-      }
-      const restricted = DEFAULT_RESTRICTIONS[p.key]?.[m] || [];
+  for (const mod of MODULES) {
+    // Roles sem kind (ADM, SAYGO, CLIENT)
+    for (const role of ['ADM','SAYGO','CLIENT']) {
+      const d = defaultsFor(role, null, mod);
       out.push({
-        role: p.role, partnerType: p.partnerType, module: m,
-        canView, canCreate, canEdit, canDelete,
-        restrictedFields: restricted,
+        role, partnerType: null, partnerKindCode: null, module: mod,
+        ...d, restrictedFields: defaultRestrictionsFor(role, null, mod),
+      });
+    }
+    // PARTNER × cada kind
+    for (const k of kinds) {
+      const d = defaultsFor('PARTNER', k.behavior, mod);
+      out.push({
+        role: 'PARTNER',
+        partnerType: k.behavior,
+        partnerKindCode: k.code,
+        module: mod,
+        ...d,
+        restrictedFields: defaultRestrictionsFor('PARTNER', k.behavior, mod),
       });
     }
   }
   return out;
 }
 
+// Backfill: para rows legadas com partnerType setado e partnerKindCode nulo,
+// usa o partnerType como kindCode (porque os builtin codes batem com o enum).
+let _backfillDone = false;
+async function backfillKindCode() {
+  if (_backfillDone) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE role_permissions
+      SET "partnerKindCode" = "partnerType"::text
+      WHERE role = 'PARTNER' AND "partnerKindCode" IS NULL AND "partnerType" IS NOT NULL
+    `);
+    _backfillDone = true;
+  } catch (e) {
+    console.warn('[permissions] backfill kindCode falhou:', e.message);
+  }
+}
+
 // Flag de boot: ensureDefaults só efetivamente roda na 1ª chamada do processo.
-// Sem isso, cada request que precisa de perms (auth/me, clientes, permissions)
-// fazia até 90 queries sequenciais — causando 15-17s no cold path com Neon distante.
 let _defaultsEnsured = false;
 let _defaultsPromise = null;
 
 export async function ensureDefaults() {
   if (_defaultsEnsured) return;
-  if (_defaultsPromise) return _defaultsPromise; // dedup chamadas concorrentes
+  if (_defaultsPromise) return _defaultsPromise;
   _defaultsPromise = (async () => {
     try {
-      // 1 query só: skipDuplicates aproveita o @@unique([role, partnerType, module])
-      // pra inserir só o que falta. Custa o mesmo que um createMany normal.
-      await prisma.rolePermission.createMany({
-        data: defaults(),
-        skipDuplicates: true,
-      });
+      await backfillKindCode();
+      const data = await buildDefaults();
+      await prisma.rolePermission.createMany({ data, skipDuplicates: true });
       _defaultsEnsured = true;
     } catch (e) {
-      _defaultsPromise = null; // permite retry no próximo request
+      _defaultsPromise = null;
       throw e;
     }
   })();
   return _defaultsPromise;
 }
 
+// Re-seeda perms pra um kind específico (chamado quando um novo kind é criado).
+export async function ensureDefaultsForKind(kindCode) {
+  const k = await prisma.partnerKind.findUnique({ where: { code: kindCode } });
+  if (!k) return;
+  const data = MODULES.map(mod => {
+    const d = defaultsFor('PARTNER', k.behavior, mod);
+    return {
+      role: 'PARTNER',
+      partnerType: k.behavior,
+      partnerKindCode: k.code,
+      module: mod,
+      ...d,
+      restrictedFields: defaultRestrictionsFor('PARTNER', k.behavior, mod),
+    };
+  });
+  await prisma.rolePermission.createMany({ data, skipDuplicates: true });
+  invalidatePermsCache();
+}
+
 export async function listAll() {
   await ensureDefaults();
   return prisma.rolePermission.findMany({
-    orderBy: [{ role: 'asc' }, { partnerType: 'asc' }, { module: 'asc' }],
+    orderBy: [{ role: 'asc' }, { partnerKindCode: 'asc' }, { module: 'asc' }],
   });
 }
 
+// Retorna a lista dinâmica de perfis (uma "coluna" da matriz) com base
+// nos kinds ativos. Frontend usa isso pra montar o cabeçalho da tabela.
+export async function listProfiles() {
+  await ensureBuiltinKinds();
+  const kinds = await prisma.partnerKind.findMany({
+    where: { active: true },
+    orderBy: { sort: 'asc' },
+  });
+  return [
+    { key: 'ADM',    role: 'ADM',     partnerKindCode: null, label: 'Administrador' },
+    { key: 'SAYGO',  role: 'SAYGO',   partnerKindCode: null, label: 'Saygo' },
+    ...kinds.map(k => ({
+      key: `PARTNER_${k.code}`,
+      role: 'PARTNER',
+      partnerKindCode: k.code,
+      label: k.label,
+      behavior: k.behavior,
+    })),
+    { key: 'CLIENT', role: 'CLIENT',  partnerKindCode: null, label: 'Cliente' },
+  ];
+}
+
 export async function update(id, data) {
-  // Verifica que o registro existe primeiro (debug-friendly)
   const exists = await prisma.rolePermission.findUnique({ where: { id } });
-  if (!exists) {
-    const e = new Error(`RolePermission ${id} nao encontrado`); e.status = 404; throw e;
-  }
+  if (!exists) { const e = new Error(`RolePermission ${id} nao encontrado`); e.status = 404; throw e; }
   const upd = {};
   if (data.canView   !== undefined) upd.canView   = !!data.canView;
   if (data.canCreate !== undefined) upd.canCreate = !!data.canCreate;
@@ -118,7 +191,7 @@ export async function update(id, data) {
       ? data.restrictedFields.filter(s => typeof s === 'string')
       : [];
   }
-  if (Object.keys(upd).length === 0) return exists; // nada a atualizar
+  if (Object.keys(upd).length === 0) return exists;
   const r = await prisma.rolePermission.update({ where: { id }, data: upd });
   invalidatePermsCache();
   return r;
@@ -126,47 +199,50 @@ export async function update(id, data) {
 
 export async function resetToDefaults() {
   await prisma.rolePermission.deleteMany({});
-  await prisma.rolePermission.createMany({ data: defaults() });
-  _defaultsEnsured = true; // já estamos populando, evita re-checar no próximo
+  const data = await buildDefaults();
+  await prisma.rolePermission.createMany({ data });
+  _defaultsEnsured = true;
   invalidatePermsCache();
   return { ok: true };
 }
 
 // === Permissões efetivas para um usuário ===
-function profileKeyOf(user) {
-  if (!user) return null;
-  if (user.role !== 'PARTNER') return user.role;
-  const t = user.partnerType || 'OUTRO';
-  if (t === 'ESCRITORIO') return 'PARTNER_ESCRITORIO';
-  if (t === 'ARMADOR_LOGISTICO') return 'PARTNER_ARMADOR';
-  return 'PARTNER_OUTRO';
-}
-function profileFromKey(key) {
-  return PROFILES.find(p => p.key === key);
-}
-
-// Cache em memória das perms efetivas por chave de perfil (não por user — todos
-// os PARTNER_ESCRITORIO compartilham as mesmas perms). TTL curto pra refletir
-// mudanças do admin em até 30s sem precisar restart.
-const _permsCache = new Map(); // profileKey -> { perms, expiresAt }
+// Cache em memória por chave de perfil (kindCode pra PARTNER, role pros demais).
+const _permsCache = new Map();
 const PERMS_TTL_MS = 30_000;
-
 function invalidatePermsCache() { _permsCache.clear(); }
 
-// Retorna { modules: [], byModule: { mod: { canView, canCreate, canEdit, canDelete, restrictedFields }}}
+function cacheKeyForUser(user) {
+  if (!user) return null;
+  if (user.role === 'PARTNER') return `PARTNER:${user.partnerKindCode || user.partnerType || 'OUTRO'}`;
+  return user.role;
+}
+
 export async function effectivePerms(user) {
   if (!user) return { modules: [], byModule: {}, profileKey: null };
-  const key = profileKeyOf(user);
-  const cached = _permsCache.get(key);
+  const cacheKey = cacheKeyForUser(user);
+  const cached = _permsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
-    return { ...cached.perms, role: user.role, partnerType: user.partnerType || null };
+    return { ...cached.perms, role: user.role, partnerType: user.partnerType || null, partnerKindCode: user.partnerKindCode || null };
   }
   await ensureDefaults();
-  const p = profileFromKey(key);
-  if (!p) return { modules: [], byModule: {}, profileKey: null };
-  const rows = await prisma.rolePermission.findMany({
-    where: { role: p.role, partnerType: p.partnerType },
-  });
+
+  // Monta filtro: PARTNER usa kindCode; demais usam null
+  let where;
+  if (user.role === 'PARTNER') {
+    const code = user.partnerKindCode || user.partnerType || 'OUTRO';
+    where = { role: 'PARTNER', partnerKindCode: code };
+  } else {
+    where = { role: user.role, partnerKindCode: null };
+  }
+  let rows = await prisma.rolePermission.findMany({ where });
+  // Fallback: usuário PARTNER cujo kindCode não está na tabela (kind recém-criado
+  // mas perms ainda não seedadas). Usa o behavior como fallback.
+  if (user.role === 'PARTNER' && rows.length === 0 && user.partnerType) {
+    rows = await prisma.rolePermission.findMany({
+      where: { role: 'PARTNER', partnerType: user.partnerType },
+    });
+  }
   const byModule = {};
   const modules = [];
   for (const r of rows) {
@@ -176,9 +252,9 @@ export async function effectivePerms(user) {
     };
     if (r.canView) modules.push(r.module);
   }
-  const perms = { modules, byModule, profileKey: key };
-  _permsCache.set(key, { perms, expiresAt: Date.now() + PERMS_TTL_MS });
-  return { ...perms, role: user.role, partnerType: user.partnerType || null };
+  const perms = { modules, byModule, profileKey: cacheKey };
+  _permsCache.set(cacheKey, { perms, expiresAt: Date.now() + PERMS_TTL_MS });
+  return { ...perms, role: user.role, partnerType: user.partnerType || null, partnerKindCode: user.partnerKindCode || null };
 }
 
 // Helper síncrono para lookup com perms já carregadas
@@ -189,7 +265,10 @@ export function applyRestrictions(record, fields) {
   return out;
 }
 
-export const META = { ROLES, PARTNER_TYPES, MODULES, PROFILES };
+// Invalidação externa (chamada pelo partnerKind service quando um kind é criado/editado/deletado)
+export { invalidatePermsCache };
+
+export const META = { ROLES, BEHAVIORS, MODULES };
 
 // Helper exportado para o controller
 export { MODULES };

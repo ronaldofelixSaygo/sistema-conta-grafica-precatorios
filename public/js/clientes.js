@@ -1,5 +1,16 @@
 window.VIEW_clientes = (() => {
   let cache = [];
+  let parceirosCache = []; // todos os parceiros ativos
+
+  // Filtra parceiros que podem ser "Escritório (Interveniente principal)".
+  // Aceita: kindCode=ESCRITORIO (builtin) ou parceiros legados com type=ESCRITORIO
+  // e kindCode ainda vazio.
+  function escritoriosDisponiveis() {
+    return parceirosCache.filter(p => {
+      const codeOuType = (p.kindCode || p.type || '').toUpperCase();
+      return codeOuType === 'ESCRITORIO';
+    });
+  }
 
   function isYes(v) {
     if (v == null) return false;
@@ -16,7 +27,10 @@ window.VIEW_clientes = (() => {
     const el = document.getElementById('view-clientes');
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
-      cache = await API.get('/api/clientes', null, { ttl: 30000 });
+      [cache, parceirosCache] = await Promise.all([
+        API.get('/api/clientes', null, { ttl: 30000 }),
+        API.get('/api/parceiros', null, { ttl: 60000 }).catch(() => []),
+      ]);
       // Se for CLIENT, mostra tela de detalhe (vê apenas o seu cliente)
       if (AUTH.role() === 'CLIENT') return renderClientDetail(cache[0]);
       return renderList();
@@ -169,7 +183,19 @@ window.VIEW_clientes = (() => {
         <div class="full"><label>Nome *</label><input name="nome" required value="${UI.escapeHtml(cli.nome||'')}"></div>
         <div><label>CNPJ</label><input name="cnpj" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(cli.cnpj||'')}"></div>
         <div><label>CNPJ filial</label><input name="cnpj_filial" data-mask="cnpj" maxlength="18" value="${UI.escapeHtml(cli.cnpjFilial||'')}"></div>
-        <div class="full"><label>Escritório (Interveniente principal)</label><input name="escritorio" value="${UI.escapeHtml(cli.escritorio||'')}"></div>
+        <div class="full"><label>Escritório (Interveniente principal)</label>
+          ${(() => {
+            const opts = escritoriosDisponiveis();
+            const current = cli.escritorio || '';
+            const inList = opts.some(p => p.nome === current);
+            return `<select name="escritorio">
+              <option value="">— selecione —</option>
+              ${opts.map(p => `<option value="${UI.escapeHtml(p.nome)}" ${p.nome===current?'selected':''}>${UI.escapeHtml(p.nome)}${p.isSaygo?' (Saygo)':''}</option>`).join('')}
+              ${current && !inList ? `<option value="${UI.escapeHtml(current)}" selected>${UI.escapeHtml(current)} (não cadastrado como Escritório)</option>` : ''}
+            </select>
+            <div class="muted small" style="margin-top:.2rem">Apenas Intervenientes do tipo <strong>Escritório</strong>. Cadastre/edite em Intervenientes Aduaneiros.</div>`;
+          })()}
+        </div>
 
         <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Status dos serviços</strong></div>
         <div><label>Locação Sala</label>${selYesNo('locacao_sala',     cli.locacaoSala)}</div>

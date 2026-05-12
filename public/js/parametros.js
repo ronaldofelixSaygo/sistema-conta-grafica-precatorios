@@ -652,7 +652,7 @@ window.VIEW_parametros = (() => {
 
   function findPerm(profile, mod) {
     return perms.find(p => p.role === profile.role
-      && (p.partnerType || null) === (profile.partnerType || null)
+      && (p.partnerKindCode || null) === (profile.partnerKindCode || null)
       && p.module === mod);
   }
 
@@ -666,30 +666,31 @@ window.VIEW_parametros = (() => {
       parceiros:'Intervenientes Aduaneiros', usuarios:'Usuários', auditoria:'Auditoria',
       chat:'Chat', parametros:'Parâmetros',
     };
-    const profileLabels = {
-      ADM: 'Administrador',
-      SAYGO: 'Saygo',
-      PARTNER_ESCRITORIO: 'Interveniente<br><small>Escritório</small>',
-      PARTNER_ARMADOR:    'Interveniente<br><small>Armador Logístico</small>',
-      PARTNER_OUTRO:      'Interveniente<br><small>Outro</small>',
-      CLIENT: 'Cliente',
-    };
     const profiles = permsMeta.PROFILES || [];
+    // Label de cada coluna: usa a label vinda do backend (suporta kinds custom como Contabilidade).
+    // Pra ESCRITORIO, ARMADOR, OUTRO, separa em duas linhas pra ficar compacto.
+    const renderProfileLabel = (p) => {
+      if (p.role === 'PARTNER') {
+        return `Interveniente<br><small>${UI.escapeHtml(p.label || p.key)}</small>`;
+      }
+      return UI.escapeHtml(p.label || p.key);
+    };
     c.innerHTML = `
       <div class="panel">
         <h3>Matriz de permissões por perfil</h3>
         <p class="muted small" style="margin-bottom:1rem">
-          Marque o que cada perfil pode fazer em cada módulo.
-          Para os módulos com campos sensíveis (Clientes, Movimentações), use o botão
-          <strong>"Campos sensíveis"</strong> ao lado do nome do módulo para ocultar campos específicos
-          do retorno por perfil.
+          Marque o que cada perfil pode fazer em cada módulo. Cada tipo de Interveniente
+          cadastrado em <strong>Tipos de Interveniente</strong> aparece como coluna própria —
+          assim Escritório, Contabilidade e outros tipos podem ter permissões distintas.
+          Para módulos com campos sensíveis (Clientes, Movimentações), use o botão
+          <strong>"Campos sensíveis"</strong> ao lado do nome do módulo.
         </p>
         <div style="overflow-x:auto">
           <table class="table">
             <thead>
               <tr>
                 <th rowspan="2" style="vertical-align:bottom">Módulo</th>
-                ${profiles.map(p => `<th colspan="4" style="text-align:center;border-left:1px solid var(--bd2);min-width:180px">${profileLabels[p.key]||p.key}</th>`).join('')}
+                ${profiles.map(p => `<th colspan="4" style="text-align:center;border-left:1px solid var(--bd2);min-width:180px">${renderProfileLabel(p)}</th>`).join('')}
               </tr>
               <tr>
                 ${profiles.map(() => `
@@ -789,13 +790,7 @@ window.VIEW_parametros = (() => {
   function openSensitiveModal(mod) {
     const fields = SENSITIVE_FIELDS_BY_MODULE[mod] || [];
     const profiles = permsMeta.PROFILES || [];
-    const profileLabels = {
-      ADM:'Administrador', SAYGO:'Saygo',
-      PARTNER_ESCRITORIO:'Interveniente Escritório',
-      PARTNER_ARMADOR:'Interveniente Armador',
-      PARTNER_OUTRO:'Interveniente Outro',
-      CLIENT:'Cliente',
-    };
+    const labelOf = (p) => p.label || p.key;
     const rows = fields.map(f => {
       const cells = profiles.map(p => {
         const r = findPerm(p, mod);
@@ -819,7 +814,7 @@ window.VIEW_parametros = (() => {
           <thead>
             <tr>
               <th>Campo</th>
-              ${profiles.map(p => `<th style="text-align:center;border-left:1px solid var(--bd2);min-width:120px">${profileLabels[p.key]||p.key}</th>`).join('')}
+              ${profiles.map(p => `<th style="text-align:center;border-left:1px solid var(--bd2);min-width:120px">${UI.escapeHtml(labelOf(p))}</th>`).join('')}
             </tr>
           </thead>
           <tbody>${rows}</tbody>

@@ -3,8 +3,11 @@ import { logAction } from '../services/audit.service.js';
 
 export async function list(req, res, next) {
   try {
-    const items = await svc.listAll();
-    res.json({ items, meta: svc.META });
+    const [items, profiles] = await Promise.all([
+      svc.listAll(),
+      svc.listProfiles(),
+    ]);
+    res.json({ items, meta: { ...svc.META, PROFILES: profiles } });
   } catch (e) { next(e); }
 }
 

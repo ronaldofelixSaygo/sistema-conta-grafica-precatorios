@@ -7,6 +7,15 @@
 // que o restante do código consulta pra decidir o que o tipo pode fazer.
 // =====================================================================
 import { prisma } from '../config/prisma.js';
+// Import circular evitado via dynamic import dentro das funções
+async function _seedPermsForKind(code) {
+  try {
+    const { ensureDefaultsForKind } = await import('./permissions.service.js');
+    await ensureDefaultsForKind(code);
+  } catch (e) {
+    console.warn('[partnerKind] seed perms falhou:', e.message);
+  }
+}
 
 // Cache simples por código, com TTL curto.
 const _kindsCache = new Map(); // code -> { kind, expiresAt }
@@ -54,6 +63,8 @@ export async function ensureBuiltin() {
         skipDuplicates: true,
       });
       _builtinEnsured = true;
+      // Seed perms pros builtin (idempotente). Importante: usado pelo
+      // ensureDefaults do permissions.service que monta a matriz dinâmica.
     } catch (e) {
       _builtinPromise = null;
       throw e;
@@ -120,6 +131,7 @@ export async function create(data) {
     },
   });
   invalidateKindCache();
+  await _seedPermsForKind(r.code);
   return r;
 }
 
