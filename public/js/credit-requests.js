@@ -74,6 +74,7 @@ window['VIEW_credit-requests'] = (() => {
                   uf:'AL', taxa_cambio:'', icms_aliq_estado: 18 };
     grupos = [emptyGrupo()];
     lastCalc = null;
+    resetAnuentesState(); // limpa anuentes de aberturas anteriores
 
     UI.openModal('Nova solicitação de créditos', `
       <div style="display:flex;gap:.4rem;border-bottom:1px solid var(--bd);padding-bottom:.5rem;margin-bottom:1rem">
@@ -301,12 +302,15 @@ window['VIEW_credit-requests'] = (() => {
       grupos.splice(i, 1);
       if (!grupos.length) grupos = [emptyGrupo()];
       drawGruposTable();
+      drawAnuentes(); // limpa anuentes de NCMs removidos
     });
     div.querySelectorAll('[data-lookup-ncm]').forEach(b => b.onclick = () => lookupNcmRow(Number(b.dataset.lookupNcm)));
   }
 
-  // Estado dos anuentes (acumulado por NCM consultado)
-  const anuentesByNcm = {}; // { '85176259': [...] }
+  // Estado dos anuentes — só cache de lookup. A exibição filtra pelos NCMs
+  // atualmente na tabela `grupos` pra não vazar histórico de NCMs removidos.
+  let anuentesByNcm = {}; // { '85176259': [...] }
+  function resetAnuentesState() { anuentesByNcm = {}; }
 
   // Re-consulta /api/ncm para todos os grupos preenchidos e recalcula tudo
   async function recalcAllFromBackend() {
@@ -379,9 +383,19 @@ window['VIEW_credit-requests'] = (() => {
   }
 
   function drawAnuentes() {
-    const all = Object.entries(anuentesByNcm);
     const div = document.getElementById('cr-anuentes');
     if (!div) return;
+    // Filtra: só mostra anuentes dos NCMs atualmente nos grupos da tabela.
+    // Limpa também o cache pra liberar memória de NCMs que foram removidos.
+    const ncmsAtivos = new Set(
+      (grupos || [])
+        .map(g => String(g?.ncm || '').replace(/\D/g, ''))
+        .filter(n => n.length >= 2)
+    );
+    for (const k of Object.keys(anuentesByNcm)) {
+      if (!ncmsAtivos.has(k)) delete anuentesByNcm[k];
+    }
+    const all = Object.entries(anuentesByNcm);
     if (!all.length) { div.innerHTML = ''; return; }
     const cards = all.map(([ncm, list]) => {
       if (!list.length) return `
