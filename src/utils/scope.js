@@ -16,9 +16,10 @@ export function clienteScope(user) {
       // officeName (preenchido na criação do usuário) é o canônico.
       // Fallback pra parceiroNome (sempre presente se há parceiroId) cobre users
       // antigos criados antes do auto-fill ou com officeName limpo manualmente.
-      // Match case-insensitive pra tolerar diferenças de digitação ao cadastrar
+      // .trim() defensivo cobre espaço invisível no fim por digitação/cópia.
+      // Match case-insensitive tolera diferenças de digitação ao cadastrar
       // o escritório no cliente.
-      const office = user.officeName || user.parceiroNome;
+      const office = (user.officeName || user.parceiroNome || '').trim();
       return office
         ? { escritorio: { equals: office, mode: 'insensitive' } }
         : { id: -1 };
@@ -38,7 +39,7 @@ export function movimentacaoScope(user) {
     case 'SAYGO':
       return {};
     case 'PARTNER': {
-      const office = user.officeName || user.parceiroNome;
+      const office = (user.officeName || user.parceiroNome || '').trim();
       return office
         ? { cliente: { escritorio: { equals: office, mode: 'insensitive' } } }
         : { id: -1 };

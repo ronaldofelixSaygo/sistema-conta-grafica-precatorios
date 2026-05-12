@@ -47,6 +47,106 @@ export async function importNcm(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// =====================================================================
+// Diagnóstico do scope de PARTNER: por que o usuário tá vendo lista vazia?
+// Compara, codepoint por codepoint, o officeName/parceiroNome do user
+// com os valores de `escritorio` que existem em clientes.
+// Uso: GET /api/admin/scope-debug?email=pedro@doccontabil.com.br
+// =====================================================================
+function codepoints(s) {
+  if (s == null) return null;
+  return [...s].map(c => ({ ch: c, cp: 'U+' + c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0') }));
+}
+export async function scopeDebug(req, res, next) {
+  try {
+    const email = (req.query.email || '').trim().toLowerCase();
+    if (!email) { const e = new Error('Informe ?email='); e.status = 400; throw e; }
+    const u = await prisma.user.findUnique({
+      where: { email },
+      include: { parceiro: true },
+    });
+    if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+    const office = (u.officeName || u.parceiro?.nome || '').trim();
+    // O que o scope ATUAL geraria
+    const wherePrisma = office
+      ? { escritorio: { equals: office, mode: 'insensitive' } }
+      : { id: -1 };
+    const countPrisma = await prisma.cliente.count({ where: wherePrisma });
+
+    // E o que um TRIM + LOWER acharia (via raw SQL)
+    const trimRows = office
+      ? await prisma.$queryRaw`
+          SELECT id, nome, escritorio
+          FROM clientes
+          WHERE LOWER(TRIM(escritorio)) = LOWER(TRIM(${office}))
+          LIMIT 5
+        `
+      : [];
+
+    // Amostra de escritorios distintos (top 20)
+    const sampleEscritorios = await prisma.$queryRaw`
+      SELECT escritorio, COUNT(*)::int AS n
+      FROM clientes
+      WHERE escritorio IS NOT NULL
+      GROUP BY escritorio
+      ORDER BY n DESC
+      LIMIT 20
+    `;
+
+    res.json({
+      user: {
+        id: u.id, email: u.email, name: u.name, role: u.role, active: u.active,
+        officeName: u.officeName,
+        officeName_cp: codepoints(u.officeName),
+        parceiroId: u.parceiroId,
+        parceiroNome: u.parceiro?.nome || null,
+        parceiroNome_cp: codepoints(u.parceiro?.nome),
+        parceiroType: u.parceiro?.type || null,
+        parceiroKindCode: u.parceiro?.kindCode || null,
+      },
+      resolved_office: office,
+      resolved_office_cp: codepoints(office),
+      where_prisma: wherePrisma,
+      count_with_prisma_scope: countPrisma,
+      matches_with_trim_lower: trimRows.map(r => ({
+        ...r,
+        escritorio_cp: codepoints(r.escritorio),
+      })),
+      sample_escritorios: sampleEscritorios.map(r => ({
+        escritorio: r.escritorio,
+        escritorio_cp: codepoints(r.escritorio),
+        count: r.n,
+      })),
+    });
+  } catch (e) { next(e); }
+}
+
+// =====================================================================
+// Normaliza escritorio em clientes e officeName em users:
+// faz TRIM em ambos os campos (não muda case, só tira espaços invisíveis).
+// É idempotente — pode rodar quantas vezes quiser.
+// Uso: POST /api/admin/scope-fix
+// =====================================================================
+export async function scopeFix(req, res, next) {
+  try {
+    const r1 = await prisma.$executeRaw`
+      UPDATE clientes SET escritorio = TRIM(escritorio)
+      WHERE escritorio IS NOT NULL AND escritorio <> TRIM(escritorio)
+    `;
+    const r2 = await prisma.$executeRaw`
+      UPDATE users SET "officeName" = TRIM("officeName")
+      WHERE "officeName" IS NOT NULL AND "officeName" <> TRIM("officeName")
+    `;
+    await logAction({
+      user: req.user, action: 'SCOPE_FIX', entity: 'admin',
+      details: JSON.stringify({ clientes_trim: r1, users_trim: r2 }),
+      ip: req.ip,
+    });
+    res.json({ ok: true, clientes_trimados: r1, users_trimados: r2 });
+  } catch (e) { next(e); }
+}
+
 export async function seedNcm(req, res, next) {
   try {
     const before = {
