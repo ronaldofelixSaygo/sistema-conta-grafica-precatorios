@@ -57,6 +57,7 @@ export async function createCliente(user, data) {
       diaFechamento:      toNumberOrNull(data.dia_fechamento      ?? data.diaFechamento)      ?? 1,
       valorPorDi:         toNumberOrNull(data.valor_por_di        ?? data.valorPorDi)         ?? 0,
       despachanteId:      (data.despachante_id ?? data.despachanteId) || null,
+      contabilidadeId:    (data.contabilidade_id ?? data.contabilidadeId) || null,
     },
   });
 }
@@ -87,6 +88,7 @@ export async function updateCliente(user, id, data) {
       ...((data.dia_fechamento ?? data.diaFechamento) !== undefined && { diaFechamento: toNumberOrNull(data.dia_fechamento ?? data.diaFechamento) ?? 1 }),
       ...((data.valor_por_di ?? data.valorPorDi) !== undefined && { valorPorDi: toNumberOrNull(data.valor_por_di ?? data.valorPorDi) ?? 0 }),
       ...((data.despachante_id ?? data.despachanteId) !== undefined && { despachanteId: (data.despachante_id ?? data.despachanteId) || null }),
+      ...((data.contabilidade_id ?? data.contabilidadeId) !== undefined && { contabilidadeId: (data.contabilidade_id ?? data.contabilidadeId) || null }),
     },
   });
 }

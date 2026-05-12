@@ -14,6 +14,9 @@ window.VIEW_clientes = (() => {
   function despachantesDisponiveis() {
     return parceirosCache.filter(p => (p.kindCode || '').toUpperCase() === 'DESPACHANTE');
   }
+  function contabilidadesDisponiveis() {
+    return parceirosCache.filter(p => (p.kindCode || '').toUpperCase() === 'CONTABILIDADE');
+  }
 
   function isYes(v) {
     if (v == null) return false;
@@ -208,6 +211,17 @@ window.VIEW_clientes = (() => {
               ${opts.map(p => `<option value="${UI.escapeHtml(p.id)}" ${p.id===current?'selected':''}>${UI.escapeHtml(p.nome)}</option>`).join('')}
             </select>
             <div class="muted small" style="margin-top:.2rem">Apenas Intervenientes do tipo <strong>Despachante</strong>. Se não houver, o próprio cliente fica responsável pela etapa de documentos da importação.</div>`;
+          })()}
+        </div>
+        <div class="full"><label>Contabilidade (responsável pelos serviços contábeis)</label>
+          ${(() => {
+            const opts = contabilidadesDisponiveis();
+            const current = cli.contabilidadeId || '';
+            return `<select name="contabilidade_id">
+              <option value="">— sem contabilidade vinculada —</option>
+              ${opts.map(p => `<option value="${UI.escapeHtml(p.id)}" ${p.id===current?'selected':''}>${UI.escapeHtml(p.nome)}</option>`).join('')}
+            </select>
+            <div class="muted small" style="margin-top:.2rem">Apenas Intervenientes do tipo <strong>Contabilidade</strong>. Usuários desse parceiro só enxergam clientes onde foram vinculados aqui.</div>`;
           })()}
         </div>
 

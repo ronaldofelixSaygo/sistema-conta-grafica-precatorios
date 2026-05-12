@@ -13,12 +13,19 @@ export function clienteScope(user) {
     case 'SAYGO':
       return {};
     case 'PARTNER': {
-      // officeName (preenchido na criação do usuário) é o canônico.
-      // Fallback pra parceiroNome (sempre presente se há parceiroId) cobre users
-      // antigos criados antes do auto-fill ou com officeName limpo manualmente.
-      // .trim() defensivo cobre espaço invisível no fim por digitação/cópia.
-      // Match case-insensitive tolera diferenças de digitação ao cadastrar
-      // o escritório no cliente.
+      // Estratégia por tipo de parceiro:
+      //  CONTABILIDADE → cliente.contabilidadeId === parceiroId
+      //  DESPACHANTE   → cliente.despachanteId   === parceiroId
+      //  ESCRITORIO (e legado) → match string em cliente.escritorio
+      const kind = (user.partnerKindCode || '').toUpperCase();
+      if (kind === 'CONTABILIDADE' && user.parceiroId) {
+        return { contabilidadeId: user.parceiroId };
+      }
+      if (kind === 'DESPACHANTE' && user.parceiroId) {
+        return { despachanteId: user.parceiroId };
+      }
+      // Default = ESCRITORIO. Match por string em cliente.escritorio.
+      // .trim() defensivo cobre espaço invisível; mode insensitive tolera case.
       const office = (user.officeName || user.parceiroNome || '').trim();
       return office
         ? { escritorio: { equals: office, mode: 'insensitive' } }
@@ -39,6 +46,13 @@ export function movimentacaoScope(user) {
     case 'SAYGO':
       return {};
     case 'PARTNER': {
+      const kind = (user.partnerKindCode || '').toUpperCase();
+      if (kind === 'CONTABILIDADE' && user.parceiroId) {
+        return { cliente: { contabilidadeId: user.parceiroId } };
+      }
+      if (kind === 'DESPACHANTE' && user.parceiroId) {
+        return { cliente: { despachanteId: user.parceiroId } };
+      }
       const office = (user.officeName || user.parceiroNome || '').trim();
       return office
         ? { cliente: { escritorio: { equals: office, mode: 'insensitive' } } }

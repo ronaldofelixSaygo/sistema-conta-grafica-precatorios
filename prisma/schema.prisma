@@ -110,6 +110,10 @@ model Cliente {
   // pra pré-vincular como responsável da etapa DOCS_DESPACHANTE).
   despachanteId       String?
   despachante         Parceiro? @relation("ClienteDespachante", fields: [despachanteId], references: [id], onDelete: SetNull)
+  // Parceiro do tipo Contabilidade vinculado ao cliente. Usuários PARTNER
+  // com kindCode='CONTABILIDADE' só enxergam clientes onde figuram aqui.
+  contabilidadeId     String?
+  contabilidade       Parceiro? @relation("ClienteContabilidade", fields: [contabilidadeId], references: [id], onDelete: SetNull)
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -433,6 +437,7 @@ model Parceiro {
   commissions     Commission[] @relation("CommissionParceiro")
   desoneracaoSteps DesoneracaoStep[] @relation("DesoneracaoStepParceiro")
   clientesDespachante Cliente[] @relation("ClienteDespachante")
+  clientesContabilidade Cliente[] @relation("ClienteContabilidade")
 
   @@index([nome])
   @@index([cnpj])
