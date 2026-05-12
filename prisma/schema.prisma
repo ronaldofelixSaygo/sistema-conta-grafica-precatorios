@@ -73,6 +73,12 @@ model User {
   creditRequestsResolved  CreditRequest[] @relation("CreditRequestResolvedBy")
   aiPromptsCreated        AiPromptVersion[] @relation("AiPromptCreatedBy")
 
+  // Desonerações
+  desoneracoesCreated  Desoneracao[]          @relation("DesoneracaoCreatedBy")
+  desoneracaoSteps     DesoneracaoStep[]      @relation("DesoneracaoStepBy")
+  desoneracaoDocs      DesoneracaoDocumento[] @relation("DesoneracaoDocBy")
+  desoneracaoEventos   DesoneracaoEvento[]    @relation("DesoneracaoEventoBy")
+
   @@index([role])
   @@index([officeName])
   @@map("users")
@@ -109,6 +115,7 @@ model Cliente {
   kanbanCard          KanbanCard?
   partnerRequests     PartnerRequest[]
   creditRequests      CreditRequest[]
+  desoneracoes        Desoneracao[]
 
   @@index([escritorio])
   @@index([nome])
@@ -132,6 +139,7 @@ model Movimentacao {
   updatedAt         DateTime @updatedAt
 
   cliente           Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  desoneracao       Desoneracao? @relation("DesoneracaoMovimentacao")
 
   @@index([clienteId])
   @@index([tipoMovimento])
@@ -419,6 +427,7 @@ model Parceiro {
   users           User[]
   kanbanStages    KanbanStageProgress[]
   commissions     Commission[] @relation("CommissionParceiro")
+  desoneracaoSteps DesoneracaoStep[] @relation("DesoneracaoStepParceiro")
 
   @@index([nome])
   @@index([cnpj])
@@ -605,6 +614,9 @@ model CreditRequest {
   resolvedAt      DateTime?
   updatedAt       DateTime @updatedAt
 
+  // Desonerações vinculadas (1 solicitação pode gerar várias desonerações no tempo)
+  desoneracoes    Desoneracao[]
+
   @@index([clienteId])
   @@index([partnerOfficeName, status])
   @@index([status])
@@ -695,4 +707,168 @@ model RolePermission {
   @@unique([role, partnerKindCode, module])
   @@index([partnerKindCode])
   @@map("role_permissions")
+}
+
+// ============================================================
+//   DESONERAÇÕES (processo operacional pós-aquisição de crédito)
+// ============================================================
+// Fluxo: cliente comprou crédito (via CreditRequest) → despachante envia docs
+// da importação → Saygo Alagoas emite DMI → cliente emite NFs → Saygo valida
+// → cliente envia NFs oficiais → Saygo protocola exoneração → conclusão.
+// Cada etapa registra o parceiro responsável (DesoneracaoStep) pra permitir
+// consolidação por parceiro (despachante, contabilidade, etc).
+enum DesonModal {
+  MARITIMO
+  AEREO
+  RODOVIARIO
+}
+
+enum DesonStatus {
+  EM_ANDAMENTO
+  AGUARDANDO_APROVACAO  // todas etapas concluídas, aguarda parceiro aprovar criação da movimentação
+  CONCLUIDA
+  CANCELADA
+}
+
+enum DesonStep {
+  DOCS_DESPACHANTE      // despachante envia DUIMP/PL/PI/AFRMM/BL/CCT
+  EMISSAO_DMI           // Saygo emite DMI
+  EMISSAO_NF            // cliente emite NFs (entrada + saída)
+  VALIDACAO_NF          // Saygo valida fiscalmente
+  ENVIO_NF_OFICIAL      // cliente envia NFs oficiais (PDFs)
+  PROTOCOLO_ICMS        // Saygo protocola exoneração ICMS
+  CONCLUIDO             // estado final
+}
+
+model Desoneracao {
+  id              String   @id @default(uuid())
+  clienteId       Int
+  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  // Rastreabilidade: vincula opcionalmente à Solicitação de Créditos que originou
+  creditRequestId String?
+  creditRequest   CreditRequest? @relation(fields: [creditRequestId], references: [id], onDelete: SetNull)
+
+  numeroProcesso  String?      // identificação amigável (auto-gerado ou manual)
+  duimpDi         String?      // número do DUIMP/DI
+  modal           DesonModal
+
+  // Valores principais
+  valorMercadoria     Float?
+  valorIcmsDesonerado Float?
+
+  status        DesonStatus  @default(EM_ANDAMENTO)
+  currentStep   DesonStep    @default(DOCS_DESPACHANTE)
+  cancelReason  String?      @db.Text
+  concludedAt   DateTime?
+
+  // Movimentação gerada na conclusão (opcional — aprovada pelo parceiro do protocolo)
+  movimentacaoId Int?
+  movimentacao   Movimentacao? @relation("DesoneracaoMovimentacao", fields: [movimentacaoId], references: [id], onDelete: SetNull)
+
+  createdById   String
+  createdBy     User      @relation("DesoneracaoCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  steps         DesoneracaoStep[]
+  notas         DesoneracaoNota[]
+  documentos    DesoneracaoDocumento[]
+  eventos       DesoneracaoEvento[]
+
+  @@index([clienteId])
+  @@index([status])
+  @@index([currentStep])
+  @@index([creditRequestId])
+  @@map("desoneracoes")
+}
+
+model DesoneracaoStep {
+  id             String       @id @default(uuid())
+  desoneracaoId  String
+  desoneracao    Desoneracao  @relation(fields: [desoneracaoId], references: [id], onDelete: Cascade)
+  etapa          DesonStep
+  parceiroId     String?      // parceiro responsável por essa etapa específica
+  parceiro       Parceiro?    @relation("DesoneracaoStepParceiro", fields: [parceiroId], references: [id], onDelete: SetNull)
+  completedAt    DateTime?
+  completedById  String?
+  completedBy    User?        @relation("DesoneracaoStepBy", fields: [completedById], references: [id], onDelete: SetNull)
+  notes          String?      @db.Text
+
+  @@unique([desoneracaoId, etapa])
+  @@index([parceiroId])
+  @@map("desoneracao_steps")
+}
+
+model DesoneracaoNota {
+  id             String       @id @default(uuid())
+  desoneracaoId  String
+  desoneracao    Desoneracao  @relation(fields: [desoneracaoId], references: [id], onDelete: Cascade)
+  tipo           String       // 'ENTRADA' | 'SAIDA'
+  numero         String
+  serie          String?
+  dataEmissao    DateTime?
+  valor          Float        @default(0)
+
+  validada       Boolean      @default(false)
+  validadaAt     DateTime?
+  validadaPorId  String?
+
+  // PDF oficial — anexado na etapa ENVIO_NF_OFICIAL
+  oficialBytes   Bytes?
+  oficialNome    String?
+  oficialMime    String?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([desoneracaoId])
+  @@map("desoneracao_notas")
+}
+
+model DesoneracaoDocumento {
+  id             String       @id @default(uuid())
+  desoneracaoId  String
+  desoneracao    Desoneracao  @relation(fields: [desoneracaoId], references: [id], onDelete: Cascade)
+  tipo           String       // 'DUIMP' | 'PL' | 'PI' | 'AFRMM' | 'BL' | 'CCT' | 'DMI' | 'DESPACHO' | 'OUTRO'
+  nome           String
+  mime           String
+  bytes          Bytes
+  uploadedById   String
+  uploadedBy     User         @relation("DesoneracaoDocBy", fields: [uploadedById], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@index([desoneracaoId])
+  @@index([tipo])
+  @@map("desoneracao_documentos")
+}
+
+model DesoneracaoEvento {
+  id             String       @id @default(uuid())
+  desoneracaoId  String
+  desoneracao    Desoneracao  @relation(fields: [desoneracaoId], references: [id], onDelete: Cascade)
+  etapa          DesonStep?
+  acao           String       // 'CRIADA' | 'ETAPA_AVANCADA' | 'DOC_ANEXADO' | 'NF_VALIDADA' | etc
+  descricao      String?      @db.Text
+  byUserId       String
+  byUser         User         @relation("DesoneracaoEventoBy", fields: [byUserId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@index([desoneracaoId])
+  @@map("desoneracao_eventos")
+}
+
+// Config admin: marca documentos como obrigatórios por etapa × modal.
+// Se obrigatorio=true e documento não foi anexado, o avanço da etapa é bloqueado.
+model DesoneracaoDocConfig {
+  id            String   @id @default(uuid())
+  modal         String   // 'MARITIMO' | 'AEREO' | 'RODOVIARIO' | 'TODOS'
+  etapa         String   // DesonStep code
+  tipoDocumento String   // 'DUIMP' | 'PL' | 'PI' | etc
+  obrigatorio   Boolean  @default(true)
+  sort          Int      @default(0)
+  updatedAt     DateTime @updatedAt
+
+  @@unique([modal, etapa, tipoDocumento])
+  @@map("desoneracao_doc_config")
 }

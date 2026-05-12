@@ -18,6 +18,7 @@ import emailR from './email.routes.js';
 import creditRequests from './creditRequest.routes.js';
 import ncm from './ncm.routes.js';
 import partnerKinds from './partnerKind.routes.js';
+import desoneracoes from './desoneracoes.routes.js';
 
 const router = Router();
 
@@ -42,5 +43,6 @@ router.use('/email',           emailR);
 router.use('/credit-requests', creditRequests);
 router.use('/ncm',             ncm);
 router.use('/partner-kinds',   partnerKinds);
+router.use('/desoneracoes',    desoneracoes);
 
 export default router;

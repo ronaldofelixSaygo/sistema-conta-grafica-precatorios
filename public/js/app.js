@@ -5,6 +5,7 @@ window.APP = (() => {
     kanban: 'Kanban de Habilitação',
     acionamentos: 'Acionamentos',
     'credit-requests': 'Solicitação de Créditos',
+    desoneracoes: 'Desonerações',
     clientes: 'Clientes',
     movimentacoes: 'Movimentações',
     saldos: 'Saldos',

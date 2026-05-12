@@ -3,7 +3,7 @@ window.VIEW_parametros = (() => {
   let stages = [];
   // Persiste a aba selecionada entre re-renders e re-aberturas de tela
   const TAB_STORAGE_KEY = 'vision.parametros.activeTab';
-  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'email', 'ia', 'ncm'];
+  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'desoneracoes', 'email', 'ia', 'ncm'];
   let activeTab = (() => {
     try {
       const v = localStorage.getItem(TAB_STORAGE_KEY);
@@ -49,6 +49,7 @@ window.VIEW_parametros = (() => {
         <button class="btn ${activeTab==='permissoes'?'primary':''}" data-tab="permissoes">Permissões</button>
         <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
         <button class="btn ${activeTab==='tipos'?'primary':''}"       data-tab="tipos">Tipos de Interveniente</button>
+        <button class="btn ${activeTab==='desoneracoes'?'primary':''}" data-tab="desoneracoes">Docs Desonerações</button>
         <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail</button>
         <button class="btn ${activeTab==='ia'?'primary':''}"          data-tab="ia">IA (extração de invoice)</button>
         <button class="btn ${activeTab==='ncm'?'primary':''}"         data-tab="ncm">NCM / Anuentes</button>
@@ -57,6 +58,7 @@ window.VIEW_parametros = (() => {
     el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { setActiveTab(b.dataset.tab); render(); });
     if (activeTab === 'permissoes') return loadPerms();
     if (activeTab === 'tipos')      return loadKinds();
+    if (activeTab === 'desoneracoes') return loadDesonConfig();
     if (activeTab === 'email')      return loadEmail();
     if (activeTab === 'ia')         return loadIa();
     if (activeTab === 'ncm')        return loadNcm();
@@ -165,6 +167,87 @@ window.VIEW_parametros = (() => {
     if (!confirm('Excluir esse tipo? Só funciona se nenhum interveniente estiver usando.')) return;
     try { await API.del(`/api/partner-kinds/${id}`); UI.toast('Excluído'); loadKinds(); }
     catch (e) { UI.toast(e.message, 'err'); }
+  }
+
+  // ===== Docs obrigatórios de Desonerações =====
+  const DESON_ETAPAS = [
+    { code: 'DOCS_DESPACHANTE', label: '1. Docs do Despachante' },
+    { code: 'EMISSAO_DMI',      label: '2. Emissão DMI' },
+    { code: 'PROTOCOLO_ICMS',   label: '6. Protocolo ICMS' },
+  ];
+  const DESON_MODAIS = ['TODOS','MARITIMO','AEREO','RODOVIARIO'];
+  const DESON_TIPOS  = ['DUIMP','PL','PI','AFRMM','BL','CCT','DMI','DESPACHO','OUTRO'];
+
+  async function loadDesonConfig() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = '<div class="muted">Carregando…</div>';
+    let list;
+    try { list = await API.get('/api/desoneracoes/doc-configs'); }
+    catch (e) { c.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`; return; }
+    c.innerHTML = `
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+          <h3 style="margin:0">📋 Documentos obrigatórios por etapa</h3>
+          <button class="btn primary" id="dcfg-new">+ Adicionar regra</button>
+        </div>
+        <p class="muted small" style="margin-bottom:1rem">
+          Define quais documentos são obrigatórios pra avançar cada etapa de uma desoneração.
+          Se houver alguma regra aqui pra uma etapa, ela <strong>substitui</strong> o padrão do sistema —
+          então cadastre tudo que precisa. Modal "TODOS" vale pra qualquer modal de transporte.
+        </p>
+        <table class="table">
+          <thead><tr><th>Etapa</th><th>Modal</th><th>Documento</th><th>Status</th><th>Ordem</th><th></th></tr></thead>
+          <tbody>${list.map(r => `<tr>
+            <td>${UI.escapeHtml(r.etapa)}</td>
+            <td>${UI.escapeHtml(r.modal)}</td>
+            <td><strong>${UI.escapeHtml(r.tipoDocumento)}</strong></td>
+            <td>${r.obrigatorio?'<span class="pill amber">Obrigatório</span>':'<span class="pill" style="background:var(--s3)">Opcional</span>'}</td>
+            <td class="num">${r.sort}</td>
+            <td><button class="btn small danger" data-cfg-del="${r.id}">x</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+    document.getElementById('dcfg-new').onclick = () => openDesonCfgForm();
+    c.querySelectorAll('[data-cfg-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('Excluir regra?')) return;
+      try { await API.del(`/api/desoneracoes/doc-configs/${b.dataset.cfgDel}`); UI.toast('Excluído'); loadDesonConfig(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    });
+  }
+  function openDesonCfgForm() {
+    UI.openModal('Nova regra de documento', `
+      <form id="form-cfg" class="form-grid">
+        <div><label>Etapa *</label>
+          <select name="etapa" required>${DESON_ETAPAS.map(e => `<option value="${e.code}">${e.label}</option>`).join('')}</select>
+        </div>
+        <div><label>Modal *</label>
+          <select name="modal" required>${DESON_MODAIS.map(m => `<option value="${m}">${m}</option>`).join('')}</select>
+        </div>
+        <div><label>Tipo de documento *</label>
+          <select name="tipoDocumento" required>${DESON_TIPOS.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+        </div>
+        <div><label>Ordem</label><input type="number" name="sort" value="0"></div>
+        <div class="full"><label><input type="checkbox" name="obrigatorio" checked> Obrigatório (bloqueia o avanço se não anexado)</label></div>
+        <div class="full form-actions">
+          <button type="button" class="btn" id="cfg-cancel">Cancelar</button>
+          <button type="submit" class="btn primary">Salvar</button>
+        </div>
+      </form>`);
+    document.getElementById('cfg-cancel').onclick = UI.closeModal;
+    document.getElementById('form-cfg').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        await API.post('/api/desoneracoes/doc-configs', {
+          etapa: fd.get('etapa'),
+          modal: fd.get('modal'),
+          tipoDocumento: fd.get('tipoDocumento'),
+          obrigatorio: !!fd.get('obrigatorio'),
+          sort: parseInt(fd.get('sort')||'0',10),
+        });
+        UI.toast('Regra salva'); UI.closeModal(); loadDesonConfig();
+      } catch (e) { UI.toast(e.message, 'err'); }
+    };
   }
 
   // ===== NCM / Anuentes =====
