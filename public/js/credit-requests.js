@@ -125,7 +125,47 @@ window['VIEW_credit-requests'] = (() => {
     for (const g of grupos) {
       if (recalcGrupoFromAliquotas(g)) mudou = true;
     }
-    if (mudou) drawGruposTable();
+    if (mudou) updateAllRowsComputedDom();
+  }
+
+  // Atualiza no DOM os campos calculados (II/PIS/COFINS/IPI) de uma linha
+  // SEM redesenhar a tabela inteira — preserva o foco do input que o usuário
+  // está digitando.
+  function updateRowComputedDom(idx, g) {
+    const row = document.querySelector(`#cr-grupos [data-grow="${idx}"]`);
+    if (!row) return;
+    ['ii','pis','cofins','ipi'].forEach(f => {
+      const inp = row.querySelector(`input[data-field="${f}"]`);
+      if (inp && document.activeElement !== inp) {
+        const v = g[f] ?? 0;
+        inp.value = v === 0 ? '' : Number(v).toFixed(2);
+      }
+    });
+  }
+  function updateAllRowsComputedDom() {
+    grupos.forEach((g, idx) => updateRowComputedDom(idx, g));
+  }
+
+  // Converte texto digitado pelo usuário em número (aceita vírgula ou ponto)
+  function parseDec(v) {
+    if (v == null || v === '') return 0;
+    const n = parseFloat(String(v).replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  }
+  // Sanitiza o input enquanto o usuário digita: mantém só dígitos + 1 separador + até 2 decimais
+  function sanitizeDecimalInput(el) {
+    const start = el.selectionStart;
+    let v = el.value;
+    // Mantém só dígitos, ponto e vírgula
+    v = v.replace(/[^\d.,]/g, '');
+    // Normaliza vírgula → ponto, mas só permite 1
+    const partes = v.split(/[.,]/);
+    if (partes.length > 2) v = partes[0] + '.' + partes.slice(1).join('');
+    else if (partes.length === 2) v = partes[0] + '.' + partes[1].slice(0, 2);
+    if (el.value !== v) {
+      el.value = v;
+      try { el.setSelectionRange(start, start); } catch {}
+    }
   }
 
   function drawManualTab(cliOpts) {
@@ -149,8 +189,8 @@ window['VIEW_credit-requests'] = (() => {
           <div><label>Exportador (Nome)</label><input name="exportadorNome" value="${UI.escapeHtml(cabecalho.exportadorNome||'')}"></div>
           <div><label>Exportador (País)</label><input name="exportadorPais" value="${UI.escapeHtml(cabecalho.exportadorPais||'')}"></div>
           <div><label>UF</label><input name="uf" value="${UI.escapeHtml(cabecalho.uf||'AL')}" maxlength="2"></div>
-          <div><label>Taxa câmbio (R$/USD) *</label><input type="number" step="0.0001" name="taxa_cambio" value="${cabecalho.taxa_cambio || ''}" required></div>
-          <div><label>ICMS estado (%)</label><input type="number" step="0.01" name="icms_aliq_estado" value="${cabecalho.icms_aliq_estado ?? 18}"></div>
+          <div><label>Taxa câmbio (R$/USD) *</label><input type="text" inputmode="decimal" class="num-decimal" name="taxa_cambio" value="${cabecalho.taxa_cambio || ''}" required></div>
+          <div><label>ICMS estado (%)</label><input type="text" inputmode="decimal" class="num-decimal" name="icms_aliq_estado" value="${cabecalho.icms_aliq_estado ?? 18}"></div>
         </div>
 
         <div style="border-top:1px solid var(--bd);padding-top:.6rem;margin-top:.8rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
@@ -188,24 +228,30 @@ window['VIEW_credit-requests'] = (() => {
     const form = document.getElementById('cr-form');
     form.addEventListener('input', e => {
       const t = e.target;
+      // Sanitiza inputs decimais (Valor USD, frete, etc) — mantém foco e cursor
+      if (t.classList?.contains('num-decimal')) sanitizeDecimalInput(t);
+
       // Cabeçalho
       if (t.name && cabecalho.hasOwnProperty(t.name)) {
-        cabecalho[t.name] = t.type === 'number' ? Number(t.value) : t.value;
+        cabecalho[t.name] = t.classList?.contains('num-decimal') ? parseDec(t.value)
+                          : (t.type === 'number' ? Number(t.value) : t.value);
         if (t.name === 'taxa_cambio') {
-          // Recalcula impostos em R$ de TODOS os grupos com alíquotas salvas
           readGruposFromTable();
           recalcAllGrupos();
         }
       }
-      // Linha da tabela: valor_usd / acrescimo_usd / frete_usd / outros_usd → recalcula a linha
+      // Linha da tabela
       const row = t.closest('[data-grow]');
       if (row) {
         const idx = Number(row.dataset.grow);
         const g = grupos[idx];
         const f = t.dataset.field;
         if (g && f && ['valor_usd','acrescimo_usd','frete_usd','outros_usd'].includes(f)) {
-          g[f] = Number(t.value) || 0;
-          if (recalcGrupoFromAliquotas(g)) drawGruposTable();
+          g[f] = parseDec(t.value);
+          // Recalcula só os campos calculados desta linha — SEM redesenhar a tabela
+          // (preserva foco e cursor no input que o usuário está digitando).
+          recalcGrupoFromAliquotas(g);
+          updateRowComputedDom(idx, g);
         }
       }
     });
@@ -259,7 +305,7 @@ window['VIEW_credit-requests'] = (() => {
       row.querySelectorAll('input').forEach(inp => {
         const f = inp.dataset.field;
         if (!f) return;
-        g[f] = inp.type === 'number' ? Number(inp.value) || 0 : inp.value;
+        g[f] = inp.classList.contains('num-decimal') ? parseDec(inp.value) : inp.value;
       });
     });
   }
@@ -287,7 +333,11 @@ window['VIEW_credit-requests'] = (() => {
               <button type="button" class="btn small" data-lookup-ncm="${idx}" title="Buscar tributos e anuentes">🔍</button>
             </td>`;
           }
-          return `<td style="padding:2px 4px"><input type="${h.t}" data-field="${h.f}" value="${g[h.f] ?? ''}" step="0.01" style="width:100%"></td>`;
+          // Campos numéricos: type=text + inputmode=decimal (sem spinners do browser)
+          // A sanitização é feita pelo handler de input (sanitizeDecimalInput).
+          const v = g[h.f] ?? '';
+          const valFmt = v === '' || v === 0 ? '' : Number(v).toFixed(2);
+          return `<td style="padding:2px 4px"><input type="text" inputmode="decimal" class="num-decimal" data-field="${h.f}" value="${valFmt}" style="width:100%;text-align:right"></td>`;
         }).join('')}
         <td><button type="button" class="btn small danger" data-rm-ncm="${idx}">×</button></td>
       </tr>`).join('');
