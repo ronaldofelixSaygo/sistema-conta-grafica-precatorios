@@ -18,7 +18,13 @@ window.AUTH = (() => {
     me = r.user;
     token = r.token || null;
     try { if (token) sessionStorage.setItem('jwt', token); } catch {}
-    try { const m = await API.get('/api/auth/me'); perms = m.perms || { modules: [], byModule: {} }; } catch {}
+    // Substitui `me` pelo user enriquecido do /me (com partnerType, parceiroNome
+    // etc. preenchidos pelo middleware). Se /me falhar, mantém o que veio do login.
+    try {
+      const m = await API.get('/api/auth/me');
+      if (m?.user) me = m.user;
+      perms = m.perms || { modules: [], byModule: {} };
+    } catch {}
     return me;
   }
 
