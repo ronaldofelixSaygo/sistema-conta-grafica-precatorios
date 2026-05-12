@@ -3,7 +3,7 @@ window.APP = (() => {
   const TITLES = {
     dashboard: 'Painel',
     kanban: 'Kanban de Habilitação',
-    acionamentos: 'Acionamentos',
+    acionamentos: 'Processos',
     'credit-requests': 'Solicitação de Créditos',
     desoneracoes: 'Desonerações',
     clientes: 'Clientes',
@@ -40,11 +40,17 @@ window.APP = (() => {
     document.querySelectorAll('.sidebar nav a').forEach(a => {
       a.classList.toggle('active', a.dataset.view === name);
     });
-    // Expande sub-itens cujo pai (data-parent) é a view ativa, ou cujo próprio sub-item é a view ativa
+    // Sub-itens: mantém TODOS os irmãos visíveis quando qualquer um do grupo estiver ativo.
+    // 1) Identifica quais "pais" devem estar expandidos: se a view atual é o próprio pai,
+    //    ou se a view atual é algum sub-item, então o pai desse sub-item entra no set.
+    const parentsExpanded = new Set();
+    parentsExpanded.add(name); // caso a view ativa seja um pai (ex.: acionamentos)
     document.querySelectorAll('.sidebar nav a.sub-item').forEach(a => {
-      const parent = a.dataset.parent;
-      const expanded = parent === name || a.dataset.view === name;
-      a.classList.toggle('expanded', expanded);
+      if (a.dataset.view === name) parentsExpanded.add(a.dataset.parent);
+    });
+    // 2) Expande todos os sub-itens cujo parent está no set
+    document.querySelectorAll('.sidebar nav a.sub-item').forEach(a => {
+      a.classList.toggle('expanded', parentsExpanded.has(a.dataset.parent));
     });
     const fn = window['VIEW_' + name]?.render;
     if (fn) fn();
