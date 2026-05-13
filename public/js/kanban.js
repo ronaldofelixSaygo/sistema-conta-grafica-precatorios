@@ -378,21 +378,36 @@ window.VIEW_kanban = (() => {
       moveStageDialog();
     }
     else if (btn.dataset.action === 'upload') {
+      // Aceita múltiplos arquivos; faz upload sequencial com toast de progresso.
       const inp = document.createElement('input');
       inp.type = 'file';
+      inp.multiple = true;
       inp.onchange = async () => {
-        if (!inp.files[0]) return;
-        const fd = new FormData();
-        fd.append('file', inp.files[0]);
-        if (btn.dataset.spid) fd.append('stageProgressId', btn.dataset.spid);
-        try {
-          const r = await fetch(`/api/kanban/cards/${card.id}/attachments`,
-            { method: 'POST', credentials: 'include', body: fd });
-          if (!r.ok) throw new Error('Upload falhou');
-          UI.toast('Arquivo anexado');
-          await refreshCardSilent();
-          renderCardModal();
-        } catch (e) { UI.toast(e.message, 'err'); }
+        const files = [...(inp.files || [])];
+        if (!files.length) return;
+        let ok = 0, fail = 0;
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          UI.toast(`Enviando ${i+1}/${files.length}: ${f.name}`);
+          const fd = new FormData();
+          fd.append('file', f);
+          if (btn.dataset.spid) fd.append('stageProgressId', btn.dataset.spid);
+          try {
+            const r = await fetch(`/api/kanban/cards/${card.id}/attachments`,
+              { method: 'POST', credentials: 'include', body: fd });
+            if (!r.ok) throw new Error(await r.text() || 'Upload falhou');
+            ok++;
+          } catch (e) {
+            fail++;
+            UI.toast(`Falhou ${f.name}: ${e.message}`, 'err');
+          }
+        }
+        UI.toast(
+          fail === 0 ? `✓ ${ok} arquivo(s) anexado(s)` : `${ok} ok, ${fail} falha(s)`,
+          fail === 0 ? 'ok' : 'err'
+        );
+        await refreshCardSilent();
+        renderCardModal();
       };
       inp.click();
     }

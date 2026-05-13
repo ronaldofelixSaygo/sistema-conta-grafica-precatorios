@@ -8,6 +8,7 @@
 // - Sincroniza com o <select> original (dispatch 'change'), então handlers
 //   existentes via .addEventListener('change', ...) continuam funcionando
 // - Casa com ou sem acento (digita "doc contabil" → acha "DOC CONTÁBIL")
+// - Tolera whitespace exótico (NBSP, zero-width, etc.) — não quebra a busca
 // - Respeita <option disabled>: mostra cinza, não permite selecionar
 // =====================================================================
 window.COMBO = (() => {
@@ -16,8 +17,16 @@ window.COMBO = (() => {
 
   // Marcas combinantes Unicode (acentos decompostos): U+0300 a U+036F
   const _DIACRITICS_RE = new RegExp('[\\u0300-\\u036f]', 'g');
+  // Whitespace exóticos (NBSP, zero-width, narrow no-break, ideographic, BOM, tabs).
+  // Sem isso, um NBSP no meio do nome quebra a busca silenciosamente.
+  const _WS_NORM_RE = new RegExp('[\\s\\u00A0\\u200B-\\u200D\\u202F\\u2060\\u3000\\uFEFF]+', 'g');
   function norm(s) {
-    return String(s || '').toLowerCase().normalize('NFD').replace(_DIACRITICS_RE, '');
+    return String(s || '')
+      .normalize('NFD')
+      .replace(_DIACRITICS_RE, '')
+      .replace(_WS_NORM_RE, ' ')
+      .toLowerCase()
+      .trim();
   }
 
   function esc(s) {
@@ -88,9 +97,12 @@ window.COMBO = (() => {
     function openDrop(filter) {
       refreshItems();
       const f = norm(filter || '');
-      filtered = f
-        ? items.filter(i => i.normText.includes(f))
-        : items.slice();
+      // Pula placeholder (value vazio) quando o user digitou algo — não faz sentido
+      // mostrar "--" na lista de busca.
+      filtered = items.filter(i => {
+        if (f && i.value === '') return false;
+        return !f || i.normText.includes(f);
+      });
       drop.innerHTML = filtered.length
         ? filtered.map((i, idx) => {
             const cls = 'combo-item' + (i.disabled ? ' disabled' : '');
