@@ -14,4 +14,5 @@ router.post('/seed-ncm',          ctrl.seedNcm);
 router.post('/ncm-import', upload.single('file'), ctrl.importNcm);
 router.get ('/scope-debug',       ctrl.scopeDebug);
 router.post('/scope-fix',         ctrl.scopeFix);
+router.get ('/storage-stats',     ctrl.storageStats);
 export default router;

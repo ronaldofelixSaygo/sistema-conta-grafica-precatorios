@@ -9,6 +9,10 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 
 const router = Router();
 router.use(requireAuth);
 
+// SLA Config — leitura aberta a logados, escrita só admin
+router.get('/sla-config',                 ctrl.getSlaConfig);
+router.put('/sla-config',                 requireAdmin, ctrl.saveSlaConfig);
+
 // AI Settings — somente ADM
 router.get('/ai/settings',                 requireAdmin, ctrl.getSettings);
 router.put('/ai/settings',                 requireAdmin, ctrl.saveSettings);

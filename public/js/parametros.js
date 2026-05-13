@@ -50,18 +50,22 @@ window.VIEW_parametros = (() => {
         <button class="btn ${activeTab==='etapas'?'primary':''}"     data-tab="etapas">Etapas e Atividades</button>
         <button class="btn ${activeTab==='tipos'?'primary':''}"       data-tab="tipos">Tipos de Interveniente</button>
         <button class="btn ${activeTab==='desoneracoes'?'primary':''}" data-tab="desoneracoes">Docs Desonerações</button>
+        <button class="btn ${activeTab==='sla'?'primary':''}"         data-tab="sla">SLA</button>
         <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail</button>
         <button class="btn ${activeTab==='ia'?'primary':''}"          data-tab="ia">IA (extração de invoice)</button>
         <button class="btn ${activeTab==='ncm'?'primary':''}"         data-tab="ncm">NCM / Anuentes</button>
+        <button class="btn ${activeTab==='storage'?'primary':''}"     data-tab="storage">Storage</button>
       </div>
       <div id="param-content"></div>`;
     el.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { setActiveTab(b.dataset.tab); render(); });
     if (activeTab === 'permissoes') return loadPerms();
     if (activeTab === 'tipos')      return loadKinds();
     if (activeTab === 'desoneracoes') return loadDesonConfig();
+    if (activeTab === 'sla')        return loadSlaConfig();
     if (activeTab === 'email')      return loadEmail();
     if (activeTab === 'ia')         return loadIa();
     if (activeTab === 'ncm')        return loadNcm();
+    if (activeTab === 'storage')    return loadStorage();
     return loadStages();
   }
 
@@ -203,12 +207,13 @@ window.VIEW_parametros = (() => {
           Quem pode avançar cada etapa do processo. Saygo/ADM sempre podem avançar como override.
         </p>
         <table class="table">
-          <thead><tr><th>Etapa</th><th>Tipo de responsável</th><th>Tipo de parceiro</th><th></th></tr></thead>
+          <thead><tr><th>Etapa</th><th>Tipo de responsável</th><th>Tipo de parceiro</th><th>SLA (h)</th><th></th></tr></thead>
           <tbody>${stepList.map(r => `<tr>
             <td><strong>${UI.escapeHtml(r.etapa)}</strong></td>
             <td>${UI.escapeHtml(TIPO_LABEL[r.responsavelTipo] || r.responsavelTipo)}</td>
             <td>${r.kindCode ? `<span class="pill">${UI.escapeHtml(r.kindCode)}</span>` : '—'}</td>
-            <td><button class="btn small" data-step-edit="${r.id}" data-etapa="${r.etapa}" data-tipo="${r.responsavelTipo}" data-kind="${r.kindCode||''}">Editar</button></td>
+            <td class="num">${r.slaHours ?? 48}</td>
+            <td><button class="btn small" data-step-edit="${r.id}" data-etapa="${r.etapa}" data-tipo="${r.responsavelTipo}" data-kind="${r.kindCode||''}" data-sla="${r.slaHours ?? 48}">Editar</button></td>
           </tr>`).join('')}</tbody>
         </table>
       </div>
@@ -240,7 +245,7 @@ window.VIEW_parametros = (() => {
       catch (e) { UI.toast(e.message, 'err'); }
     });
     c.querySelectorAll('[data-step-edit]').forEach(b => b.onclick = () => openStepConfigForm({
-      etapa: b.dataset.etapa, responsavelTipo: b.dataset.tipo, kindCode: b.dataset.kind,
+      etapa: b.dataset.etapa, responsavelTipo: b.dataset.tipo, kindCode: b.dataset.kind, slaHours: Number(b.dataset.sla) || 48,
     }));
   }
   function openStepConfigForm(cfg) {
@@ -255,8 +260,12 @@ window.VIEW_parametros = (() => {
             <option value="SAYGO"               ${cfg.responsavelTipo==='SAYGO'?'selected':''}>Saygo / Admin</option>
           </select>
         </div>
-        <div class="full"><label>Tipo de parceiro (kindCode) — só quando aplicável</label>
+        <div><label>Tipo de parceiro (kindCode) — só quando aplicável</label>
           <input name="kindCode" value="${UI.escapeHtml(cfg.kindCode||'')}" placeholder="ex: ESCRITORIO, DESPACHANTE">
+        </div>
+        <div><label>SLA da etapa (horas)</label>
+          <input type="number" min="0" name="slaHours" value="${cfg.slaHours ?? 48}">
+          <div class="muted small" style="margin-top:.2rem">Tempo previsto pra concluir a etapa antes de aparecer como "fora do SLA" no Painel.</div>
         </div>
         <div class="full form-actions">
           <button type="button" class="btn" id="step-cancel">Cancelar</button>
@@ -272,6 +281,7 @@ window.VIEW_parametros = (() => {
           etapa: fd.get('etapa'),
           responsavelTipo: fd.get('responsavelTipo'),
           kindCode: fd.get('kindCode') || null,
+          slaHours: fd.get('slaHours'),
         });
         UI.toast('Atualizado'); UI.closeModal(); loadDesonConfig();
       } catch (e) { UI.toast(e.message, 'err'); }
@@ -311,6 +321,170 @@ window.VIEW_parametros = (() => {
         UI.toast('Regra salva'); UI.closeModal(); loadDesonConfig();
       } catch (e) { UI.toast(e.message, 'err'); }
     };
+  }
+
+  // ===== SLA (Crédito + atalho Desonerações) =====
+  async function loadSlaConfig() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = '<div class="muted">Carregando…</div>';
+    let creditFases, desonSteps;
+    try {
+      [creditFases, desonSteps] = await Promise.all([
+        API.get('/api/credit-requests/sla-config'),
+        API.get('/api/desoneracoes/step-configs'),
+      ]);
+    } catch (e) { c.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`; return; }
+
+    c.innerHTML = `
+      <div class="panel">
+        <h3>⏱ SLA — Solicitação de Crédito</h3>
+        <p class="muted small" style="margin-bottom:.8rem">
+          Tempo previsto pra cada transição da solicitação. Quando o prazo estoura,
+          o processo aparece como "fora do SLA" no Painel.
+        </p>
+        <form id="form-sla-credit" class="form-grid">
+          ${creditFases.map(f => `
+            <div class="full">
+              <label>${UI.escapeHtml(f.label || f.fase)}</label>
+              <input type="number" min="0" name="${UI.escapeHtml(f.fase)}" value="${f.slaHours}" style="max-width:180px">
+              <span class="muted small" style="margin-left:.5rem">horas</span>
+            </div>`).join('')}
+          <div class="full form-actions" style="justify-content:flex-end">
+            <button type="submit" class="btn primary">Salvar SLAs de Crédito</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h3>⏱ SLA — Desonerações (por etapa)</h3>
+        <p class="muted small" style="margin-bottom:.8rem">
+          SLA de cada etapa do processo. Para editar, acesse a aba <strong>Docs Desonerações</strong> e clique em <em>Editar</em> na etapa desejada.
+        </p>
+        <table class="table">
+          <thead><tr><th>Etapa</th><th>Responsável</th><th class="num">SLA (h)</th></tr></thead>
+          <tbody>${desonSteps.map(s => `
+            <tr>
+              <td><strong>${UI.escapeHtml(s.etapa)}</strong></td>
+              <td>${UI.escapeHtml(s.label || s.responsavelTipo || '—')}</td>
+              <td class="num">${s.slaHours ?? 48}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <div style="margin-top:.6rem">
+          <button class="btn small" id="goto-deson-tab">→ Ir pra Docs Desonerações</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('goto-deson-tab').onclick = () => {
+      setActiveTab('desoneracoes'); render();
+    };
+
+    document.getElementById('form-sla-credit').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const payload = creditFases.map(f => ({
+        fase: f.fase,
+        label: f.label || null,
+        slaHours: Number(fd.get(f.fase)) || 0,
+      }));
+      try {
+        await API.put('/api/credit-requests/sla-config', payload);
+        UI.toast('SLA de Crédito salvo');
+      } catch (e) { UI.toast(e.message, 'err'); }
+    };
+  }
+
+  // ===== Storage (uso de espaço no banco) =====
+  function fmtBytes(b) {
+    if (b == null || isNaN(b)) return '—';
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+    return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  }
+  async function loadStorage() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = '<div class="muted">Calculando…</div>';
+    let stats;
+    try {
+      stats = await API.get('/api/admin/storage-stats');
+    } catch (e) { c.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`; return; }
+
+    const used = stats.databaseSize || 0;
+    const limit = stats.limitBytes || (500 * 1024 * 1024);
+    const pct = Math.min(100, Math.round((used / limit) * 100));
+    const pctCls = pct >= 90 ? 'sla-bad' : (pct >= 70 ? 'sla-warn' : 'sla-good');
+    const sortedBreakdown = [...stats.breakdown].sort((a,b) => b.bytes - a.bytes);
+    const maxBlob = Math.max(1, ...sortedBreakdown.map(b => b.bytes));
+
+    c.innerHTML = `
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+          <div>
+            <h3 style="margin-top:0">💾 Storage Neon (plano Free)</h3>
+            <p class="muted small" style="margin:0 0 .4rem">
+              Limite do plano Free: <strong>${fmtBytes(limit)}</strong> por branch. Quando estourar, é preciso fazer upgrade (a partir de $5/mês com $0,35/GB·mês).
+            </p>
+          </div>
+          <div class="sla-pill ${pctCls}" title="${fmtBytes(used)} de ${fmtBytes(limit)}">
+            <div class="sla-pct">${pct}%</div>
+            <div class="sla-label">do limite</div>
+          </div>
+        </div>
+        <div style="margin-top:.8rem;background:var(--s2);border-radius:99px;height:22px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${pct>=90?'#ef4444':(pct>=70?'#f59e0b':'#22c55e')};transition:width .3s ease"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:.3rem">
+          <span class="muted small">Usado: <strong style="color:var(--t1)">${fmtBytes(used)}</strong></span>
+          <span class="muted small">Disponível: <strong style="color:var(--t1)">${fmtBytes(Math.max(0, limit - used))}</strong></span>
+        </div>
+        <div class="muted small" style="margin-top:.6rem">
+          ℹ Total do banco inclui índices, metadados e overhead. Os blocos abaixo são só dos arquivos anexados.
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin-top:0">📦 Arquivos anexados — por tipo</h3>
+        <p class="muted small" style="margin-bottom:.8rem">
+          Total de bytes ocupado por <strong>${fmtBytes(stats.blobsTotal || 0)}</strong> em
+          ${sortedBreakdown.reduce((s,b)=>s+(b.count||0),0)} arquivo(s).
+        </p>
+        <table class="table">
+          <thead><tr><th>Tipo</th><th class="num">Qtd.</th><th class="num">Tamanho</th><th>%</th></tr></thead>
+          <tbody>${sortedBreakdown.map(b => {
+            const w = Math.round((b.bytes / maxBlob) * 100);
+            return `<tr>
+              <td>${UI.escapeHtml(b.label)}<br><span class="muted small">${UI.escapeHtml(b.table)}.${UI.escapeHtml(b.column)}</span></td>
+              <td class="num">${b.count}</td>
+              <td class="num"><strong>${fmtBytes(b.bytes)}</strong></td>
+              <td>
+                <div style="background:var(--s2);height:10px;border-radius:99px;overflow:hidden">
+                  <div style="height:100%;width:${w}%;background:var(--ac);transition:width .3s"></div>
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+        <div class="muted small" style="margin-top:.6rem">
+          Última leitura: ${UI.escapeHtml(new Date(stats.generatedAt).toLocaleString('pt-BR'))}
+        </div>
+        <div style="margin-top:.6rem">
+          <button class="btn small" id="storage-refresh">🔄 Recalcular</button>
+        </div>
+      </div>
+
+      ${pct >= 70 ? `
+        <div class="panel" style="border-left:3px solid ${pct>=90?'#ef4444':'#f59e0b'}">
+          <h3 style="margin-top:0">⚠ Recomendação</h3>
+          <p class="muted small">
+            ${pct >= 90
+              ? 'Você está próximo do limite. Considere fazer upgrade do plano Neon ou migrar os arquivos pra storage externo (Cloudflare R2, S3) antes de bloquear novos uploads.'
+              : 'Já passou de 70% do limite. Monitore o crescimento e planeje a migração antes de chegar a 90%.'}
+          </p>
+        </div>` : ''}
+    `;
+    document.getElementById('storage-refresh').onclick = loadStorage;
   }
 
   // ===== NCM / Anuentes =====

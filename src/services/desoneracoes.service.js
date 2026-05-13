@@ -48,14 +48,21 @@ export async function getStepConfig(etapa) {
   await ensureStepConfigDefaults();
   return prisma.desoneracaoStepConfig.findUnique({ where: { etapa } });
 }
-export async function upsertStepConfig({ etapa, responsavelTipo, kindCode, label, sort }) {
+export async function upsertStepConfig({ etapa, responsavelTipo, kindCode, label, sort, slaHours }) {
   if (!etapa) throw new Error('Etapa obrigatória');
   const valid = ['CLIENTE','PARCEIRO_KIND','CLIENTE_OU_PARCEIRO','SAYGO'];
   if (!valid.includes(responsavelTipo)) throw new Error('Tipo de responsável inválido');
+  const slaH = slaHours != null && slaHours !== '' ? Math.max(0, Number(slaHours)) : null;
   return prisma.desoneracaoStepConfig.upsert({
     where: { etapa },
-    create: { etapa, responsavelTipo, kindCode: kindCode || null, label: label || null, sort: Number(sort) || 0 },
-    update: { responsavelTipo, kindCode: kindCode || null, label: label || null, sort: Number(sort) || 0 },
+    create: {
+      etapa, responsavelTipo, kindCode: kindCode || null, label: label || null,
+      sort: Number(sort) || 0, ...(slaH != null && { slaHours: slaH }),
+    },
+    update: {
+      responsavelTipo, kindCode: kindCode || null, label: label || null,
+      sort: Number(sort) || 0, ...(slaH != null && { slaHours: slaH }),
+    },
   });
 }
 

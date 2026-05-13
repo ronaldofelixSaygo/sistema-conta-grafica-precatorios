@@ -1,10 +1,23 @@
 import { prisma } from '../config/prisma.js';
 import { clienteScope, movimentacaoScope } from '../utils/scope.js';
 
-// SLAs hardcoded por enquanto pra Crédito (configurar em Parâmetros depois)
-const CREDIT_SLA_TO_START_H   = 24;  // SENT → IN_PROGRESS
-const CREDIT_SLA_TO_RESOLVE_H = 72;  // IN_PROGRESS → RESOLVED
+// Defaults caso não exista config no banco. A leitura usa CreditSlaConfig.
+const CREDIT_SLA_TO_START_H_DEFAULT   = 24;
+const CREDIT_SLA_TO_RESOLVE_H_DEFAULT = 72;
 const MS_PER_H = 3600 * 1000;
+
+async function getCreditSlaHours() {
+  try {
+    const rows = await prisma.creditSlaConfig.findMany();
+    const m = new Map(rows.map(r => [r.fase, r.slaHours]));
+    return {
+      toStart:   m.get('SENT_TO_PROGRESS')        ?? CREDIT_SLA_TO_START_H_DEFAULT,
+      toResolve: m.get('IN_PROGRESS_TO_RESOLVED') ?? CREDIT_SLA_TO_RESOLVE_H_DEFAULT,
+    };
+  } catch {
+    return { toStart: CREDIT_SLA_TO_START_H_DEFAULT, toResolve: CREDIT_SLA_TO_RESOLVE_H_DEFAULT };
+  }
+}
 
 // % aderência: stages dentro do prazo / total avaliável.
 // Para cada item retorna { okCount, totalCount, percent }.
@@ -65,24 +78,23 @@ async function getDesoneracaoSlaAderencia(prisma, hasDate, dateRange) {
 // SLA de Crédito: avalia 2 transições — SENT→IN_PROGRESS (CREDIT_SLA_TO_START_H)
 // e IN_PROGRESS→RESOLVED (CREDIT_SLA_TO_RESOLVE_H). Cada uma vira uma "etapa".
 async function getCreditoSlaAderencia(prisma, hasDate, dateRange) {
-  const requests = await prisma.creditRequest.findMany({
-    where: {
-      sentAt: { not: null, ...(hasDate ? dateRange : {}) },
-    },
-    select: { status: true, sentAt: true, inProgressAt: true, resolvedAt: true },
-  });
+  const [requests, sla] = await Promise.all([
+    prisma.creditRequest.findMany({
+      where: { sentAt: { not: null, ...(hasDate ? dateRange : {}) } },
+      select: { status: true, sentAt: true, inProgressAt: true, resolvedAt: true },
+    }),
+    getCreditSlaHours(),
+  ]);
   let ok = 0;
   let total = 0;
   const now = new Date();
   for (const r of requests) {
     // Fase 1: SENT → IN_PROGRESS (ou ainda aguardando)
     total++;
-    const start1 = r.sentAt.getTime();
-    const deadline1 = start1 + CREDIT_SLA_TO_START_H * MS_PER_H;
+    const deadline1 = r.sentAt.getTime() + sla.toStart * MS_PER_H;
     if (r.inProgressAt) {
       if (r.inProgressAt.getTime() <= deadline1) ok++;
     } else if (r.status === 'CANCELLED' || r.status === 'RESOLVED') {
-      // Foi resolvida ou cancelada sem passar por IN_PROGRESS — usa resolvedAt como proxy
       if (r.resolvedAt && r.resolvedAt.getTime() <= deadline1) ok++;
     } else {
       if (now.getTime() <= deadline1) ok++;
@@ -90,8 +102,7 @@ async function getCreditoSlaAderencia(prisma, hasDate, dateRange) {
     // Fase 2: IN_PROGRESS → RESOLVED (só conta se chegou a IN_PROGRESS)
     if (r.inProgressAt) {
       total++;
-      const start2 = r.inProgressAt.getTime();
-      const deadline2 = start2 + CREDIT_SLA_TO_RESOLVE_H * MS_PER_H;
+      const deadline2 = r.inProgressAt.getTime() + sla.toResolve * MS_PER_H;
       if (r.resolvedAt) {
         if (r.resolvedAt.getTime() <= deadline2) ok++;
       } else {

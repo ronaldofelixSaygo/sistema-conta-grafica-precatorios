@@ -1,6 +1,40 @@
 import * as svc from '../services/invoice/creditRequest.service.js';
 import * as ai  from '../services/invoice/invoiceAi.service.js';
 import { logAction } from '../services/audit.service.js';
+import { prisma } from '../config/prisma.js';
+
+// === SLA Config ===
+// 2 fases configuráveis. Defaults: 24h pra começar a tratar, 72h pra concluir.
+// listadas sempre — se não existem no banco, retorna defaults.
+const SLA_FASES = [
+  { fase: 'SENT_TO_PROGRESS',       slaHours: 24, label: 'Aceitar a solicitação (de Enviada para Em andamento)' },
+  { fase: 'IN_PROGRESS_TO_RESOLVED', slaHours: 72, label: 'Concluir a solicitação (de Em andamento para Concluída)' },
+];
+
+export async function getSlaConfig(_req, res, next) {
+  try {
+    const rows = await prisma.creditSlaConfig.findMany();
+    const byFase = new Map(rows.map(r => [r.fase, r]));
+    const merged = SLA_FASES.map(d => byFase.get(d.fase) || d);
+    res.json(merged);
+  } catch (e) { next(e); }
+}
+
+export async function saveSlaConfig(req, res, next) {
+  try {
+    const items = Array.isArray(req.body) ? req.body : [];
+    for (const it of items) {
+      if (!it?.fase) continue;
+      const slaHours = Math.max(0, Number(it.slaHours) || 0);
+      await prisma.creditSlaConfig.upsert({
+        where: { fase: it.fase },
+        create: { fase: it.fase, slaHours, label: it.label || null },
+        update: { slaHours, label: it.label || null },
+      });
+    }
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+}
 
 // === IA Settings (somente ADM via routes) ===
 export async function getSettings(_req, res, next) {

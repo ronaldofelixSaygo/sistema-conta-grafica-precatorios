@@ -193,9 +193,18 @@ window.COMBO = (() => {
     root.querySelectorAll('select').forEach(maybeEnhance);
   }
 
-  // Observa selects novos chegando no DOM (modais que abrem depois)
+  // Observa selects novos chegando no DOM (modais que abrem depois).
+  // IMPORTANTE: também olha se o TARGET da mutação é um <select> existente
+  // que ganhou options dinamicamente (caso típico: select renderizado vazio
+  // e populado depois via fetch). Sem isso, selects populados após o render
+  // inicial nunca viram combobox.
   const docObs = new MutationObserver((muts) => {
     for (const m of muts) {
+      // 1) Selects existentes que ganharam (ou perderam) options
+      if (m.target?.tagName === 'SELECT') {
+        maybeEnhance(m.target);
+      }
+      // 2) Novos selects adicionados em qualquer lugar do body
       for (const n of m.addedNodes) {
         if (n.nodeType !== 1) continue;
         if (n.tagName === 'SELECT') maybeEnhance(n);

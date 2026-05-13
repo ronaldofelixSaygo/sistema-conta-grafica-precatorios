@@ -904,6 +904,16 @@ model DesoneracaoDocConfig {
 //   - 'PARCEIRO_KIND'       → parceiro do kindCode informado, vinculado ao processo
 //   - 'CLIENTE_OU_PARCEIRO' → CLIENTE ou parceiro do kindCode (DOCS_DESPACHANTE usa isso)
 //   - 'SAYGO'               → só ADM/SAYGO
+// Config de SLA pra fluxo de Solicitação de Crédito. Key-value simples,
+// 2 linhas: SENT_TO_PROGRESS, IN_PROGRESS_TO_RESOLVED.
+model CreditSlaConfig {
+  fase     String   @id   // SENT_TO_PROGRESS | IN_PROGRESS_TO_RESOLVED
+  slaHours Int      @default(24)
+  label    String?
+  updatedAt DateTime @updatedAt
+  @@map("credit_sla_config")
+}
+
 model DesoneracaoStepConfig {
   id              String   @id @default(uuid())
   etapa           String   @unique

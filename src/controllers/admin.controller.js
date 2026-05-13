@@ -128,6 +128,53 @@ export async function scopeDebug(req, res, next) {
 // É idempotente — pode rodar quantas vezes quiser.
 // Uso: POST /api/admin/scope-fix
 // =====================================================================
+// =====================================================================
+// Estado do storage. Soma os bytes dos blobs em cada tabela e o tamanho
+// total do banco. Usado pra acompanhar consumo no Neon free (limite 500 MB).
+// =====================================================================
+export async function storageStats(_req, res, next) {
+  try {
+    // Tamanho total do banco (inclui índices e overhead). Em Bytes.
+    const dbRow = await prisma.$queryRawUnsafe(`SELECT pg_database_size(current_database())::bigint AS bytes`);
+    const databaseSize = Number(dbRow[0]?.bytes || 0);
+
+    // Helper: conta linhas com bytea + soma octet_length da coluna
+    async function tally(label, table, column) {
+      const sql = `
+        SELECT
+          COUNT(*) FILTER (WHERE "${column}" IS NOT NULL)::int AS count,
+          COALESCE(SUM(octet_length("${column}")), 0)::bigint AS bytes
+        FROM "${table}"
+      `;
+      try {
+        const r = await prisma.$queryRawUnsafe(sql);
+        return { label, table, column, count: Number(r[0]?.count || 0), bytes: Number(r[0]?.bytes || 0) };
+      } catch (e) {
+        return { label, table, column, count: 0, bytes: 0, error: e.message };
+      }
+    }
+
+    const breakdown = await Promise.all([
+      tally('Foto de perfil',              'users',                 'avatarBytes'),
+      tally('Anexos Kanban',               'kanban_attachments',    'content'),
+      tally('PDF entrada Crédito',         'credit_requests',       'inputPdfBytes'),
+      tally('PDF evidência Crédito',       'credit_requests',       'resolutionAttachmentBytes'),
+      tally('NF oficial (Desonerações)',   'desoneracao_notas',     'oficialBytes'),
+      tally('Docs Desonerações',           'desoneracao_documentos','bytes'),
+    ]);
+    const blobsTotal = breakdown.reduce((s, b) => s + b.bytes, 0);
+
+    res.json({
+      databaseSize,
+      blobsTotal,
+      // Neon free plan: 0,5 GB = 500 * 1024 * 1024 bytes
+      limitBytes: 500 * 1024 * 1024,
+      breakdown,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (e) { next(e); }
+}
+
 export async function scopeFix(req, res, next) {
   try {
     const r1 = await prisma.$executeRaw`
