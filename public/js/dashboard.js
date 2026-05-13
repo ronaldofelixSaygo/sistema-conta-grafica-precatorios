@@ -117,6 +117,7 @@ window.VIEW_dashboard = (() => {
               <h3>Kanban — cards por etapa</h3>
               <div class="muted small">${UI.fmtNum(kanban.total || 0)} cards no total</div>
             </div>
+            ${renderSlaPill(kanban.sla, 'Etapas no SLA')}
           </div>
           ${renderBars(kanban.porEtapa, 'stage', 'count', 'Sem cards no período.')}
         </div>
@@ -127,6 +128,7 @@ window.VIEW_dashboard = (() => {
               <h3>Solicitações de Crédito</h3>
               <div class="muted small">${UI.fmtNum(creditos.total || 0)} no período · <strong>${UI.fmtNum(creditos.emAberto || 0)} em aberto</strong></div>
             </div>
+            ${renderSlaPill(creditos.sla, 'Fases no SLA')}
           </div>
           ${renderBars(creditos.porStatus, 'status', 'count', 'Sem solicitações no período.', s => CREDIT_STATUS[s] || s)}
         </div>
@@ -137,6 +139,7 @@ window.VIEW_dashboard = (() => {
               <h3>Desonerações</h3>
               <div class="muted small">${UI.fmtNum(desoneracoes.total || 0)} no período · <strong>${UI.fmtNum(desoneracoes.emAberto || 0)} em aberto</strong></div>
             </div>
+            ${renderSlaPill(desoneracoes.sla, 'Etapas no SLA')}
           </div>
           ${renderBars(desoneracoes.porStatus, 'status', 'count', 'Sem desonerações no período.', s => DESON_STATUS[s] || s)}
         </div>
@@ -153,6 +156,22 @@ window.VIEW_dashboard = (() => {
           </div>` : ''}
       </div>
     `;
+  }
+
+  // Pill colorida de aderência SLA (verde >= 90, âmbar >= 70, vermelho < 70).
+  // Recebe { ok, total, percent }. Se total=0 ou percent=null, mostra "—".
+  function renderSlaPill(sla, label) {
+    if (!sla || sla.total === 0 || sla.percent == null) {
+      return `<div class="sla-pill sla-empty" title="Sem dados no período">
+                <div class="sla-pct">—</div>
+                <div class="sla-label">${label}</div>
+              </div>`;
+    }
+    const cls = sla.percent >= 90 ? 'sla-good' : (sla.percent >= 70 ? 'sla-warn' : 'sla-bad');
+    return `<div class="sla-pill ${cls}" title="${sla.ok} de ${sla.total} dentro do prazo">
+              <div class="sla-pct">${sla.percent}%</div>
+              <div class="sla-label">${label}</div>
+            </div>`;
   }
 
   // Render visual: barras horizontais com label + count.

@@ -288,10 +288,13 @@ export async function createDesoneracao(user, data) {
         createdById: user.id,
       },
     });
+    const now = new Date();
     const stepsToCreate = STEPS_ORDER.filter(s => s !== 'CONCLUIDO').map(etapa => ({
       desoneracaoId: d.id,
       etapa,
       parceiroId: finalParceiros[etapa] || null,
+      // Etapa inicial já começa "em andamento" pra cálculo de SLA.
+      startedAt: etapa === 'DOCS_DESPACHANTE' ? now : null,
     }));
     await tx.desoneracaoStep.createMany({ data: stepsToCreate });
     await tx.desoneracaoEvento.create({
@@ -460,6 +463,11 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
       await tx.desoneracao.update({
         where: { id },
         data: { currentStep: proxima },
+      });
+      // Inicia o relógio de SLA da próxima etapa
+      await tx.desoneracaoStep.update({
+        where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: proxima } },
+        data: { startedAt: new Date() },
       });
     }
     await tx.desoneracaoEvento.create({

@@ -170,7 +170,7 @@ export async function startResolution(user, id) {
     const e = new Error('Status inválido para iniciar'); e.status = 400; throw e;
   }
   return prisma.creditRequest.update({
-    where: { id }, data: { status: 'IN_PROGRESS' },
+    where: { id }, data: { status: 'IN_PROGRESS', inProgressAt: new Date() },
   });
 }
 
