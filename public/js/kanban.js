@@ -41,22 +41,48 @@ window.VIEW_kanban = (() => {
     if (filters.slaStatus) {
       out = out.filter(c => {
         const sp = c.stages.find(s => s.stage === c.currentStage);
-        if (!sp?.slaDeadline) return filters.slaStatus === 'sem';
+        const hasDeadline = !!sp?.slaDeadline;
+        if (filters.slaStatus === 'sem')      return !hasDeadline;
+        if (!hasDeadline) return false;       // ok/atrasado exigem SLA definido
         const overdue = new Date(sp.slaDeadline) < new Date();
         if (filters.slaStatus === 'atrasado') return overdue;
         if (filters.slaStatus === 'ok')       return !overdue;
-        return true;
+        return false;
       });
     }
     if (filters.anexo === 'com')  out = out.filter(c => (c.attachments || 0) > 0);
     if (filters.anexo === 'sem')  out = out.filter(c => !c.attachments);
-    if (filters.responsavel === 'sem') {
-      out = out.filter(c => {
-        const sp = c.stages.find(s => s.stage === c.currentStage);
-        return !sp?.parceiroId && !sp?.responsibleUserId;
-      });
+    if (filters.responsavel) {
+      if (filters.responsavel === 'sem') {
+        out = out.filter(c => {
+          const sp = c.stages.find(s => s.stage === c.currentStage);
+          return !sp?.parceiroId && !sp?.responsibleUserId;
+        });
+      } else {
+        // Filtra por parceiroId específico (qualquer stage com esse parceiro)
+        out = out.filter(c => c.stages.some(s => s.parceiroId === filters.responsavel));
+      }
     }
     return out;
+  }
+
+  // Coleta opções únicas pros dropdowns (calculadas dos cards atuais)
+  function getFilterOptions() {
+    const escSet = new Set();
+    const respMap = new Map(); // parceiroId → nome
+    for (const c of cards) {
+      const esc = (c.clienteEscritorio || '').trim();
+      if (esc) escSet.add(esc);
+      for (const s of (c.stages || [])) {
+        if (s.parceiroId && s.parceiro?.nome) respMap.set(s.parceiroId, s.parceiro.nome);
+      }
+    }
+    return {
+      escritorios: [...escSet].sort(),
+      responsaveis: [...respMap.entries()]
+        .map(([id, nome]) => ({ id, nome }))
+        .sort((a,b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+    };
   }
 
   async function render() {
@@ -75,13 +101,13 @@ window.VIEW_kanban = (() => {
     } catch (e) { el.innerHTML = `<div class="err">${e.message}</div>`; }
   }
 
+  // Renderiza tudo (toolbar + counter + board). Chamado quando o conjunto
+  // de cards muda (ex.: load inicial, depois de criar/atualizar card).
   function drawBoard() {
     const el = document.getElementById('view-kanban');
     const isStaff = AUTH.isStaff();
-    // Escritórios distintos pra popular o dropdown
-    const escritorios = [...new Set(cards.map(c => (c.clienteEscritorio || '').trim()).filter(Boolean))].sort();
-    const visiveis = filteredCards();
-    const hasFiltro = !!(filters.search || filters.escritorio || filters.dataIni || filters.dataFim || filters.slaStatus || filters.anexo || filters.responsavel);
+    const { escritorios, responsaveis } = getFilterOptions();
+    const hasFiltro = hasAnyFilter();
 
     el.innerHTML = `
       <div class="kb-toolbar">
@@ -103,22 +129,46 @@ window.VIEW_kanban = (() => {
           <option value="com" ${filters.anexo==='com'?'selected':''}>📎 Com anexos</option>
           <option value="sem" ${filters.anexo==='sem'?'selected':''}>Sem anexos</option>
         </select>
-        <select id="kb-f-resp" data-no-combo>
+        <select id="kb-f-resp">
           <option value="">Responsável: todos</option>
           <option value="sem" ${filters.responsavel==='sem'?'selected':''}>👤 Sem responsável</option>
+          ${responsaveis.length ? '<option disabled>──────────</option>' : ''}
+          ${responsaveis.map(r => `<option value="${UI.escapeHtml(r.id)}" ${filters.responsavel===r.id?'selected':''}>${UI.escapeHtml(r.nome)}</option>`).join('')}
         </select>
-        ${hasFiltro ? '<button class="btn small ghost" id="kb-f-clear">Limpar filtros</button>' : ''}
+        <button class="btn small ghost" id="kb-f-clear" style="${hasFiltro?'':'display:none'}">Limpar filtros</button>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem;gap:.5rem;flex-wrap:wrap">
-        <div class="muted small">
-          ${visiveis.length} de ${cards.length} card(s)
-          ${hasFiltro ? ' • <span style="color:var(--ac)">filtros ativos</span>' : ''}
-        </div>
+      <div class="kb-counter-bar">
+        <div class="muted small" id="kb-counter"></div>
         ${isStaff ? '<button class="btn primary" id="kb-new">+ Novo card</button>' : ''}
       </div>
       <div class="kb-board" id="kb-board"></div>`;
 
+    redrawBody();
+
+    document.getElementById('kb-board').addEventListener('click', e => {
+      const cd = e.target.closest('.kb-card');
+      if (cd) openCardModal(cd.dataset.id);
+    });
+    if (isStaff) document.getElementById('kb-new').onclick = openNewCardModal;
+    bindFilters();
+  }
+
+  // Re-renderiza só o board e o contador. NÃO recria a toolbar — preserva
+  // foco no input de busca e estado dos selects.
+  function redrawBody() {
+    const visiveis = filteredCards();
+    const hasFiltro = hasAnyFilter();
+
+    const counter = document.getElementById('kb-counter');
+    if (counter) {
+      counter.innerHTML = `${visiveis.length} de ${cards.length} card(s)` +
+        (hasFiltro ? ' • <span style="color:var(--ac)">filtros ativos</span>' : '');
+    }
+    const clearBtn = document.getElementById('kb-f-clear');
+    if (clearBtn) clearBtn.style.display = hasFiltro ? '' : 'none';
+
     const board = document.getElementById('kb-board');
+    if (!board) return;
     board.innerHTML = meta.stagesOrder.map(stage => {
       const stageMeta = meta.stageMeta[stage] || { label: stage };
       const list = visiveis.filter(c => c.currentStage === stage);
@@ -134,13 +184,11 @@ window.VIEW_kanban = (() => {
           </div>
         </div>`;
     }).join('');
+  }
 
-    board.addEventListener('click', e => {
-      const cd = e.target.closest('.kb-card');
-      if (cd) openCardModal(cd.dataset.id);
-    });
-    if (isStaff) document.getElementById('kb-new').onclick = openNewCardModal;
-    bindFilters();
+  function hasAnyFilter() {
+    return !!(filters.search || filters.escritorio || filters.dataIni ||
+              filters.dataFim || filters.slaStatus || filters.anexo || filters.responsavel);
   }
 
   function bindFilters() {
@@ -148,13 +196,14 @@ window.VIEW_kanban = (() => {
       if (val === '' || val == null) delete filters[key];
       else filters[key] = val;
       saveFilters();
-      drawBoard();
+      redrawBody(); // NÃO recria toolbar — preserva foco e digitação
     }
-    // Search com debounce leve
+    // Search com debounce leve. Como redrawBody não recria o input, o foco fica.
     let tmr = null;
     document.getElementById('kb-f-search')?.addEventListener('input', e => {
       clearTimeout(tmr);
-      tmr = setTimeout(() => set('search', e.target.value.trim()), 250);
+      const val = e.target.value.trim();
+      tmr = setTimeout(() => set('search', val), 250);
     });
     document.getElementById('kb-f-escritorio')?.addEventListener('change', e => set('escritorio', e.target.value));
     document.getElementById('kb-f-sla')?.addEventListener('change',        e => set('slaStatus',  e.target.value));
@@ -163,7 +212,11 @@ window.VIEW_kanban = (() => {
     document.getElementById('kb-f-anexo')?.addEventListener('change',      e => set('anexo',      e.target.value));
     document.getElementById('kb-f-resp')?.addEventListener('change',       e => set('responsavel',e.target.value));
     document.getElementById('kb-f-clear')?.addEventListener('click', () => {
-      filters = {}; saveFilters(); drawBoard();
+      filters = {}; saveFilters();
+      // Limpar SELECTs e INPUT visualmente sem destruir o DOM
+      const ids = ['kb-f-search','kb-f-escritorio','kb-f-sla','kb-f-dataini','kb-f-datafim','kb-f-anexo','kb-f-resp'];
+      ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      redrawBody();
     });
   }
 
