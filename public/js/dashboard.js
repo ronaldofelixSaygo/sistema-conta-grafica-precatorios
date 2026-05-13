@@ -107,7 +107,7 @@ window.VIEW_dashboard = (() => {
     if (!wrap) return;
     if (!staff) { wrap.innerHTML = ''; return; }
 
-    const { kanban, creditos, desoneracoes } = staff;
+    const { kanban, creditos, desoneracoes, storage } = staff;
 
     wrap.innerHTML = `
       <div class="staff-grid">
@@ -144,6 +144,8 @@ window.VIEW_dashboard = (() => {
           ${renderBars(desoneracoes.porStatus, 'status', 'count', 'Sem desonerações no período.', s => DESON_STATUS[s] || s)}
         </div>
 
+        ${storage ? renderStoragePanel(storage) : ''}
+
         ${desoneracoes.porEtapaEmAberto?.length ? `
           <div class="panel staff-panel staff-panel-wide">
             <div class="staff-head">
@@ -156,6 +158,43 @@ window.VIEW_dashboard = (() => {
           </div>` : ''}
       </div>
     `;
+  }
+
+  function fmtBytes(b) {
+    if (b == null || isNaN(b)) return '—';
+    if (b < 1024) return b + ' B';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+    if (b < 1024*1024*1024) return (b/1024/1024).toFixed(1) + ' MB';
+    return (b/1024/1024/1024).toFixed(2) + ' GB';
+  }
+
+  function renderStoragePanel(s) {
+    const pct = s.percent || 0;
+    const cls = pct >= 90 ? 'sla-bad' : (pct >= 70 ? 'sla-warn' : 'sla-good');
+    const barColor = pct >= 90 ? '#ef4444' : (pct >= 70 ? '#f59e0b' : '#22c55e');
+    return `
+      <div class="panel staff-panel">
+        <div class="staff-head">
+          <div>
+            <h3>💾 Storage do banco</h3>
+            <div class="muted small">Plano Neon Free — limite ${fmtBytes(s.limitBytes)}</div>
+          </div>
+          <div class="sla-pill ${cls}" title="${fmtBytes(s.usedBytes)} de ${fmtBytes(s.limitBytes)}">
+            <div class="sla-pct">${pct}%</div>
+            <div class="sla-label">do limite</div>
+          </div>
+        </div>
+        <div style="background:var(--s2);border-radius:99px;height:14px;overflow:hidden;margin-top:.4rem">
+          <div style="height:100%;width:${Math.min(100,pct)}%;background:${barColor};transition:width .3s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:.3rem">
+          <span class="muted small">Usado: <strong style="color:var(--t1)">${fmtBytes(s.usedBytes)}</strong></span>
+          <span class="muted small">Disponível: <strong style="color:var(--t1)">${fmtBytes(Math.max(0, s.limitBytes - s.usedBytes))}</strong></span>
+        </div>
+        ${pct >= 80 ? `<div class="muted small" style="margin-top:.4rem;color:${pct>=90?'#ef4444':'#f59e0b'}">
+          ⚠ Acima de 80% — alerta enviado pros admins. Detalhes em <strong>Parâmetros → Storage</strong>.
+        </div>` : ''}
+      </div>`;
   }
 
   // Pill colorida de aderência SLA (verde >= 90, âmbar >= 70, vermelho < 70).

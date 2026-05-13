@@ -904,6 +904,15 @@ model DesoneracaoDocConfig {
 //   - 'PARCEIRO_KIND'       → parceiro do kindCode informado, vinculado ao processo
 //   - 'CLIENTE_OU_PARCEIRO' → CLIENTE ou parceiro do kindCode (DOCS_DESPACHANTE usa isso)
 //   - 'SAYGO'               → só ADM/SAYGO
+// Estado de alertas do sistema (key-value) — usado pra throttling de
+// notificações automáticas (ex: storage 80% não pode mandar e-mail toda hora).
+model SystemAlert {
+  key        String   @id  // ex.: 'storage_80_percent'
+  lastSentAt DateTime
+  payload    Json?    // opcional: snapshot do que disparou
+  @@map("system_alerts")
+}
+
 // Config de SLA pra fluxo de Solicitação de Crédito. Key-value simples,
 // 2 linhas: SENT_TO_PROGRESS, IN_PROGRESS_TO_RESOLVED.
 model CreditSlaConfig {

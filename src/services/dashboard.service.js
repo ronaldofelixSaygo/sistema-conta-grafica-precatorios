@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma.js';
 import { clienteScope, movimentacaoScope } from '../utils/scope.js';
+import { getStorageUsage, checkAndAlertIfNeeded } from './storageAlert.service.js';
 
 // Defaults caso não exista config no banco. A leitura usa CreditSlaConfig.
 const CREDIT_SLA_TO_START_H_DEFAULT   = 24;
@@ -125,11 +126,17 @@ async function getStaffIndicators(user, q) {
   if (q.data_fim) dateRange.lte = new Date(q.data_fim);
   const hasDate = Object.keys(dateRange).length > 0;
 
+  // Em todo acesso de ADM/SAYGO, dá uma "tocada" no monitor de storage —
+  // garante que se o app rodar pouco a noite e o cron interno não pegar, ao
+  // logar pela manhã ele já avisa.
+  checkAndAlertIfNeeded().catch(() => {});
+
   const [
     kanbanByStage, kanbanTotal,
     creditByStatus, creditTotal, creditOpen,
     desonByStatus,  desonTotal,  desonOpen,
     kanbanSla, desonSla, creditSla,
+    storage,
   ] = await Promise.all([
     // Kanban: contagem por etapa atual
     prisma.kanbanCard.groupBy({
@@ -167,6 +174,8 @@ async function getStaffIndicators(user, q) {
     getKanbanSlaAderencia(prisma, hasDate, dateRange),
     getDesoneracaoSlaAderencia(prisma, hasDate, dateRange),
     getCreditoSlaAderencia(prisma, hasDate, dateRange),
+    // Uso de storage (Neon free 500 MB)
+    getStorageUsage(),
   ]);
 
   // Desonerações em aberto por etapa (currentStep) — pra montar o gráfico
@@ -195,6 +204,7 @@ async function getStaffIndicators(user, q) {
       porEtapaEmAberto: desonOpenByStep.map(r => ({ step: r.currentStep, count: r._count._all })),
       sla: desonSla,
     },
+    storage,
   };
 }
 

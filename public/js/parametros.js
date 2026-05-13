@@ -643,7 +643,7 @@ window.VIEW_parametros = (() => {
         <h3>🤖 IA — Configuração</h3>
         <p class="muted small" style="margin-bottom:1rem">
           Provedor de IA usado para ler PDFs de invoice e extrair os dados de cálculo.
-          Mesmo padrão multi-provider do projeto Indicadores Comercial Bitrix.
+          Suporta múltiplos provedores (Anthropic, OpenAI etc.) — escolha o ativo e cole a API key.
         </p>
         <form id="ia-form" class="form-grid" autocomplete="off">
           <input type="text" style="display:none" autocomplete="username">
@@ -827,7 +827,7 @@ window.VIEW_parametros = (() => {
       <div class="panel">
         <h3>📧 E-mail</h3>
         <p class="muted small" style="margin-bottom:1rem">
-          O sistema dispara e-mails automáticos via API interna Saygo (mesmo padrão do projeto Indicadores Comercial Bitrix).
+          O sistema dispara e-mails automáticos via API interna Saygo.
         </p>
         <form id="email-form" class="form-grid">
           <div class="full">
