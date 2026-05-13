@@ -2,7 +2,12 @@ import * as svc from '../services/clientes.service.js';
 import { logAction } from '../services/audit.service.js';
 
 export async function list(req, res, next) {
-  try { res.json(await svc.listClientes(req.user)); } catch (e) { next(e); }
+  try {
+    // Desabilita cache HTTP — o front controla TTL próprio em memória.
+    // Sem isso, o browser podia entregar lista antiga após cadastrar cliente.
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.json(await svc.listClientes(req.user));
+  } catch (e) { next(e); }
 }
 
 export async function get(req, res, next) {

@@ -182,8 +182,14 @@ async function recipientsForCliente(clienteId, allowedRoles = ['ADM','SAYGO','PA
   const emails = new Set();
   if (allowedRoles.includes('CLIENT') && cli.user?.email) emails.add(cli.user.email);
   if (allowedRoles.includes('PARTNER') && cli.escritorio) {
+    // Match case-insensitive com trim no escritorio — mesmo padrão do scope.
+    // Sem isso, NBSP/case quebra silenciosamente quem deveria receber.
+    const office = String(cli.escritorio).trim();
     const partners = await prisma.user.findMany({
-      where: { role: 'PARTNER', officeName: cli.escritorio, active: true, email: { not: null } },
+      where: {
+        role: 'PARTNER', active: true, email: { not: null },
+        officeName: { equals: office, mode: 'insensitive' },
+      },
       select: { email: true },
     });
     for (const p of partners) emails.add(p.email);

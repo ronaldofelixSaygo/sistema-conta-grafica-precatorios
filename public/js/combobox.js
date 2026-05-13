@@ -97,12 +97,23 @@ window.COMBO = (() => {
     function openDrop(filter) {
       refreshItems();
       const f = norm(filter || '');
-      // Pula placeholder (value vazio) quando o user digitou algo — não faz sentido
-      // mostrar "--" na lista de busca.
+      // Tokeniza a busca: cada palavra digitada deve aparecer em qualquer ordem
+      // no normText do item. Assim "gs trator" e "trator gs" funcionam, e
+      // "PMH hosp" acha "PMH Produtos Medicos Hospitalares".
+      const tokens = f.split(/\s+/).filter(Boolean);
+      // Pula placeholder (value vazio) quando user digitou algo.
       filtered = items.filter(i => {
         if (f && i.value === '') return false;
-        return !f || i.normText.includes(f);
+        if (!tokens.length) return true;
+        return tokens.every(t => i.normText.includes(t));
       });
+      // Debug: se digitou mas nada bateu, loga no console pra ajudar diagnóstico
+      if (f && filtered.length === 0 && items.length > 1) {
+        console.warn('[combobox] busca sem resultado:', JSON.stringify(f),
+          'tokens:', tokens,
+          'total items:', items.length,
+          'amostra normText:', items.slice(0, 3).map(i => JSON.stringify(i.normText)));
+      }
       drop.innerHTML = filtered.length
         ? filtered.map((i, idx) => {
             const cls = 'combo-item' + (i.disabled ? ' disabled' : '');

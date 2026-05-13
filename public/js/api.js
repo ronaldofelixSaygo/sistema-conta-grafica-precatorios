@@ -9,6 +9,7 @@ window.API = (() => {
       credentials: 'include',
       headers: { 'Accept': 'application/json' },
     };
+    if (opts.noStore) init.cache = 'no-store';
     if (body !== undefined && !(body instanceof FormData)) {
       init.headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
@@ -34,7 +35,9 @@ window.API = (() => {
     return s ? `?${s}` : '';
   }
 
-  // GET com cache opcional (passe { ttl: 30000 } no 3o arg em milissegundos)
+  // GET com cache opcional (passe { ttl: 30000 } no 3o arg em milissegundos).
+  // Quando ttl === 0, força fetch com `cache: 'no-store'` pra ignorar tanto o
+  // cache em memória quanto qualquer cache HTTP do navegador / proxy.
   async function get(u, q, opts = {}) {
     const fullUrl = u + qs(q);
     const ttl = Number(opts.ttl) || 0;
@@ -42,7 +45,7 @@ window.API = (() => {
       const c = cache.get(fullUrl);
       if (c && c.expiresAt > Date.now()) return c.data;
     }
-    const data = await req('GET', fullUrl);
+    const data = await req('GET', fullUrl, undefined, { noStore: ttl === 0 });
     if (ttl > 0) cache.set(fullUrl, { data, expiresAt: Date.now() + ttl });
     return data;
   }
