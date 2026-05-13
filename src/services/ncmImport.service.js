@@ -49,7 +49,12 @@ function detectColumnsByName(headers, modo) {
     // 'aliquota' isolado vira IPI no modo tributos (header padrão da TIPI é "ALÍQUOTA (%)")
     if (/^(ipi|aliquotaipi|aliqipi)$/.test(h)) set('ipi', i);
     else if (modo === 'tributos' && /^aliquota$/.test(h)) set('ipi', i);
-    if (/(impimport|aliquotaii|^tec$|aliqii|iialiq|^ii$|impostoimportac)/.test(h)) set('ii', i);
+    // II vem com vários rótulos na prática: "TEC (%)", "Alíquota aplicada (%)",
+    // "Alíquota (%)", "II", "Imposto de Importação", etc. Quando o modo é 'tec',
+    // priorizamos "Alíquota aplicada" se aparecer — match silencioso é melhor
+    // que falha; pra TEC oficial use scripts/parse-tec.mjs antes de subir.
+    if (modo === 'tec' && /^aliquotaaplicada(pct|porcent)?$|^aliquotaaplicada$/.test(h)) set('ii', i);
+    else if (/(impimport|aliquotaii|^tec$|aliqii|iialiq|^ii$|impostoimportac|^aliquotaaplicada$|^aliquota$)/.test(h)) set('ii', i);
     if (/^(pis|aliquotapis)$/.test(h)) set('pis', i);
     if (/^(cofins|aliquotacofins)$/.test(h)) set('cofins', i);
     if (/^(anuente|orgao|orgaoanuente|controle|controla|orgaocontrolador)$/.test(h)) set('anuente', i);
