@@ -44,3 +44,58 @@ export async function setTheme(req, res, next) {
     res.json({ ok: true, theme });
   } catch (e) { next(e); }
 }
+
+// Avatar (foto de perfil). Bytes guardados na própria tabela User. Limitado
+// a 2 MB pra não inflar payload de listagens. Mime aceito: png|jpg|jpeg|webp.
+const AVATAR_MAX = 2 * 1024 * 1024;
+const AVATAR_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
+
+export async function uploadAvatar(req, res, next) {
+  try {
+    if (!req.file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
+    if (req.file.size > AVATAR_MAX) {
+      const e = new Error(`Foto muito grande (máx ${AVATAR_MAX/1024/1024}MB)`); e.status = 400; throw e;
+    }
+    if (!AVATAR_MIMES.has(req.file.mimetype)) {
+      const e = new Error('Formato não suportado (use PNG, JPG ou WEBP)'); e.status = 400; throw e;
+    }
+    const { prisma } = await import('../config/prisma.js');
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        avatarBytes: req.file.buffer,
+        avatarMime: req.file.mimetype,
+        avatarUpdated: new Date(),
+      },
+    });
+    res.json({ ok: true, updatedAt: new Date() });
+  } catch (e) { next(e); }
+}
+
+export async function deleteAvatar(req, res, next) {
+  try {
+    const { prisma } = await import('../config/prisma.js');
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { avatarBytes: null, avatarMime: null, avatarUpdated: new Date() },
+    });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+}
+
+// Serve a foto. Disponível pra todos os usuários autenticados ver avatares dos
+// outros (chat, lista de usuários, etc). Cache por 1h, busted pelo ?v=timestamp
+// que o frontend adiciona.
+export async function getAvatar(req, res, next) {
+  try {
+    const { prisma } = await import('../config/prisma.js');
+    const u = await prisma.user.findUnique({
+      where: { id: req.params.userId },
+      select: { avatarBytes: true, avatarMime: true },
+    });
+    if (!u?.avatarBytes) { res.status(404).end(); return; }
+    res.setHeader('Content-Type', u.avatarMime || 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(Buffer.from(u.avatarBytes));
+  } catch (e) { next(e); }
+}

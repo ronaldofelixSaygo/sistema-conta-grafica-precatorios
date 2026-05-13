@@ -21,6 +21,7 @@ window.VIEW_dashboard = (() => {
           <button class="btn" id="d-clear">Limpar</button>
         </div>
         <div id="d-kpis"></div>
+        <div id="d-staff"></div>
         <div class="panel">
           <h3>Últimas movimentações</h3>
           <div id="d-table"></div>
@@ -54,6 +55,9 @@ window.VIEW_dashboard = (() => {
           <div class="kpi p"><div class="l">Saldo</div><div class="v">${UI.fmtMoney(t.saldo)}</div></div>
           ${AUTH.isAdm() ? `<div class="kpi a"><div class="l">Usuários</div><div class="v">${UI.fmtNum(t.users)}</div></div>` : ''}
         </div>`;
+      // Bloco de indicadores extras (só pra ADM/SAYGO — vem com d.staff)
+      renderStaffBlock(d.staff);
+
       document.getElementById('d-table').innerHTML = UI.table({
         cols: [
           { label: 'Cliente', key: 'cliente_nome' },
@@ -74,6 +78,107 @@ window.VIEW_dashboard = (() => {
     } catch (e) {
       document.getElementById('d-kpis').innerHTML = `<div class="err">${e.message}</div>`;
     }
+  }
+
+  // Labels amigáveis pros enums do banco
+  const CREDIT_STATUS = {
+    DRAFT: 'Rascunho', SENT: 'Enviada', IN_PROGRESS: 'Em andamento',
+    RESOLVED: 'Concluída', CANCELLED: 'Cancelada', REJECTED: 'Rejeitada',
+  };
+  const DESON_STATUS = {
+    EM_ANDAMENTO: 'Em andamento', AGUARDANDO_APROVACAO: 'Aguard. aprovação',
+    CONCLUIDA: 'Concluída', CANCELADA: 'Cancelada',
+  };
+  const DESON_STEP = {
+    DOCS_DESPACHANTE: 'Docs do Despachante',
+    EMISSAO_DMI: 'Emissão DMI',
+    EMISSAO_NF: 'Emissão NFs',
+    VALIDACAO_NF: 'Validação NFs',
+    ENVIO_NF_OFICIAL: 'NFs Oficiais',
+    PROTOCOLO_ICMS: 'Protocolo ICMS',
+    CONCLUIDO: 'Concluído',
+  };
+
+  // Paleta consistente pras barras
+  const BAR_COLORS = ['#3b82f6','#22c55e','#f59e0b','#ec4899','#a855f7','#14b8a6','#ef4444','#64748b'];
+
+  function renderStaffBlock(staff) {
+    const wrap = document.getElementById('d-staff');
+    if (!wrap) return;
+    if (!staff) { wrap.innerHTML = ''; return; }
+
+    const { kanban, creditos, desoneracoes } = staff;
+
+    wrap.innerHTML = `
+      <div class="staff-grid">
+        <div class="panel staff-panel">
+          <div class="staff-head">
+            <div>
+              <h3>Kanban — cards por etapa</h3>
+              <div class="muted small">${UI.fmtNum(kanban.total || 0)} cards no total</div>
+            </div>
+          </div>
+          ${renderBars(kanban.porEtapa, 'stage', 'count', 'Sem cards no período.')}
+        </div>
+
+        <div class="panel staff-panel">
+          <div class="staff-head">
+            <div>
+              <h3>Solicitações de Crédito</h3>
+              <div class="muted small">${UI.fmtNum(creditos.total || 0)} no período · <strong>${UI.fmtNum(creditos.emAberto || 0)} em aberto</strong></div>
+            </div>
+          </div>
+          ${renderBars(creditos.porStatus, 'status', 'count', 'Sem solicitações no período.', s => CREDIT_STATUS[s] || s)}
+        </div>
+
+        <div class="panel staff-panel">
+          <div class="staff-head">
+            <div>
+              <h3>Desonerações</h3>
+              <div class="muted small">${UI.fmtNum(desoneracoes.total || 0)} no período · <strong>${UI.fmtNum(desoneracoes.emAberto || 0)} em aberto</strong></div>
+            </div>
+          </div>
+          ${renderBars(desoneracoes.porStatus, 'status', 'count', 'Sem desonerações no período.', s => DESON_STATUS[s] || s)}
+        </div>
+
+        ${desoneracoes.porEtapaEmAberto?.length ? `
+          <div class="panel staff-panel staff-panel-wide">
+            <div class="staff-head">
+              <div>
+                <h3>Desonerações em aberto — por etapa</h3>
+                <div class="muted small">Onde estão paradas as ${UI.fmtNum(desoneracoes.emAberto)} desonerações em andamento</div>
+              </div>
+            </div>
+            ${renderBars(desoneracoes.porEtapaEmAberto, 'step', 'count', 'Sem desonerações em aberto.', s => DESON_STEP[s] || s)}
+          </div>` : ''}
+      </div>
+    `;
+  }
+
+  // Render visual: barras horizontais com label + count.
+  function renderBars(rows, keyField, valField, emptyMsg, labelMap) {
+    if (!rows || !rows.length) {
+      return `<div class="muted small" style="padding:.8rem 0">${emptyMsg}</div>`;
+    }
+    const max = Math.max(1, ...rows.map(r => r[valField] || 0));
+    const sorted = [...rows].sort((a,b) => (b[valField]||0) - (a[valField]||0));
+    return `
+      <div class="bar-list">
+        ${sorted.map((r, i) => {
+          const label = labelMap ? labelMap(r[keyField]) : r[keyField];
+          const val = r[valField] || 0;
+          const pct = Math.round((val / max) * 100);
+          const color = BAR_COLORS[i % BAR_COLORS.length];
+          return `
+            <div class="bar-row">
+              <div class="bar-label" title="${UI.escapeHtml(label)}">${UI.escapeHtml(label)}</div>
+              <div class="bar-track">
+                <div class="bar-fill" style="width:${pct}%;background:${color}"></div>
+              </div>
+              <div class="bar-val">${UI.fmtNum(val)}</div>
+            </div>`;
+        }).join('')}
+      </div>`;
   }
 
   return { render };

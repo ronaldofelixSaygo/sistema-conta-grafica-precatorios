@@ -45,6 +45,7 @@ export async function login({ email, password, ip }) {
       id: user.id, email: user.email, name: user.name, role: user.role,
       officeName: user.officeName, clienteId: user.clienteId,
       themePref: user.themePref, parceiroId: user.parceiroId,
+      avatarUpdated: user.avatarUpdated || null,
       partnerType,
       partnerKindCode,
       parceiroNome: user.parceiro?.nome || null,

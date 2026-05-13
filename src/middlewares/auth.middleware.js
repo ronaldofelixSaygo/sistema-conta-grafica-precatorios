@@ -14,6 +14,7 @@ async function loadUser(uid) {
     select: {
       id: true, email: true, name: true, role: true, active: true,
       officeName: true, clienteId: true, themePref: true, parceiroId: true,
+      avatarUpdated: true,
       parceiro: {
         select: {
           id: true, type: true, nome: true, kindCode: true,

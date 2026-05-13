@@ -40,6 +40,13 @@ model User {
   // Preferência de tema do usuário (persistida)
   themePref    String    @default("dark") // 'dark' | 'light'
 
+  // Avatar (foto do perfil). Guardado como bytes inline pra evitar dependência
+  // de storage externo. Limitamos no upload pra ~2 MB.
+  avatarBytes  Bytes?
+  avatarMime   String?
+  avatarUpdated DateTime?  // pra cache-busting do <img src>
+
+
   // Para PARTNER: pode estar vinculado a um cadastro de Parceiro (empresa)
   parceiroId   String?
   parceiro     Parceiro? @relation(fields: [parceiroId], references: [id], onDelete: SetNull)

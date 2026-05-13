@@ -17,6 +17,7 @@ window.APP = (() => {
     usuarios: 'Usuários',
     auditoria: 'Auditoria',
     parametros: 'Parâmetros',
+    perfil: 'Meu Perfil',
     admin: 'Migração de Dados',
   };
 
@@ -81,6 +82,9 @@ window.APP = (() => {
     const me = AUTH.user();
     document.getElementById('me-name').textContent = me.name;
     document.getElementById('me-role').textContent = roleLabel(me.role) + (me.officeName ? ` · ${me.officeName}` : '');
+    // Avatar/iniciais no canto da sidebar (clicável pra abrir Meu Perfil)
+    if (window.PERFIL) window.PERFIL.refreshSidebar();
+    document.getElementById('user-box-head')?.addEventListener('click', () => showView('perfil'));
     showScreen('app');
     applyRoleVisibility();
     // Carrega a primeira view permitida (na ordem do menu lateral)

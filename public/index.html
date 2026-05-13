@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Vision — Conta Gráfica · Saygo</title>
-<link rel="stylesheet" href="/css/styles.css?v=39" />
+<link rel="stylesheet" href="/css/styles.css?v=40" />
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>window.ASSETV='37';</script>
 </head>
@@ -66,8 +66,13 @@
       <a href="#" data-view="parametros" data-admin-only>Parâmetros</a>
     </nav>
     <div class="user-box">
-      <div id="me-name">—</div>
-      <div class="muted small" id="me-role">—</div>
+      <div class="user-box-head" id="user-box-head" title="Abrir meu perfil">
+        <span id="me-avatar" class="me-avatar"><span>?</span></span>
+        <div class="me-name-wrap">
+          <div id="me-name">—</div>
+          <div class="muted small" id="me-role">—</div>
+        </div>
+      </div>
       <button id="btn-chat-toggle" class="btn ghost small">💬 Chat <span id="chat-badge" class="badge hidden">0</span></button>
       <button id="btn-theme" class="theme-toggle" title="Alternar tema">
         <span id="theme-icon">🌙</span><span id="theme-label">Modo Escuro</span>
@@ -97,6 +102,7 @@
     <section id="view-usuarios"      class="view hidden"></section>
     <section id="view-auditoria"     class="view hidden"></section>
     <section id="view-parametros"    class="view hidden"></section>
+    <section id="view-perfil"        class="view hidden"></section>
     <section id="view-admin"         class="view hidden"></section>
   </main>
 
@@ -132,31 +138,32 @@
 <!-- toast -->
 <div id="toast" class="toast"></div>
 
-<script src="/js/api.js?v=39"></script>
-<script src="/js/ui.js?v=39"></script>
-<script src="/js/mask.js?v=39"></script>
-<script src="/js/viewer.js?v=39"></script>
-<script src="/js/combobox.js?v=39"></script>
-<script src="/js/auth.js?v=39"></script>
-<script src="/js/dashboard.js?v=39"></script>
-<script src="/js/clientes.js?v=39"></script>
-<script src="/js/movimentacoes.js?v=39"></script>
-<script src="/js/saldos.js?v=39"></script>
-<script src="/js/comissoes.js?v=39"></script>
-<script src="/js/relatorios.js?v=39"></script>
-<script src="/js/alertas.js?v=39"></script>
-<script src="/js/consulta-ncm.js?v=39"></script>
-<script src="/js/usuarios.js?v=39"></script>
-<script src="/js/auditoria.js?v=39"></script>
-<script src="/js/kanban.js?v=39"></script>
-<script src="/js/acionamentos.js?v=39"></script>
-<script src="/js/credit-requests.js?v=39"></script>
-<script src="/js/desoneracoes.js?v=39"></script>
-<script src="/js/parceiros.js?v=39"></script>
-<script src="/js/parametros.js?v=39"></script>
-<script src="/js/admin.js?v=39"></script>
-<script src="/js/theme.js?v=39"></script>
-<script src="/js/chat.js?v=39"></script>
-<script src="/js/app.js?v=39"></script>
+<script src="/js/api.js?v=40"></script>
+<script src="/js/ui.js?v=40"></script>
+<script src="/js/mask.js?v=40"></script>
+<script src="/js/viewer.js?v=40"></script>
+<script src="/js/combobox.js?v=40"></script>
+<script src="/js/auth.js?v=40"></script>
+<script src="/js/dashboard.js?v=40"></script>
+<script src="/js/clientes.js?v=40"></script>
+<script src="/js/movimentacoes.js?v=40"></script>
+<script src="/js/saldos.js?v=40"></script>
+<script src="/js/comissoes.js?v=40"></script>
+<script src="/js/relatorios.js?v=40"></script>
+<script src="/js/alertas.js?v=40"></script>
+<script src="/js/consulta-ncm.js?v=40"></script>
+<script src="/js/usuarios.js?v=40"></script>
+<script src="/js/auditoria.js?v=40"></script>
+<script src="/js/kanban.js?v=40"></script>
+<script src="/js/acionamentos.js?v=40"></script>
+<script src="/js/credit-requests.js?v=40"></script>
+<script src="/js/desoneracoes.js?v=40"></script>
+<script src="/js/parceiros.js?v=40"></script>
+<script src="/js/parametros.js?v=40"></script>
+<script src="/js/perfil.js?v=40"></script>
+<script src="/js/admin.js?v=40"></script>
+<script src="/js/theme.js?v=40"></script>
+<script src="/js/chat.js?v=40"></script>
+<script src="/js/app.js?v=40"></script>
 </body>
 </html>

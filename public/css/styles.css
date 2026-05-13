@@ -377,6 +377,38 @@ html[data-theme="light"] .page-toolbar select{background:var(--s1) !important;co
 .param-act-add{display:flex;gap:.4rem;align-items:center;margin-top:.4rem;padding-top:.4rem;border-top:1px dashed var(--bd2)}
 .param-act-add input{flex:1;background:var(--s1);border:1px solid var(--bd2);color:var(--t1);padding:6px 10px;border-radius:6px}
 
+/* Meu Perfil */
+.profile-grid{display:grid;grid-template-columns:280px 1fr;gap:1rem;align-items:start}
+@media (max-width:780px){.profile-grid{grid-template-columns:1fr}}
+.profile-card{text-align:center;padding:1.4rem 1rem}
+.profile-avatar-wrap{position:relative;width:140px;height:140px;margin:0 auto}
+.profile-avatar{width:140px;height:140px;border-radius:50%;object-fit:cover;border:3px solid var(--ac);background:var(--s2);display:flex;align-items:center;justify-content:center}
+.profile-avatar-fallback{font-size:54px;font-weight:700;color:var(--t1);background:linear-gradient(135deg,var(--ac),#9333ea)}
+.profile-avatar-edit{position:absolute;bottom:4px;right:4px;width:34px;height:34px;border-radius:50%;background:var(--ac);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid var(--s1);font-size:16px}
+.profile-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.7rem;margin-top:.5rem}
+.profile-info label{font-size:11px;color:var(--t2);text-transform:uppercase;font-weight:600;letter-spacing:.04em;display:block;margin-bottom:.15rem}
+.profile-value{background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:7px 10px;color:var(--t1);font-size:13px}
+
+/* Mini-avatar na sidebar (canto user-box) */
+.me-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--ac),#9333ea);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;overflow:hidden;margin-right:.5rem;vertical-align:middle;border:1px solid var(--bd2)}
+.me-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.user-box-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;cursor:pointer}
+.user-box-head:hover{opacity:.85}
+.user-box-head .me-name-wrap{flex:1;min-width:0}
+.user-box-head .me-name-wrap > div:first-child{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Dashboard — bloco de indicadores pra staff (Kanban, Crédito, Desonerações) */
+.staff-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;margin:1rem 0}
+.staff-panel-wide{grid-column:1/-1}
+.staff-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.6rem}
+.staff-head h3{margin:0 0 .15rem}
+.bar-list{display:flex;flex-direction:column;gap:.4rem}
+.bar-row{display:grid;grid-template-columns:140px 1fr 50px;align-items:center;gap:.6rem;font-size:13px}
+.bar-label{color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{background:var(--s2);border-radius:99px;height:18px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:99px;transition:width .4s ease}
+.bar-val{text-align:right;font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums}
+
 /* Consulta NCM — visual rico de impostos e anuentes */
 .cn-form{display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap;margin-top:.6rem}
 .cn-input-group{display:flex;flex-direction:column;gap:.2rem;flex:1;min-width:160px;max-width:240px}
