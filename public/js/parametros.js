@@ -3,7 +3,7 @@ window.VIEW_parametros = (() => {
   let stages = [];
   // Persiste a aba selecionada entre re-renders e re-aberturas de tela
   const TAB_STORAGE_KEY = 'vision.parametros.activeTab';
-  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'desoneracoes', 'email', 'ia', 'ncm'];
+  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'desoneracoes', 'sla', 'email', 'ia', 'ncm', 'storage'];
   let activeTab = (() => {
     try {
       const v = localStorage.getItem(TAB_STORAGE_KEY);
