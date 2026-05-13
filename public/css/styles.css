@@ -466,6 +466,12 @@ html[data-theme="light"] .page-toolbar select{background:var(--s1) !important;co
 .cn-badge.gray {background:rgba(107,114,128,.15);color:#9ca3af}
 .cn-badge.dark {background:rgba(0,0,0,.25);color:var(--t1);border:1px solid var(--bd2)}
 
+/* Barra de filtros do Kanban */
+.kb-toolbar{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.6rem;align-items:center;background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:.6rem}
+.kb-toolbar input,.kb-toolbar select{background:var(--s2);border:1px solid var(--bd2);color:var(--t1);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px}
+.kb-toolbar input:focus,.kb-toolbar select:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 2px rgba(255,140,0,.15)}
+.kb-toolbar .kb-input{flex:1;min-width:200px;max-width:320px}
+
 /* Combobox pesquisável (substitui <select> longos) */
 .combo-wrap{position:relative;display:block;width:100%}
 .combo-hidden{display:none !important}
@@ -476,7 +482,8 @@ html[data-theme="light"] .page-toolbar select{background:var(--s1) !important;co
 .combo-drop.hidden{display:none}
 .combo-item{padding:7px 10px;cursor:pointer;font-size:13px;color:var(--t1);border-bottom:1px solid var(--bd)}
 .combo-item:last-child{border-bottom:0}
-.combo-item:hover,.combo-item.hl{background:var(--ac);color:#fff}
+.combo-item:hover:not(.disabled),.combo-item.hl:not(.disabled){background:var(--ac);color:#fff}
+.combo-item.disabled{color:var(--t3);font-style:italic;cursor:not-allowed;opacity:.7}
 .combo-empty{padding:10px;color:var(--t2);font-size:12px;text-align:center}
 
 /* Visualizador de anexos */

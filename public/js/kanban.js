@@ -3,6 +3,62 @@ window.VIEW_kanban = (() => {
   // estado local do modal (evita refetch a cada toggle)
   let openCard = null;
 
+  // Filtros visíveis na barra superior do Kanban. Persiste em localStorage
+  // pra não perder ao navegar pra outra view e voltar.
+  const FILTERS_KEY = 'vision.kanban.filters';
+  let filters = (() => {
+    try { return JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}'); }
+    catch { return {}; }
+  })();
+  function saveFilters() {
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify(filters)); } catch {}
+  }
+  function _norm(s) {
+    return String(s || '').toLowerCase().normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]','g'), '');
+  }
+
+  // Aplica os filtros sobre `cards`. Retorna o array filtrado.
+  function filteredCards() {
+    let out = cards.slice();
+    if (filters.search) {
+      const q = _norm(filters.search);
+      out = out.filter(c =>
+        _norm(c.clienteNome).includes(q) ||
+        _norm(c.clienteEscritorio).includes(q)
+      );
+    }
+    if (filters.escritorio) {
+      out = out.filter(c => (c.clienteEscritorio || '').trim() === filters.escritorio);
+    }
+    if (filters.dataIni) {
+      const d = new Date(filters.dataIni); d.setHours(0,0,0,0);
+      out = out.filter(c => c.startedAt && new Date(c.startedAt) >= d);
+    }
+    if (filters.dataFim) {
+      const d = new Date(filters.dataFim); d.setHours(23,59,59,999);
+      out = out.filter(c => c.startedAt && new Date(c.startedAt) <= d);
+    }
+    if (filters.slaStatus) {
+      out = out.filter(c => {
+        const sp = c.stages.find(s => s.stage === c.currentStage);
+        if (!sp?.slaDeadline) return filters.slaStatus === 'sem';
+        const overdue = new Date(sp.slaDeadline) < new Date();
+        if (filters.slaStatus === 'atrasado') return overdue;
+        if (filters.slaStatus === 'ok')       return !overdue;
+        return true;
+      });
+    }
+    if (filters.anexo === 'com')  out = out.filter(c => (c.attachments || 0) > 0);
+    if (filters.anexo === 'sem')  out = out.filter(c => !c.attachments);
+    if (filters.responsavel === 'sem') {
+      out = out.filter(c => {
+        const sp = c.stages.find(s => s.stage === c.currentStage);
+        return !sp?.parceiroId && !sp?.responsibleUserId;
+      });
+    }
+    return out;
+  }
+
   async function render() {
     const el = document.getElementById('view-kanban');
     el.innerHTML = '<div class="muted">Carregando...</div>';
@@ -22,9 +78,42 @@ window.VIEW_kanban = (() => {
   function drawBoard() {
     const el = document.getElementById('view-kanban');
     const isStaff = AUTH.isStaff();
+    // Escritórios distintos pra popular o dropdown
+    const escritorios = [...new Set(cards.map(c => (c.clienteEscritorio || '').trim()).filter(Boolean))].sort();
+    const visiveis = filteredCards();
+    const hasFiltro = !!(filters.search || filters.escritorio || filters.dataIni || filters.dataFim || filters.slaStatus || filters.anexo || filters.responsavel);
+
     el.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;gap:.5rem;flex-wrap:wrap">
-        <div class="muted small">${cards.length} card(s) no Kanban</div>
+      <div class="kb-toolbar">
+        <input id="kb-f-search" class="kb-input" placeholder="🔍 Buscar cliente ou escritório..." value="${UI.escapeHtml(filters.search || '')}">
+        <select id="kb-f-escritorio" data-no-combo>
+          <option value="">Todos escritórios</option>
+          ${escritorios.map(e => `<option value="${UI.escapeHtml(e)}" ${filters.escritorio===e?'selected':''}>${UI.escapeHtml(e)}</option>`).join('')}
+        </select>
+        <select id="kb-f-sla" data-no-combo>
+          <option value="">SLA: todos</option>
+          <option value="ok"        ${filters.slaStatus==='ok'?'selected':''}>✅ Dentro do SLA</option>
+          <option value="atrasado"  ${filters.slaStatus==='atrasado'?'selected':''}>⚠ Atrasados</option>
+          <option value="sem"       ${filters.slaStatus==='sem'?'selected':''}>— Sem SLA definido</option>
+        </select>
+        <input id="kb-f-dataini" type="date" title="Criados desde" value="${filters.dataIni||''}">
+        <input id="kb-f-datafim" type="date" title="Criados até"   value="${filters.dataFim||''}">
+        <select id="kb-f-anexo" data-no-combo>
+          <option value="">Anexos: todos</option>
+          <option value="com" ${filters.anexo==='com'?'selected':''}>📎 Com anexos</option>
+          <option value="sem" ${filters.anexo==='sem'?'selected':''}>Sem anexos</option>
+        </select>
+        <select id="kb-f-resp" data-no-combo>
+          <option value="">Responsável: todos</option>
+          <option value="sem" ${filters.responsavel==='sem'?'selected':''}>👤 Sem responsável</option>
+        </select>
+        ${hasFiltro ? '<button class="btn small ghost" id="kb-f-clear">Limpar filtros</button>' : ''}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem;gap:.5rem;flex-wrap:wrap">
+        <div class="muted small">
+          ${visiveis.length} de ${cards.length} card(s)
+          ${hasFiltro ? ' • <span style="color:var(--ac)">filtros ativos</span>' : ''}
+        </div>
         ${isStaff ? '<button class="btn primary" id="kb-new">+ Novo card</button>' : ''}
       </div>
       <div class="kb-board" id="kb-board"></div>`;
@@ -32,7 +121,7 @@ window.VIEW_kanban = (() => {
     const board = document.getElementById('kb-board');
     board.innerHTML = meta.stagesOrder.map(stage => {
       const stageMeta = meta.stageMeta[stage] || { label: stage };
-      const list = cards.filter(c => c.currentStage === stage);
+      const list = visiveis.filter(c => c.currentStage === stage);
       const isDone = stage === 'CONCLUIDO';
       return `
         <div class="kb-col ${isDone?'col-done':''}" data-stage="${stage}">
@@ -51,6 +140,31 @@ window.VIEW_kanban = (() => {
       if (cd) openCardModal(cd.dataset.id);
     });
     if (isStaff) document.getElementById('kb-new').onclick = openNewCardModal;
+    bindFilters();
+  }
+
+  function bindFilters() {
+    function set(key, val) {
+      if (val === '' || val == null) delete filters[key];
+      else filters[key] = val;
+      saveFilters();
+      drawBoard();
+    }
+    // Search com debounce leve
+    let tmr = null;
+    document.getElementById('kb-f-search')?.addEventListener('input', e => {
+      clearTimeout(tmr);
+      tmr = setTimeout(() => set('search', e.target.value.trim()), 250);
+    });
+    document.getElementById('kb-f-escritorio')?.addEventListener('change', e => set('escritorio', e.target.value));
+    document.getElementById('kb-f-sla')?.addEventListener('change',        e => set('slaStatus',  e.target.value));
+    document.getElementById('kb-f-dataini')?.addEventListener('change',    e => set('dataIni',    e.target.value));
+    document.getElementById('kb-f-datafim')?.addEventListener('change',    e => set('dataFim',    e.target.value));
+    document.getElementById('kb-f-anexo')?.addEventListener('change',      e => set('anexo',      e.target.value));
+    document.getElementById('kb-f-resp')?.addEventListener('change',       e => set('responsavel',e.target.value));
+    document.getElementById('kb-f-clear')?.addEventListener('click', () => {
+      filters = {}; saveFilters(); drawBoard();
+    });
   }
 
   function cardHtml(c) {
@@ -85,9 +199,20 @@ window.VIEW_kanban = (() => {
       clientesCache = await API.get('/api/clientes', null, { ttl: 0 });
     } catch {}
     const usados = new Set(cards.map(c => c.clienteId));
-    const disponiveis = clientesCache.filter(c => !usados.has(c.id));
-    const cliOpts = disponiveis.map(c =>
-      `<option value="${c.id}">${UI.escapeHtml(c.nome)}${c.escritorio?` -- ${UI.escapeHtml(c.escritorio)}`:''}</option>`).join('');
+    // Mostra TODOS os clientes; os que já têm card ficam desabilitados com
+    // sufixo "(já no Kanban)". Ordena disponíveis primeiro, depois alfabética.
+    const cliOpts = [...clientesCache]
+      .sort((a, b) => {
+        const ua = usados.has(a.id), ub = usados.has(b.id);
+        if (ua !== ub) return ua ? 1 : -1;
+        return String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
+      })
+      .map(c => {
+        const jaTem = usados.has(c.id);
+        const esc = c.escritorio ? ` -- ${UI.escapeHtml(c.escritorio)}` : '';
+        const sufixo = jaTem ? ' (já no Kanban)' : '';
+        return `<option value="${c.id}" ${jaTem ? 'disabled' : ''}>${UI.escapeHtml(c.nome)}${esc}${sufixo}</option>`;
+      }).join('');
 
     const stageRows = meta.stagesOrder.filter(s => s !== 'CONCLUIDO').map(stage => {
       const m = meta.stageMeta[stage];

@@ -8,6 +8,7 @@
 // - Sincroniza com o <select> original (dispatch 'change'), então handlers
 //   existentes via .addEventListener('change', ...) continuam funcionando
 // - Casa com ou sem acento (digita "doc contabil" → acha "DOC CONTÁBIL")
+// - Respeita <option disabled>: mostra cinza, não permite selecionar
 // =====================================================================
 window.COMBO = (() => {
   const ENHANCED = new WeakSet();
@@ -65,7 +66,7 @@ window.COMBO = (() => {
     drop.className = 'combo-drop hidden';
     wrap.appendChild(drop);
 
-    let items = [];        // todas as opções: [{value, text, opt}]
+    let items = [];        // todas as opções: [{value, text, normText, disabled}]
     let filtered = [];     // opções filtradas atualmente exibidas
     let highlighted = -1;
 
@@ -74,6 +75,7 @@ window.COMBO = (() => {
         value: o.value,
         text: o.textContent.trim(),
         normText: norm(o.textContent),
+        disabled: !!o.disabled,
       }));
     }
 
@@ -90,14 +92,17 @@ window.COMBO = (() => {
         ? items.filter(i => i.normText.includes(f))
         : items.slice();
       drop.innerHTML = filtered.length
-        ? filtered.map((i, idx) =>
-            `<div class="combo-item" data-idx="${idx}">${esc(i.text || ' ')}</div>`
-          ).join('')
+        ? filtered.map((i, idx) => {
+            const cls = 'combo-item' + (i.disabled ? ' disabled' : '');
+            const aria = i.disabled ? ' aria-disabled="true"' : '';
+            return `<div class="${cls}" data-idx="${idx}"${aria}>${esc(i.text || ' ')}</div>`;
+          }).join('')
         : '<div class="combo-empty">Nenhum resultado</div>';
       drop.classList.remove('hidden');
-      // Tenta destacar a opção atual; senão, a primeira
-      const curIdx = filtered.findIndex(i => i.value === sel.value);
-      highlighted = curIdx >= 0 ? curIdx : (filtered.length ? 0 : -1);
+      // Tenta destacar a opção atual; senão a primeira NÃO disabled
+      const curIdx = filtered.findIndex(i => i.value === sel.value && !i.disabled);
+      const firstEnabled = filtered.findIndex(i => !i.disabled);
+      highlighted = curIdx >= 0 ? curIdx : firstEnabled;
       updateHighlight();
     }
 
@@ -115,11 +120,23 @@ window.COMBO = (() => {
       }
     }
 
+    // Move o highlight pulando items disabled. Wrap-around.
+    function moveHighlight(dir) {
+      if (!filtered.length) return;
+      let i = highlighted < 0 ? -dir : highlighted;
+      for (let step = 0; step < filtered.length; step++) {
+        i = (i + dir + filtered.length) % filtered.length;
+        if (!filtered[i].disabled) { highlighted = i; updateHighlight(); return; }
+      }
+    }
+
     function pick(value) {
+      // Não selecionar items disabled
+      const item = items.find(i => i.value === value);
+      if (item?.disabled) return;
       sel.value = value;
       syncInputFromSelect();
       closeDrop();
-      // Dispara change no <select> original pra rodar handlers preexistentes
       sel.dispatchEvent(new Event('change', { bubbles: true }));
       sel.dispatchEvent(new Event('input',  { bubbles: true }));
     }
@@ -131,15 +148,13 @@ window.COMBO = (() => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         if (drop.classList.contains('hidden')) return openDrop(input.value);
-        highlighted = Math.min(highlighted + 1, filtered.length - 1);
-        updateHighlight();
+        moveHighlight(1);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         if (drop.classList.contains('hidden')) return openDrop(input.value);
-        highlighted = Math.max(highlighted - 1, 0);
-        updateHighlight();
+        moveHighlight(-1);
       } else if (e.key === 'Enter') {
-        if (!drop.classList.contains('hidden') && filtered[highlighted]) {
+        if (!drop.classList.contains('hidden') && filtered[highlighted] && !filtered[highlighted].disabled) {
           e.preventDefault();
           pick(filtered[highlighted].value);
         }
@@ -150,8 +165,8 @@ window.COMBO = (() => {
           closeDrop();
         }
       } else if (e.key === 'Tab') {
-        // Se digitou um valor exato, seleciona ao sair
-        const exact = items.find(i => i.normText === norm(input.value));
+        // Se digitou um valor exato (não-disabled), seleciona ao sair
+        const exact = items.find(i => i.normText === norm(input.value) && !i.disabled);
         if (exact && exact.value !== sel.value) pick(exact.value);
         closeDrop();
       }
@@ -159,8 +174,7 @@ window.COMBO = (() => {
     input.addEventListener('blur', () => {
       // pequeno delay pra processar mousedown no item antes de fechar
       setTimeout(() => {
-        // Se o texto não bate com nenhuma opção exata, restaura ao valor atual do select
-        const exact = items.find(i => i.normText === norm(input.value));
+        const exact = items.find(i => i.normText === norm(input.value) && !i.disabled);
         if (!exact) syncInputFromSelect();
         closeDrop();
       }, 150);
@@ -170,6 +184,7 @@ window.COMBO = (() => {
       const item = e.target.closest('.combo-item');
       if (!item) return;
       e.preventDefault();
+      if (item.classList.contains('disabled')) return;
       const idx = Number(item.dataset.idx);
       if (filtered[idx]) pick(filtered[idx].value);
     });
