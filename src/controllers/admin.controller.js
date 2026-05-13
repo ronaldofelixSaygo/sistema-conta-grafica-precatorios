@@ -175,6 +175,97 @@ export async function storageStats(_req, res, next) {
   } catch (e) { next(e); }
 }
 
+// =====================================================================
+// Diagnóstico de e-mail: por que um trigger não disparou?
+// Mostra settings completos + recipients pra um cardId opcional.
+// Uso: GET /api/admin/email-debug?cardId=<id>
+// =====================================================================
+export async function emailDebug(req, res, next) {
+  try {
+    const { default: emailSvc } = await import('../services/email.service.js')
+      .then(m => ({ default: m })); // workaround se for namespace
+    const settingsRow = await prisma.emailSettings.findUnique({ where: { id: 'default' } });
+    const settings = {
+      enabled: !!settingsRow?.enabled,
+      apiUrl: settingsRow?.apiUrl || null,
+      hasApiToken: !!settingsRow?.apiToken,
+      sender: settingsRow?.sender || null,
+      notifyKanbanStageChange: !!settingsRow?.notifyKanbanStageChange,
+      notifyKanbanStageDone:   !!settingsRow?.notifyKanbanStageDone,
+      notifyPartnerRequest:    !!settingsRow?.notifyPartnerRequest,
+      notifyCreditRequest:     settingsRow?.notifyCreditRequest !== false,
+      notifyKanbanStageChangeRoles: settingsRow?.notifyKanbanStageChangeRoles || null,
+      notifyKanbanStageDoneRoles:   settingsRow?.notifyKanbanStageDoneRoles   || null,
+    };
+
+    // Snapshot de usuários ADM e SAYGO
+    const staff = await prisma.user.findMany({
+      where: { role: { in: ['ADM','SAYGO'] }, active: true, email: { not: null } },
+      select: { id: true, email: true, name: true, role: true },
+    });
+
+    let cardSnapshot = null;
+    let recipients = null;
+    if (req.query.cardId) {
+      const card = await prisma.kanbanCard.findUnique({
+        where: { id: String(req.query.cardId) },
+        include: { cliente: { include: { user: { select: { email: true, name: true } } } } },
+      });
+      if (card) {
+        cardSnapshot = {
+          id: card.id,
+          clienteId: card.clienteId,
+          clienteNome: card.cliente?.nome,
+          clienteEscritorio: card.cliente?.escritorio,
+          clienteUser: card.cliente?.user || null,
+          currentStage: card.currentStage,
+        };
+        const roles = settings.notifyKanbanStageChangeRoles || ['ADM','SAYGO','PARTNER','CLIENT'];
+        const partners = card.cliente?.escritorio ? await prisma.user.findMany({
+          where: {
+            role: 'PARTNER', active: true, email: { not: null },
+            officeName: { equals: String(card.cliente.escritorio).trim(), mode: 'insensitive' },
+          },
+          select: { email: true, name: true, officeName: true },
+        }) : [];
+        recipients = {
+          roles,
+          client:   roles.includes('CLIENT') && card.cliente?.user?.email ? card.cliente.user.email : null,
+          partners: roles.includes('PARTNER') ? partners.map(p => p.email) : [],
+          staff:    (roles.includes('ADM') || roles.includes('SAYGO')) ? staff.map(s => s.email) : [],
+        };
+      }
+    }
+
+    res.json({
+      settings,
+      staffCount: staff.length,
+      staffEmails: staff.map(s => `${s.name} (${s.email})`),
+      cardSnapshot,
+      recipients,
+      diagnosticNotes: [
+        settings.enabled ? null : '⚠ EMAIL_ENABLED está OFF — nenhum e-mail vai disparar',
+        settings.notifyKanbanStageChange ? null : '⚠ notifyKanbanStageChange está OFF — clique em "Salvar" na aba E-mail',
+        settings.hasApiToken ? null : '⚠ Sem token da API Saygo',
+        settings.apiUrl ? null : '⚠ Sem URL da API Saygo',
+        staff.length ? null : '⚠ Nenhum usuário ADM/SAYGO ativo com e-mail cadastrado',
+      ].filter(Boolean),
+    });
+  } catch (e) { next(e); }
+}
+
+// Dispara o trigger de mudança de fase pra um card específico (uso: teste manual).
+// POST /api/admin/email-test-trigger body: { cardId, fromStage, toStage }
+export async function emailTestTrigger(req, res, next) {
+  try {
+    const { cardId, fromStage = 'ONBOARDING', toStage = 'CONTRATACAO_SALA' } = req.body || {};
+    if (!cardId) { const e = new Error('cardId obrigatório'); e.status = 400; throw e; }
+    const emailMod = await import('../services/email.service.js');
+    await emailMod.notifyStageChange({ cardId, fromStage, toStage, byUser: req.user });
+    res.json({ ok: true, message: 'Trigger executado — veja Histórico de envios e Logs do Render' });
+  } catch (e) { next(e); }
+}
+
 export async function scopeFix(req, res, next) {
   try {
     const r1 = await prisma.$executeRaw`

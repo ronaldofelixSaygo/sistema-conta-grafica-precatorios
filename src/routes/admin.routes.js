@@ -15,4 +15,6 @@ router.post('/ncm-import', upload.single('file'), ctrl.importNcm);
 router.get ('/scope-debug',       ctrl.scopeDebug);
 router.post('/scope-fix',         ctrl.scopeFix);
 router.get ('/storage-stats',     ctrl.storageStats);
+router.get ('/email-debug',       ctrl.emailDebug);
+router.post('/email-test-trigger', ctrl.emailTestTrigger);
 export default router;
