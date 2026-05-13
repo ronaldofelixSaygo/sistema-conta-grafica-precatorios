@@ -259,6 +259,10 @@ window.VIEW_clientes = (() => {
       try {
         if (cli.id) await API.put(`/api/clientes/${cli.id}`, data);
         else        await API.post('/api/clientes', data);
+        // Invalida cache em memória do API.get pra outras views (Kanban,
+        // Movimentações, Solicitação, Desonerações) verem o cliente novo
+        // sem precisar de F5.
+        API.invalidate?.('/api/clientes');
         UI.toast('Cliente salvo'); UI.closeModal(); render();
       } catch (e) { UI.toast(e.message, 'err'); }
     };
@@ -266,8 +270,11 @@ window.VIEW_clientes = (() => {
 
   async function removeCli(id) {
     if (!confirm('Excluir este cliente? Movimentações serão excluídas em cascata.')) return;
-    try { await API.del(`/api/clientes/${id}`); UI.toast('Cliente excluído'); render(); }
-    catch (e) { UI.toast(e.message, 'err'); }
+    try {
+      await API.del(`/api/clientes/${id}`);
+      API.invalidate?.('/api/clientes');
+      UI.toast('Cliente excluído'); render();
+    } catch (e) { UI.toast(e.message, 'err'); }
   }
 
   return { render };

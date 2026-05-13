@@ -77,7 +77,13 @@ window.VIEW_kanban = (() => {
   }
 
   // ------ NOVO CARD: form com parceiros para todas as etapas ------
-  function openNewCardModal() {
+  async function openNewCardModal() {
+    // Recarrega a lista de clientes sem cache. Sem isso, clientes cadastrados
+    // em outra view enquanto o Kanban está aberto não aparecem no select.
+    try {
+      API.invalidate?.('/api/clientes');
+      clientesCache = await API.get('/api/clientes', null, { ttl: 0 });
+    } catch {}
     const usados = new Set(cards.map(c => c.clienteId));
     const disponiveis = clientesCache.filter(c => !usados.has(c.id));
     const cliOpts = disponiveis.map(c =>
