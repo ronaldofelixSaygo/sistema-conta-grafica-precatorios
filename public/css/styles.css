@@ -484,7 +484,8 @@ html[data-theme="light"] .page-toolbar select{background:var(--s1) !important;co
 .combo-item{padding:7px 10px;cursor:pointer;font-size:13px;color:var(--t1);border-bottom:1px solid var(--bd)}
 .combo-item:last-child{border-bottom:0}
 .combo-item:hover:not(.disabled),.combo-item.hl:not(.disabled){background:var(--ac);color:#fff}
-.combo-item.disabled{color:var(--t3);font-style:italic;cursor:not-allowed;opacity:.7}
+.combo-item.disabled{color:var(--t2);font-style:italic;cursor:not-allowed;background:var(--s2) !important;opacity:1}
+.combo-item.disabled:hover,.combo-item.disabled.hl{background:var(--bd) !important;color:var(--t2) !important}
 .combo-empty{padding:10px;color:var(--t2);font-size:12px;text-align:center}
 
 /* Visualizador de anexos */
