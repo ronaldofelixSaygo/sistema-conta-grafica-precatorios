@@ -59,8 +59,22 @@ window.VIEW_kanban = (() => {
           return !sp?.parceiroId && !sp?.responsibleUserId;
         });
       } else {
-        // Filtra por parceiroId específico (qualquer stage com esse parceiro)
-        out = out.filter(c => c.stages.some(s => s.parceiroId === filters.responsavel));
+        // Filtra por parceiroId específico.
+        // Regra: card precisa ter ESSE parceiro como responsável de ALGUMA
+        // stage E a stage atual do card precisa estar entre as fases em que
+        // o parceiro atua (Parceiro.stages). Assim, ARMADOR_LOGISTICO vinculado
+        // só a "Contratação Sala" não aparece em cards que já passaram dessa
+        // fase nem nos que ainda não chegaram.
+        const parc = parceirosCache.find(p => p.id === filters.responsavel);
+        const fasesDoParceiro = new Set(Array.isArray(parc?.stages) ? parc.stages : []);
+        out = out.filter(c => {
+          const eResponsavel = c.stages.some(s => s.parceiroId === filters.responsavel);
+          if (!eResponsavel) return false;
+          // Se o parceiro tem fases configuradas, exige que currentStage esteja nelas.
+          // Se não tem fases (configuração genérica), traz qualquer card onde ele participa.
+          if (fasesDoParceiro.size === 0) return true;
+          return fasesDoParceiro.has(c.currentStage);
+        });
       }
     }
     return out;
