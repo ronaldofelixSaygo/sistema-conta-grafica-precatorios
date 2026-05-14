@@ -74,6 +74,9 @@ export async function addNota(req, res, next) {
 export async function validarNota(req, res, next) {
   try { res.json(await svc.validarNota(req.user, req.params.notaId)); } catch (e) { next(e); }
 }
+export async function rejeitarNota(req, res, next) {
+  try { res.json(await svc.rejeitarNota(req.user, req.params.notaId, req.body?.motivo)); } catch (e) { next(e); }
+}
 export async function anexarOficial(req, res, next) {
   try {
     if (!req.file) { const e = new Error('Arquivo obrigatório'); e.status = 400; throw e; }

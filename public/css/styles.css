@@ -502,6 +502,9 @@ form label{position:relative}
 .kb-toolbar input:focus,.kb-toolbar select:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 2px rgba(255,140,0,.15)}
 .kb-toolbar .kb-input{flex:1;min-width:200px;max-width:320px}
 
+/* Doc/NF rejeitada — borda vermelha leve pra destacar */
+.doc-row.rejeitada{border-left:3px solid #ef4444;background:rgba(239,68,68,.05)}
+
 /* Combobox pesquisável (substitui <select> longos) */
 .combo-wrap{position:relative;display:block;width:100%}
 .combo-hidden{display:none !important}

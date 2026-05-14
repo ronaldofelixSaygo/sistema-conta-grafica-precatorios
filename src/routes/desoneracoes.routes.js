@@ -46,6 +46,7 @@ router.post('/:id/notas',                    ctrl.addNota);
 // Novo: upload direto cria NF + anexa o arquivo (cliente não precisa preencher campos)
 router.post('/:id/notas/upload', upload.single('file'), ctrl.uploadNota);
 router.post('/notas/:notaId/validar',        ctrl.validarNota);
+router.post('/notas/:notaId/rejeitar',       ctrl.rejeitarNota);
 router.post('/notas/:notaId/oficial', upload.single('file'), ctrl.anexarOficial);
 router.get('/notas/:notaId/oficial',         ctrl.downloadOficial);
 router.delete('/notas/:notaId',              ctrl.removeNota); // cliente pode excluir na sua etapa (validado no service)

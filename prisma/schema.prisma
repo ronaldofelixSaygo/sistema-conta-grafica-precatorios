@@ -835,6 +835,12 @@ model DesoneracaoNota {
   validada       Boolean      @default(false)
   validadaAt     DateTime?
   validadaPorId  String?
+  // Rejeição: marca NF que o parceiro reprovou na etapa VALIDACAO_NF.
+  // Quando há rejeitadas no avanço, o fluxo vai pra ENVIO_NF_OFICIAL pra
+  // o cliente re-anexar. Quando todas validadas, pula direto pra PROTOCOLO_ICMS.
+  rejeitada      Boolean      @default(false)
+  rejeitadaAt    DateTime?
+  rejeitadaMotivo String?
 
   // PDF oficial — anexado na etapa ENVIO_NF_OFICIAL
   oficialBytes   Bytes?

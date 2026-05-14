@@ -499,31 +499,43 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
       e.status = 400; throw e;
     }
   }
-  // NFs: na EMISSAO_NF precisa pelo menos 1 entrada e 1 saída.
+  // NFs: na EMISSAO_NF precisa de pelo menos 1 NF anexada (entrada/saída
+  // ficam na mesma etapa, cliente sobe ambas como arquivos PDF).
   if (etapaAtual === 'EMISSAO_NF') {
-    const tem = (t) => cur.notas.some(n => n.tipo === t);
-    if (!tem('ENTRADA') || !tem('SAIDA')) {
-      const e = new Error('Cadastre ao menos 1 NF de Entrada e 1 NF de Saída antes de avançar');
+    if (cur.notas.length === 0) {
+      const e = new Error('Anexe ao menos 1 NF antes de avançar');
       e.status = 400; throw e;
     }
   }
-  // VALIDACAO_NF: todas NFs devem estar marcadas como validadas
+  // VALIDACAO_NF: todas devem ter sido decididas (validada OU rejeitada)
   if (etapaAtual === 'VALIDACAO_NF') {
-    if (cur.notas.some(n => !n.validada)) {
-      const e = new Error('Existem NFs ainda não validadas');
+    const pendentes = cur.notas.filter(n => !n.validada && !n.rejeitada);
+    if (pendentes.length) {
+      const e = new Error(`${pendentes.length} NF(s) sem decisão — valide ou rejeite todas`);
       e.status = 400; throw e;
     }
   }
-  // ENVIO_NF_OFICIAL: todas NFs precisam ter PDF oficial anexado
+  // ENVIO_NF_OFICIAL: as NFs rejeitadas precisam ter sido re-anexadas
+  // (cliente sobe NF nova ou indica que substituiu)
   if (etapaAtual === 'ENVIO_NF_OFICIAL') {
-    if (cur.notas.some(n => !n.oficialBytes)) {
-      const e = new Error('Existem NFs sem PDF oficial anexado');
+    const rejeitadasSemNovoArquivo = cur.notas.filter(n => n.rejeitada && !n.oficialBytes);
+    if (rejeitadasSemNovoArquivo.length) {
+      const e = new Error('Há NFs rejeitadas sem novo arquivo anexado');
       e.status = 400; throw e;
     }
   }
 
-  // === Marca etapa atual como concluída + define próxima ===
-  const proxima = nextStep(etapaAtual);
+  // === Define próxima etapa (com lógica condicional pra fluxo de NF) ===
+  let proxima = nextStep(etapaAtual);
+  if (etapaAtual === 'VALIDACAO_NF') {
+    // Se há NFs rejeitadas → cliente precisa re-anexar (etapa 5)
+    // Se todas validadas → pula direto pra PROTOCOLO_ICMS
+    const temRejeitada = cur.notas.some(n => n.rejeitada);
+    proxima = temRejeitada ? 'ENVIO_NF_OFICIAL' : 'PROTOCOLO_ICMS';
+  } else if (etapaAtual === 'ENVIO_NF_OFICIAL') {
+    // Depois do cliente re-anexar, volta pra validação
+    proxima = 'VALIDACAO_NF';
+  }
   await prisma.$transaction(async (tx) => {
     await tx.desoneracaoStep.update({
       where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: etapaAtual } },
@@ -699,10 +711,30 @@ export async function validarNota(user, notaId) {
   }
   const n = await prisma.desoneracaoNota.update({
     where: { id: notaId },
-    data: { validada: true, validadaAt: new Date(), validadaPorId: user.id },
+    data: { validada: true, validadaAt: new Date(), validadaPorId: user.id, rejeitada: false, rejeitadaAt: null },
   });
   await prisma.desoneracaoEvento.create({
     data: { desoneracaoId: n.desoneracaoId, acao: 'NF_VALIDADA', descricao: `NF ${n.numero} validada`, byUserId: user.id },
+  });
+  return n;
+}
+
+// Rejeita uma NF — disponível na etapa VALIDACAO_NF. Quando há ao menos
+// uma NF rejeitada e o parceiro avança, o fluxo passa por ENVIO_NF_OFICIAL
+// pra o cliente re-anexar as rejeitadas.
+export async function rejeitarNota(user, notaId, motivo) {
+  const cur = await prisma.desoneracaoNota.findUnique({ where: { id: notaId }, include: { desoneracao: true } });
+  if (!cur) { const e = new Error('NF não encontrada'); e.status = 404; throw e; }
+  if (cur.desoneracao.currentStep !== 'VALIDACAO_NF') {
+    const e = new Error('Rejeição só pode ser feita na etapa "Validação NFs"');
+    e.status = 400; throw e;
+  }
+  const n = await prisma.desoneracaoNota.update({
+    where: { id: notaId },
+    data: { rejeitada: true, rejeitadaAt: new Date(), rejeitadaMotivo: motivo || null, validada: false, validadaAt: null, validadaPorId: null },
+  });
+  await prisma.desoneracaoEvento.create({
+    data: { desoneracaoId: n.desoneracaoId, acao: 'NF_REJEITADA', descricao: `NF ${n.numero} rejeitada${motivo?': '+motivo:''}`, byUserId: user.id },
   });
   return n;
 }

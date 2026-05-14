@@ -464,9 +464,10 @@ window.VIEW_desoneracoes = (() => {
   }
 
   // Renderiza uma etapa de NF como linha-padrão (mesmo visual dos docs).
-  // EMISSAO_NF: cliente sobe NFs (botão "+ Anexar NF" no fim)
-  // VALIDACAO_NF: parceiro escritório valida (botão ✓ em cada NF)
-  // ENVIO_NF_OFICIAL: ...
+  // EMISSAO_NF: cliente sobe NFs (entrada+saída) — upload múltiplo.
+  // VALIDACAO_NF: parceiro escritório valida (✓) ou rejeita (✗) cada NF.
+  // ENVIO_NF_OFICIAL: só é acionada quando há NFs rejeitadas — cliente
+  //                   re-anexa. Se todas validadas na etapa 4, é pulada.
   function renderEtapaNotas(d, etapa, isStaff, podeAtuarAgora) {
     const reached = isStepReached(d, etapa);
     if (!reached) {
@@ -479,44 +480,67 @@ window.VIEW_desoneracoes = (() => {
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
     const isCurrent = d.currentStep === etapa;
     const ativo = !!cur?.podeAtuar || isStaff;
-    const podeAdicionar = ativo && etapa === 'EMISSAO_NF' && isCurrent;
+    const podeAdicionar = ativo && isCurrent && (etapa === 'EMISSAO_NF' || etapa === 'ENVIO_NF_OFICIAL');
     const podeValidar   = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
+    const podeRejeitar  = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
     const podeRemover   = ativo && etapa === 'EMISSAO_NF' && isCurrent;
 
-    const notas = d.notas || [];
+    let notas = d.notas || [];
+    // Na etapa 5 (re-anexo), só mostra as NFs rejeitadas — o cliente substitui essas
+    if (etapa === 'ENVIO_NF_OFICIAL') {
+      notas = notas.filter(n => n.rejeitada);
+    }
+
     if (!notas.length && !podeAdicionar) {
+      const msg = etapa === 'ENVIO_NF_OFICIAL'
+        ? 'Etapa não acionada — NFs aprovadas direto na validação'
+        : (etapa === 'EMISSAO_NF' ? 'Aguardando anexo' : 'Sem NFs anexadas');
       return `<div class="doc-grid"><div class="doc-row disabled">
         <div class="doc-tipo">NF</div>
-        <div class="doc-file"><span class="muted small">${etapa === 'EMISSAO_NF' ? 'Aguardando anexo' : 'Sem NFs anexadas'}</span></div>
+        <div class="doc-file"><span class="muted small">${msg}</span></div>
         <div class="doc-actions"></div>
       </div></div>`;
     }
 
-    const linhas = notas.map(n => `
-      <div class="doc-row">
+    const linhas = notas.map(n => {
+      const statusPill = n.rejeitada
+        ? `<span class="pill red" style="margin-top:.2rem;font-size:10px" title="${UI.escapeHtml(n.rejeitadaMotivo||'Reprovada')}">Rejeitada</span>`
+        : n.validada
+          ? '<span class="pill green" style="margin-top:.2rem;font-size:10px">Validada</span>'
+          : '';
+      return `
+      <div class="doc-row ${n.rejeitada?'rejeitada':''}">
         <div class="doc-tipo">NF</div>
         <div class="doc-file">
           <div class="doc-file-item">
             <span class="doc-name" title="${UI.escapeHtml(n.oficialNome || n.numero)}">📄 ${UI.escapeHtml(n.oficialNome || n.numero)}</span>
             ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
           </div>
-          ${n.validada ? '<span class="pill green" style="margin-top:.2rem;font-size:10px">Validada</span>' : ''}
+          ${statusPill}
         </div>
         <div class="doc-actions">
           ${(n.oficialBytes || n.oficialNome) ? `<button class="btn small" data-nf-view="${n.id}" data-nf-name="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Visualizar">👁</button>` : ''}
           ${podeValidar && !n.validada ? `<button class="btn small" data-nf-validar="${n.id}" title="Validar">✓</button>` : ''}
+          ${podeRejeitar && !n.rejeitada ? `<button class="btn small danger" data-nf-rejeitar="${n.id}" title="Rejeitar">✗</button>` : ''}
           ${podeRemover ? `<button class="btn small danger" data-nf-del="${n.id}" title="Excluir">✕</button>` : ''}
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
+
+    const hint = etapa === 'EMISSAO_NF'
+      ? 'Anexe NFs de entrada e saída como arquivos PDF. Múltiplos suportados.'
+      : etapa === 'ENVIO_NF_OFICIAL'
+        ? 'NFs rejeitadas pelo parceiro. Re-anexe os arquivos corretos.'
+        : 'Aprove (✓) ou rejeite (✗) cada NF. Rejeitadas voltam pro cliente re-anexar.';
 
     const adicionarHtml = podeAdicionar ? `
       <div style="margin-top:.4rem">
         <label class="btn primary small btn-anexar" style="cursor:pointer">
-          📎 Anexar NF(s)
+          📎 ${etapa === 'ENVIO_NF_OFICIAL' ? 'Re-anexar NF(s)' : 'Anexar NF(s)'}
           <input type="file" id="nf-upload" multiple accept=".pdf,.xml,image/*" style="display:none">
         </label>
-        <div class="muted small" style="margin-top:.2rem">Múltiplos arquivos suportados. O parceiro escritório valida na etapa seguinte.</div>
-      </div>` : '';
+        <div class="muted small" style="margin-top:.2rem">${hint}</div>
+      </div>` : (isCurrent ? `<div class="muted small" style="margin-top:.3rem">${hint}</div>` : '');
 
     return `<div class="doc-grid">${linhas || ''}</div>${adicionarHtml}`;
   }
@@ -590,6 +614,13 @@ window.VIEW_desoneracoes = (() => {
     // Validar NF
     document.querySelectorAll('[data-nf-validar]').forEach(b => b.onclick = async () => {
       try { await API.post(`/api/desoneracoes/notas/${b.dataset.nfValidar}/validar`); openDetail(id); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    });
+    // Rejeitar NF (parceiro escritório na etapa VALIDACAO_NF)
+    document.querySelectorAll('[data-nf-rejeitar]').forEach(b => b.onclick = async () => {
+      const motivo = prompt('Motivo da rejeição (opcional, mas ajuda o cliente):', '');
+      if (motivo === null) return;
+      try { await API.post(`/api/desoneracoes/notas/${b.dataset.nfRejeitar}/rejeitar`, { motivo: motivo || null }); openDetail(id); }
       catch (e) { UI.toast(e.message, 'err'); }
     });
     // Excluir NF
