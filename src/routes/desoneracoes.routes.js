@@ -45,6 +45,7 @@ router.post('/:id/cancel',       ctrl.cancel);
 router.post('/:id/notas',                    ctrl.addNota);
 // Novo: upload direto cria NF + anexa o arquivo (cliente não precisa preencher campos)
 router.post('/:id/notas/upload', upload.single('file'), ctrl.uploadNota);
+router.post('/:id/devolver-nfs',                                 ctrl.devolverNfs);
 router.post('/notas/:notaId/validar',        ctrl.validarNota);
 router.post('/notas/:notaId/rejeitar',       ctrl.rejeitarNota);
 router.post('/notas/:notaId/oficial', upload.single('file'), ctrl.anexarOficial);

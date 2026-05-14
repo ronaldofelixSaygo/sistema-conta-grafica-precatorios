@@ -481,13 +481,17 @@ window.VIEW_desoneracoes = (() => {
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
     const isCurrent = d.currentStep === etapa;
     const ativo = !!cur?.podeAtuar || isStaff;
-    const podeAdicionar = ativo && isCurrent && etapa === 'EMISSAO_NF';
-    const podeValidar   = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
-    const podeRejeitar  = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
-    const podeRemover   = ativo && etapa === 'EMISSAO_NF' && isCurrent;
-
     const notas = d.notas || [];
     const temRejeitada = notas.some(n => n.rejeitada);
+
+    // Cliente / staff pode anexar e excluir só durante a EMISSAO_NF ativa.
+    // Re-anexação após rejeição acontece DEPOIS do parceiro clicar
+    // "Devolver pro cliente" (volta a etapa 3 explicitamente).
+    const canEditNFsAgora = d.status === 'EM_ANDAMENTO' && etapa === 'EMISSAO_NF' && isCurrent && ativo;
+    const podeAdicionar = canEditNFsAgora;
+    const podeRemover   = canEditNFsAgora;
+    const podeValidar   = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
+    const podeRejeitar  = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
 
     if (!notas.length && !podeAdicionar) {
       return `<div class="doc-grid"><div class="doc-row disabled">
@@ -506,9 +510,10 @@ window.VIEW_desoneracoes = (() => {
         : n.validada
           ? '<span class="pill green" style="margin-top:.2rem;font-size:10px;display:inline-block">Validada</span>'
           : '';
+      const tipoLabel = n.tipo === 'SAIDA' ? 'NF-S' : 'NF-E';
       return `
       <div class="doc-row ${n.rejeitada?'rejeitada':''}">
-        <div class="doc-tipo">NF</div>
+        <div class="doc-tipo">${tipoLabel}</div>
         <div class="doc-file">
           <div class="doc-file-item">
             <span class="doc-name" title="${UI.escapeHtml(n.oficialNome || n.numero)}">📄 ${UI.escapeHtml(n.oficialNome || n.numero)}</span>
@@ -525,27 +530,42 @@ window.VIEW_desoneracoes = (() => {
       </div>`;
     }).join('');
 
-    // Aviso de retorno: se está na etapa 3 com NF rejeitada, sinaliza claro
+    // Aviso visível na etapa 3 quando o cliente voltou aqui por NFs rejeitadas
     const avisoRetorno = (etapa === 'EMISSAO_NF' && isCurrent && temRejeitada)
-      ? `<div class="aviso-rejeicao">⚠ <strong>NFs rejeitadas pelo parceiro</strong> — exclua as rejeitadas e re-anexe as corretas antes de avançar.</div>`
+      ? `<div class="aviso-rejeicao">⚠ <strong>NFs rejeitadas pelo parceiro</strong> — exclua as rejeitadas e anexe as corretas antes de avançar.</div>`
+      : '';
+    // Aviso pro parceiro na etapa 4: bloqueio de avanço quando há rejeitada
+    const avisoBloqueio = (etapa === 'VALIDACAO_NF' && isCurrent && temRejeitada)
+      ? `<div class="aviso-rejeicao">⚠ Há NFs rejeitadas — você precisa clicar em "Devolver pro cliente" pra esta etapa voltar pra ele substituir os arquivos.</div>`
       : '';
 
     const hint = etapa === 'EMISSAO_NF'
       ? (temRejeitada
-          ? 'Substitua as NFs rejeitadas. Você também pode anexar outras NFs.'
-          : 'Anexe NFs de entrada e saída como arquivos PDF. Múltiplos suportados.')
-      : 'Aprove (✓) ou rejeite (✗) cada NF. Rejeitadas voltam pro cliente re-anexar nesta mesma etapa.';
+          ? 'Substitua as NFs rejeitadas. Mínimo: 1 NF de Entrada e 1 NF de Saída.'
+          : 'Anexe pelo menos 1 NF de Entrada e 1 NF de Saída.')
+      : 'Aprove (✓) ou rejeite (✗) cada NF. Para avançar: nenhuma rejeitada + pelo menos 1 NF-E e 1 NF-S validadas.';
 
+    // 2 botões dedicados (Entrada / Saída) na etapa 3
     const adicionarHtml = podeAdicionar ? `
-      <div style="margin-top:.4rem">
+      <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap">
         <label class="btn primary small btn-anexar" style="cursor:pointer">
-          📎 Anexar NF(s)
-          <input type="file" id="nf-upload" multiple accept=".pdf,.xml,image/*" style="display:none">
+          📎 Anexar NF de Entrada
+          <input type="file" data-nf-upload-tipo="ENTRADA" multiple accept=".pdf,.xml,image/*" style="display:none">
         </label>
-        <div class="muted small" style="margin-top:.2rem">${hint}</div>
-      </div>` : (isCurrent ? `<div class="muted small" style="margin-top:.3rem">${hint}</div>` : '');
+        <label class="btn primary small btn-anexar" style="cursor:pointer">
+          📎 Anexar NF de Saída
+          <input type="file" data-nf-upload-tipo="SAIDA" multiple accept=".pdf,.xml,image/*" style="display:none">
+        </label>
+      </div>
+      <div class="muted small" style="margin-top:.3rem">${hint}</div>` : (isCurrent ? `<div class="muted small" style="margin-top:.3rem">${hint}</div>` : '');
 
-    return `${avisoRetorno}<div class="doc-grid">${linhas || ''}</div>${adicionarHtml}`;
+    // Botão "Devolver pro cliente" — só pro parceiro na etapa 4 quando há rejeitada
+    const devolverHtml = (etapa === 'VALIDACAO_NF' && isCurrent && temRejeitada && ativo)
+      ? `<div style="margin-top:.5rem">
+           <button class="btn danger small" id="nf-devolver">↩ Devolver pro cliente</button>
+         </div>` : '';
+
+    return `${avisoRetorno}${avisoBloqueio}<div class="doc-grid">${linhas || ''}</div>${adicionarHtml}${devolverHtml}`;
   }
 
   function renderHistorico(d) {
@@ -596,23 +616,34 @@ window.VIEW_desoneracoes = (() => {
         UI.toast('Movimentação criada — desoneração concluída'); UI.closeModal(); render();
       } catch (e) { UI.toast(e.message, 'err'); }
     });
-    // Upload de NFs (múltiplos arquivos) — sem prompt, só pega o arquivo
-    document.getElementById('nf-upload')?.addEventListener('change', async e => {
+    // Upload de NFs por tipo (Entrada / Saída). Cada input tem data-nf-upload-tipo.
+    document.querySelectorAll('[data-nf-upload-tipo]').forEach(inp => inp.addEventListener('change', async e => {
       const files = [...(e.target.files || [])];
       if (!files.length) return;
+      const tipo = e.target.dataset.nfUploadTipo || 'ENTRADA';
       let ok = 0, fail = 0;
       for (let i = 0; i < files.length; i++) {
-        UI.toast(`Enviando ${i+1}/${files.length}: ${files[i].name}`);
+        UI.toast(`Enviando NF-${tipo==='SAIDA'?'S':'E'} ${i+1}/${files.length}: ${files[i].name}`);
         const fd = new FormData();
         fd.append('file', files[i]);
+        fd.append('tipo', tipo);
         try {
           const r = await fetch(`/api/desoneracoes/${id}/notas/upload`, { method: 'POST', credentials: 'include', body: fd });
           if (!r.ok) throw new Error(await r.text() || 'Falha no upload');
           ok++;
         } catch (er) { fail++; UI.toast(`Falhou ${files[i].name}: ${er.message}`, 'err'); }
       }
-      UI.toast(fail === 0 ? `✓ ${ok} NF(s) anexada(s)` : `${ok} ok, ${fail} falha(s)`, fail === 0 ? 'ok' : 'err');
+      UI.toast(fail === 0 ? `✓ ${ok} NF(s) ${tipo} anexada(s)` : `${ok} ok, ${fail} falha(s)`, fail === 0 ? 'ok' : 'err');
       openDetail(id);
+    }));
+    // Botão "Devolver pro cliente" na etapa 4
+    document.getElementById('nf-devolver')?.addEventListener('click', async () => {
+      if (!confirm('Devolver o processo pro cliente substituir as NFs rejeitadas?')) return;
+      try {
+        await API.post(`/api/desoneracoes/${id}/devolver-nfs`);
+        UI.toast('Devolvido pro cliente');
+        openDetail(id); render();
+      } catch (e) { UI.toast(e.message, 'err'); }
     });
     // Validar NF
     document.querySelectorAll('[data-nf-validar]').forEach(b => b.onclick = async () => {

@@ -97,7 +97,10 @@ export async function removeNota(req, res, next) {
   try { res.json(await svc.removeNota(req.user, req.params.notaId)); } catch (e) { next(e); }
 }
 export async function uploadNota(req, res, next) {
-  try { res.status(201).json(await svc.uploadNota(req.user, req.params.id, req.file)); } catch (e) { next(e); }
+  try { res.status(201).json(await svc.uploadNota(req.user, req.params.id, req.file, req.body?.tipo)); } catch (e) { next(e); }
+}
+export async function devolverNfs(req, res, next) {
+  try { res.json(await svc.devolverNfsCliente(req.user, req.params.id)); } catch (e) { next(e); }
 }
 
 // === Documentos ===

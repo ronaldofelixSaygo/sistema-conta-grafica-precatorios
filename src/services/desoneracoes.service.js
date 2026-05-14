@@ -501,19 +501,41 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
       e.status = 400; throw e;
     }
   }
-  // NFs: na EMISSAO_NF precisa de pelo menos 1 NF anexada (entrada/saída
-  // ficam na mesma etapa, cliente sobe ambas como arquivos PDF).
+  // EMISSAO_NF: cliente precisa de pelo menos 1 entrada + 1 saída anexadas,
+  // e NENHUMA NF pode estar marcada como rejeitada (cliente deve excluir e
+  // substituir as rejeitadas antes de devolver pro parceiro).
   if (etapaAtual === 'EMISSAO_NF') {
-    if (cur.notas.length === 0) {
-      const e = new Error('Anexe ao menos 1 NF antes de avançar');
+    const aindaRejeitada = cur.notas.filter(n => n.rejeitada);
+    if (aindaRejeitada.length) {
+      const e = new Error(`${aindaRejeitada.length} NF(s) ainda marcadas como rejeitadas — exclua e anexe novas no lugar antes de avançar`);
+      e.status = 400; throw e;
+    }
+    const temEntrada = cur.notas.some(n => n.tipo === 'ENTRADA');
+    const temSaida   = cur.notas.some(n => n.tipo === 'SAIDA');
+    if (!temEntrada || !temSaida) {
+      const e = new Error('Anexe ao menos 1 NF de Entrada e 1 NF de Saída antes de avançar');
       e.status = 400; throw e;
     }
   }
-  // VALIDACAO_NF: todas devem ter sido decididas (validada OU rejeitada)
+  // VALIDACAO_NF: parceiro só avança quando:
+  //  1) Não há nenhuma NF rejeitada (se há, ele deve clicar em "Devolver pro cliente")
+  //  2) Todas as NFs foram validadas
+  //  3) Existe pelo menos 1 entrada validada E 1 saída validada
   if (etapaAtual === 'VALIDACAO_NF') {
-    const pendentes = cur.notas.filter(n => !n.validada && !n.rejeitada);
+    const temRejeitada = cur.notas.some(n => n.rejeitada);
+    if (temRejeitada) {
+      const e = new Error('Há NFs rejeitadas — clique em "Devolver pro cliente" antes de avançar');
+      e.status = 400; throw e;
+    }
+    const pendentes = cur.notas.filter(n => !n.validada);
     if (pendentes.length) {
-      const e = new Error(`${pendentes.length} NF(s) sem decisão — valide ou rejeite todas`);
+      const e = new Error(`${pendentes.length} NF(s) sem validação — valide ou rejeite todas`);
+      e.status = 400; throw e;
+    }
+    const entradaValidada = cur.notas.some(n => n.tipo === 'ENTRADA' && n.validada);
+    const saidaValidada   = cur.notas.some(n => n.tipo === 'SAIDA'   && n.validada);
+    if (!entradaValidada || !saidaValidada) {
+      const e = new Error('É preciso ter ao menos 1 NF de Entrada e 1 NF de Saída validadas antes de avançar');
       e.status = 400; throw e;
     }
   }
@@ -527,68 +549,36 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
     }
   }
 
-  // === Define próxima etapa (com lógica condicional pra fluxo de NF) ===
-  let proxima = nextStep(etapaAtual);
-  if (etapaAtual === 'VALIDACAO_NF') {
-    // Se há NFs rejeitadas → volta pra EMISSAO_NF pra cliente substituir.
-    // Se todas validadas → segue normal pra PROTOCOLO_ICMS.
-    const temRejeitada = cur.notas.some(n => n.rejeitada);
-    proxima = temRejeitada ? 'EMISSAO_NF' : 'PROTOCOLO_ICMS';
-  }
-  // Detecta retorno (etapa "próxima" vem antes da atual na ordem) — caso de
-  // rejeição na VALIDACAO_NF que volta o fluxo pra EMISSAO_NF.
-  const idxAtual = STEPS_ORDER.indexOf(etapaAtual);
-  const idxProx  = STEPS_ORDER.indexOf(proxima);
-  const isReturn = idxProx >= 0 && idxProx < idxAtual;
-
+  // === Define próxima etapa ===
+  // Avanço sempre é linear agora — a "volta" pra etapa 3 é feita pelo botão
+  // explícito "Devolver pro cliente" (endpoint /devolver-nfs).
+  const proxima = nextStep(etapaAtual);
   await prisma.$transaction(async (tx) => {
-    if (isReturn) {
-      // Marca etapa atual como "rejeitada/devolvida" — não completedAt pra não
-      // bagunçar SLA agregado, mas registra notes do parceiro.
-      await tx.desoneracaoStep.update({
-        where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: etapaAtual } },
-        data: {
-          completedAt: null, startedAt: null,
-          notes: notes || 'Devolvido — NFs rejeitadas',
-        },
+    await tx.desoneracaoStep.update({
+      where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: etapaAtual } },
+      data: {
+        completedAt: new Date(),
+        completedById: user.id,
+        parceiroId: parceiroId || undefined,
+        notes: notes || undefined,
+      },
+    });
+    if (proxima === 'CONCLUIDO') {
+      await tx.desoneracao.update({
+        where: { id },
+        data: { status: 'AGUARDANDO_APROVACAO', currentStep: 'CONCLUIDO' },
       });
-      // Reabre a etapa anterior (limpa completedAt + novo startedAt)
+    } else {
+      await tx.desoneracao.update({ where: { id }, data: { currentStep: proxima } });
       await tx.desoneracaoStep.update({
         where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: proxima } },
-        data: { completedAt: null, completedById: null, startedAt: new Date() },
+        data: { startedAt: new Date() },
       });
-      await tx.desoneracao.update({ where: { id }, data: { currentStep: proxima } });
-    } else {
-      // Avanço normal
-      await tx.desoneracaoStep.update({
-        where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: etapaAtual } },
-        data: {
-          completedAt: new Date(),
-          completedById: user.id,
-          parceiroId: parceiroId || undefined,
-          notes: notes || undefined,
-        },
-      });
-      if (proxima === 'CONCLUIDO') {
-        await tx.desoneracao.update({
-          where: { id },
-          data: { status: 'AGUARDANDO_APROVACAO', currentStep: 'CONCLUIDO' },
-        });
-      } else {
-        await tx.desoneracao.update({ where: { id }, data: { currentStep: proxima } });
-        await tx.desoneracaoStep.update({
-          where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: proxima } },
-          data: { startedAt: new Date() },
-        });
-      }
     }
     await tx.desoneracaoEvento.create({
       data: {
-        desoneracaoId: id, etapa: etapaAtual,
-        acao: isReturn ? 'ETAPA_DEVOLVIDA' : 'ETAPA_AVANCADA',
-        descricao: isReturn
-          ? `Etapa ${etapaAtual} devolveu pra ${proxima} (NFs rejeitadas) por ${user.name}`
-          : `Etapa ${etapaAtual} concluída por ${user.name}`,
+        desoneracaoId: id, etapa: etapaAtual, acao: 'ETAPA_AVANCADA',
+        descricao: `Etapa ${etapaAtual} concluída por ${user.name}`,
         byUserId: user.id,
       },
     });
@@ -806,17 +796,24 @@ export async function removeNota(user, notaId) {
 // Upload simplificado: cliente sobe um arquivo e o sistema cria a NF com
 // número = nome do arquivo (sem mais prompts pra digitar tipo/data/valor).
 // O parceiro valida visualizando o arquivo na etapa de Validação.
-export async function uploadNota(user, id, file) {
+export async function uploadNota(user, id, file, tipo = 'ENTRADA') {
   if (!file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
-  const cur = await prisma.desoneracao.findUnique({ where: { id } });
+  const tipoNorm = (tipo || 'ENTRADA').toString().toUpperCase();
+  if (!['ENTRADA','SAIDA'].includes(tipoNorm)) {
+    const e = new Error("Tipo da NF deve ser ENTRADA ou SAIDA"); e.status = 400; throw e;
+  }
+  const cur = await prisma.desoneracao.findUnique({
+    where: { id }, include: { notas: { select: { rejeitada: true } } },
+  });
   if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
   if (cur.currentStep !== 'EMISSAO_NF') {
-    const e = new Error('NFs só podem ser anexadas na etapa "Emissão NFs"'); e.status = 400; throw e;
+    const e = new Error('NFs só podem ser anexadas na etapa "Emissão NFs". Se houver NFs rejeitadas, o parceiro precisa devolver pro cliente primeiro.');
+    e.status = 400; throw e;
   }
   const n = await prisma.desoneracaoNota.create({
     data: {
       desoneracaoId: id,
-      tipo: 'ENTRADA',
+      tipo: tipoNorm,
       numero: file.originalname,
       valor: 0,
       oficialNome: file.originalname,
@@ -825,9 +822,46 @@ export async function uploadNota(user, id, file) {
     },
   });
   await prisma.desoneracaoEvento.create({
-    data: { desoneracaoId: id, acao: 'NF_ANEXADA', descricao: `NF anexada: ${file.originalname}`, byUserId: user.id },
+    data: { desoneracaoId: id, acao: 'NF_ANEXADA', descricao: `NF ${tipoNorm} anexada: ${file.originalname}`, byUserId: user.id },
   });
-  return { id: n.id, numero: n.numero, oficialNome: n.oficialNome };
+  return { id: n.id, numero: n.numero, oficialNome: n.oficialNome, tipo: n.tipo };
+}
+
+// Devolve explicitamente o processo pro cliente (etapa 4 → etapa 3).
+// Usado quando parceiro rejeitou NFs e quer devolver pro cliente refazer.
+export async function devolverNfsCliente(user, id) {
+  const cur = await prisma.desoneracao.findUnique({
+    where: { id }, include: { notas: true },
+  });
+  if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
+  if (cur.currentStep !== 'VALIDACAO_NF') {
+    const e = new Error('Só dá pra devolver durante a etapa "Validação NFs"'); e.status = 400; throw e;
+  }
+  const temRejeitada = cur.notas.some(n => n.rejeitada);
+  if (!temRejeitada) {
+    const e = new Error('Não há NFs rejeitadas pra devolver'); e.status = 400; throw e;
+  }
+  await prisma.$transaction(async (tx) => {
+    // Reseta etapa 4 (não foi concluída)
+    await tx.desoneracaoStep.update({
+      where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: 'VALIDACAO_NF' } },
+      data: { completedAt: null, startedAt: null, notes: 'Devolvido — NFs rejeitadas' },
+    });
+    // Reabre a etapa 3 (limpa completedAt + novo startedAt)
+    await tx.desoneracaoStep.update({
+      where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: 'EMISSAO_NF' } },
+      data: { completedAt: null, completedById: null, startedAt: new Date() },
+    });
+    await tx.desoneracao.update({ where: { id }, data: { currentStep: 'EMISSAO_NF' } });
+    await tx.desoneracaoEvento.create({
+      data: {
+        desoneracaoId: id, etapa: 'VALIDACAO_NF', acao: 'ETAPA_DEVOLVIDA',
+        descricao: `Devolvido pro cliente — NFs rejeitadas (por ${user.name})`,
+        byUserId: user.id,
+      },
+    });
+  });
+  return { ok: true };
 }
 
 // === Documentos ===
