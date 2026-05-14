@@ -196,7 +196,7 @@ window.VIEW_desoneracoes = (() => {
     const isOwnerClient = AUTH.role() === 'CLIENT' && AUTH.user()?.clienteId === d.clienteId;
     const stepperHtml = renderStepperHorizontal(d);
     const painelHtml = renderPainel(d, isStaff, isOwnerClient);
-    const notasHtml = renderNotas(d, isStaff);
+    // NFs agora ficam integradas dentro de renderDocs (etapas 3-5).
     const docsHtml = renderDocs(d, isStaff);
     const histHtml = renderHistorico(d);
 
@@ -210,7 +210,6 @@ window.VIEW_desoneracoes = (() => {
       <div style="display:flex;flex-direction:column;gap:1rem">
         ${painelHtml}
         ${docsHtml}
-        ${notasHtml}
         ${histHtml}
       </div>`, { large: true });
     bindDetailActions(d, isStaff);
@@ -437,12 +436,22 @@ window.VIEW_desoneracoes = (() => {
       </div>`;
     }
 
-    // Renderiza separado por etapa com cabeçalho leve
-    const sections = ['DOCS_DESPACHANTE','EMISSAO_DMI','PROTOCOLO_ICMS'].map(etapa => {
-      const linhas = rowsByEtapa[etapa].map(t => renderLinha(etapa, t)).join('');
+    // Renderiza TODAS as etapas operacionais em ordem, com headers leves.
+    // As 3 etapas de NF (EMISSAO_NF, VALIDACAO_NF, ENVIO_NF_OFICIAL) ficam
+    // entre EMISSAO_DMI e PROTOCOLO_ICMS, usando o renderEtapaNotas pra mostrar
+    // a lista de NFs ou "aguardando etapa anterior" se ainda não chegaram.
+    const todasEtapas = [
+      'DOCS_DESPACHANTE','EMISSAO_DMI',
+      'EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL',
+      'PROTOCOLO_ICMS',
+    ];
+    const sections = todasEtapas.map(etapa => {
+      const conteudo = ['EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL'].includes(etapa)
+        ? renderEtapaNotas(d, etapa, isStaff, podeAtuarAgora)
+        : `<div class="doc-grid">${rowsByEtapa[etapa].map(t => renderLinha(etapa, t)).join('')}</div>`;
       return `<div style="margin-bottom:.6rem">
         <div class="muted small" style="text-transform:uppercase;font-weight:600;margin-bottom:.3rem">${STEP_LABELS[etapa]}</div>
-        <div class="doc-grid">${linhas}</div>
+        ${conteudo}
       </div>`;
     }).join('');
 
@@ -450,6 +459,64 @@ window.VIEW_desoneracoes = (() => {
       <h3>Documentos</h3>
       ${sections}
     </div>`;
+  }
+
+  // Renderiza uma etapa de NF como linha-padrão (mesmo visual dos docs).
+  // EMISSAO_NF: cliente sobe NFs (botão "+ Anexar NF" no fim)
+  // VALIDACAO_NF: parceiro escritório valida (botão ✓ em cada NF)
+  // ENVIO_NF_OFICIAL: ...
+  function renderEtapaNotas(d, etapa, isStaff, podeAtuarAgora) {
+    const reached = isStepReached(d, etapa);
+    if (!reached) {
+      return `<div class="doc-grid"><div class="doc-row disabled">
+        <div class="doc-tipo">NF</div>
+        <div class="doc-file"><span class="muted small">⏳ Aguardando etapa anterior</span></div>
+        <div class="doc-actions"></div>
+      </div></div>`;
+    }
+    const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
+    const isCurrent = d.currentStep === etapa;
+    const ativo = !!cur?.podeAtuar || isStaff;
+    const podeAdicionar = ativo && etapa === 'EMISSAO_NF' && isCurrent;
+    const podeValidar   = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
+    const podeRemover   = ativo && etapa === 'EMISSAO_NF' && isCurrent;
+
+    const notas = d.notas || [];
+    if (!notas.length && !podeAdicionar) {
+      return `<div class="doc-grid"><div class="doc-row disabled">
+        <div class="doc-tipo">NF</div>
+        <div class="doc-file"><span class="muted small">${etapa === 'EMISSAO_NF' ? 'Aguardando anexo' : 'Sem NFs anexadas'}</span></div>
+        <div class="doc-actions"></div>
+      </div></div>`;
+    }
+
+    const linhas = notas.map(n => `
+      <div class="doc-row">
+        <div class="doc-tipo">NF</div>
+        <div class="doc-file">
+          <div class="doc-file-item">
+            <span class="doc-name" title="${UI.escapeHtml(n.oficialNome || n.numero)}">📄 ${UI.escapeHtml(n.oficialNome || n.numero)}</span>
+            ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
+          </div>
+          ${n.validada ? '<span class="pill green" style="margin-top:.2rem;font-size:10px">Validada</span>' : ''}
+        </div>
+        <div class="doc-actions">
+          ${(n.oficialBytes || n.oficialNome) ? `<button class="btn small" data-nf-view="${n.id}" data-nf-name="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Visualizar">👁</button>` : ''}
+          ${podeValidar && !n.validada ? `<button class="btn small" data-nf-validar="${n.id}" title="Validar">✓</button>` : ''}
+          ${podeRemover ? `<button class="btn small danger" data-nf-del="${n.id}" title="Excluir">✕</button>` : ''}
+        </div>
+      </div>`).join('');
+
+    const adicionarHtml = podeAdicionar ? `
+      <div style="margin-top:.4rem">
+        <label class="btn primary small btn-anexar" style="cursor:pointer">
+          📎 Anexar NF(s)
+          <input type="file" id="nf-upload" multiple accept=".pdf,.xml,image/*" style="display:none">
+        </label>
+        <div class="muted small" style="margin-top:.2rem">Múltiplos arquivos suportados. O parceiro escritório valida na etapa seguinte.</div>
+      </div>` : '';
+
+    return `<div class="doc-grid">${linhas || ''}</div>${adicionarHtml}`;
   }
 
   function renderHistorico(d) {
