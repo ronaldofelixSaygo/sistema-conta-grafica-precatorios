@@ -641,8 +641,10 @@ export async function cancelDesoneracao(user, id, reason) {
 }
 
 // Tabela de qual etapa habilita qual ação. Backend valida + frontend usa pra UX.
+// CTE_AWB_BL é o tipo unificado novo; BL/CCT são legados mas continuam aceitos
+// pra retrocompat com documentos já anexados antes da unificação.
 const ETAPA_DOC_TIPOS = {
-  DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL','CCT','OUTRO'],
+  DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','CTE_AWB_BL','BL','CCT','OUTRO'],
   EMISSAO_DMI:      ['DMI','OUTRO'],
   EMISSAO_NF:       ['OUTRO'],
   VALIDACAO_NF:     ['OUTRO'],
@@ -651,6 +653,13 @@ const ETAPA_DOC_TIPOS = {
 };
 export function getTiposDocPermitidos(etapa) {
   return ETAPA_DOC_TIPOS[etapa] || ['OUTRO'];
+}
+// Inverso: dado um tipo de documento, em qual etapa ele pertence?
+function etapaDoTipo(tipo) {
+  for (const [etapa, tipos] of Object.entries(ETAPA_DOC_TIPOS)) {
+    if (tipos.includes(tipo) && tipo !== 'OUTRO') return etapa;
+  }
+  return null;
 }
 
 // === Notas Fiscais ===
@@ -797,8 +806,28 @@ export async function getDocumento(docId) {
 }
 
 export async function removeDocumento(user, docId) {
-  const d = await prisma.desoneracaoDocumento.findUnique({ where: { id: docId } });
+  const d = await prisma.desoneracaoDocumento.findUnique({
+    where: { id: docId }, include: { desoneracao: { include: { steps: { include: { parceiro: true } } } } },
+  });
   if (!d) { const e = new Error('Não encontrado'); e.status = 404; throw e; }
+  const des = d.desoneracao;
+  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
+  if (!isStaff) {
+    if (des.status !== 'EM_ANDAMENTO') {
+      const e = new Error('Processo não está em andamento'); e.status = 400; throw e;
+    }
+    // Documento não tem campo "etapa" no schema — inferimos pelo tipo via
+    // ETAPA_DOC_TIPOS. Só permite excluir se o tipo pertence à etapa atual.
+    const etapaDoDoc = etapaDoTipo(d.tipo);
+    if (etapaDoDoc && etapaDoDoc !== des.currentStep) {
+      const e = new Error('Só dá pra excluir documento da etapa atual'); e.status = 400; throw e;
+    }
+    const curStep = des.steps.find(s => s.etapa === des.currentStep);
+    const podeAtuar = await canActOnStep(user, des, curStep);
+    if (!podeAtuar) {
+      const e = new Error('Sem permissão pra excluir documento desta etapa'); e.status = 403; throw e;
+    }
+  }
   await prisma.desoneracaoDocumento.delete({ where: { id: docId } });
   await prisma.desoneracaoEvento.create({
     data: { desoneracaoId: d.desoneracaoId, acao: 'DOC_REMOVIDO', descricao: `${d.tipo}: ${d.nome}`, byUserId: user.id },

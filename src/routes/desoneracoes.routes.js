@@ -50,9 +50,10 @@ router.post('/notas/:notaId/oficial', upload.single('file'), ctrl.anexarOficial)
 router.get('/notas/:notaId/oficial',         ctrl.downloadOficial);
 router.delete('/notas/:notaId',              ctrl.removeNota); // cliente pode excluir na sua etapa (validado no service)
 
-// Documentos
+// Documentos — exclusão é validada no service (qualquer um que pode atuar
+// na etapa atual pode excluir, enquanto não foi avançada).
 router.post('/:id/documentos', upload.single('file'), ctrl.addDocumento);
 router.get('/documentos/:docId',            ctrl.downloadDoc);
-router.delete('/documentos/:docId',         requireStaffOrPartnerEscritorio, ctrl.removeDoc);
+router.delete('/documentos/:docId',         ctrl.removeDoc);
 
 export default router;

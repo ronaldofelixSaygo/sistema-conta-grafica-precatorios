@@ -400,7 +400,9 @@ window.VIEW_desoneracoes = (() => {
       const arquivos = docs.filter(x => x.tipo === tipo);
       const tem = arquivos.length > 0;
       const podeAnexarNessaEtapa = isCurrent && podeAtuarAgora;
-      const podeExcluir = isStaff && isCurrent && d.status === 'EM_ANDAMENTO';
+      // Excluir: quem pode atuar na etapa atual também pode excluir o que ele
+      // (ou outro responsável) anexou — enquanto a etapa não foi avançada.
+      const podeExcluir = isCurrent && podeAtuarAgora && d.status === 'EM_ANDAMENTO';
 
       const disabled = !reached && !tem;
       const statusText = !reached ? (isCurrent ? 'Aguardando anexo' : '⏳ Aguardando etapa anterior')
