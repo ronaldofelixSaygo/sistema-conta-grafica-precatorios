@@ -23,16 +23,17 @@ router.get('/step-configs',                 ctrl.listStepConfigs);
 router.post('/step-configs',                requireStaffOrPartnerEscritorio, ctrl.upsertStepConfig);
 
 // CRUD principal — scope é aplicado no service (cada user vê só o que pode).
-// Criação só pra staff/escritório (cliente não inicia processo por enquanto).
+// Regra de criação/cancelamento (CLIENT ou STAFF) é validada no service —
+// o middleware aqui é só requireAuth (já aplicado no topo via router.use).
 router.get('/',                  ctrl.list);
-router.post('/',                 requireStaffOrPartnerEscritorio, ctrl.create);
+router.post('/',                 ctrl.create);
 router.get('/:id',               ctrl.get);
 router.put('/:id',               requireStaffOrPartnerEscritorio, ctrl.update);
 router.post('/:id/step/:etapa',  requireStaffOrPartnerEscritorio, ctrl.setStepParceiro);
 // Advance e demais ações: autorização granular no service (canActOnStep)
 router.post('/:id/advance',      ctrl.advance);
 router.post('/:id/approve',      requireStaffOrPartnerEscritorio, ctrl.approve);
-router.post('/:id/cancel',       requireStaffOrPartnerEscritorio, ctrl.cancel);
+router.post('/:id/cancel',       ctrl.cancel);
 
 // Notas — cliente também precisa adicionar/anexar na sua etapa
 router.post('/:id/notas',                    ctrl.addNota);

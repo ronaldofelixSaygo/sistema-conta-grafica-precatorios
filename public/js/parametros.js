@@ -1005,19 +1005,19 @@ window.VIEW_parametros = (() => {
           Para módulos com campos sensíveis (Clientes, Movimentações), use o botão
           <strong>"Campos sensíveis"</strong> ao lado do nome do módulo.
         </p>
-        <div style="overflow-x:auto">
-          <table class="table">
+        <div class="perms-table-wrap">
+          <table class="table perms-table">
             <thead>
               <tr>
-                <th rowspan="2" style="vertical-align:bottom">Módulo</th>
-                ${profiles.map(p => `<th colspan="4" style="text-align:center;border-left:1px solid var(--bd2);min-width:180px">${renderProfileLabel(p)}</th>`).join('')}
+                <th rowspan="2" class="perms-corner">Módulo</th>
+                ${profiles.map(p => `<th colspan="4" class="perms-th-group" style="border-left:1px solid var(--bd2)">${renderProfileLabel(p)}</th>`).join('')}
               </tr>
               <tr>
                 ${profiles.map(() => `
-                  <th style="font-size:9px;border-left:1px solid var(--bd2)">VER</th>
-                  <th style="font-size:9px">CRIAR</th>
-                  <th style="font-size:9px">EDIT</th>
-                  <th style="font-size:9px">EXCL</th>
+                  <th class="perms-th-action perms-th-row2" style="border-left:1px solid var(--bd2)">VER</th>
+                  <th class="perms-th-action perms-th-row2">CRIAR</th>
+                  <th class="perms-th-action perms-th-row2">EDIT</th>
+                  <th class="perms-th-action perms-th-row2">EXCL</th>
                 `).join('')}
               </tr>
             </thead>
@@ -1037,7 +1037,7 @@ window.VIEW_parametros = (() => {
                   ? `<button class="btn small ghost" data-sens-mod="${mod}" style="font-size:10px;margin-left:.4rem">Campos sensíveis</button>`
                   : '';
                 return `<tr>
-                  <td><strong>${moduleLabels[mod]||mod}</strong>${sensitiveBtn}</td>
+                  <td class="perms-row-label"><strong>${moduleLabels[mod]||mod}</strong>${sensitiveBtn}</td>
                   ${cells}
                 </tr>`;
               }).join('')}

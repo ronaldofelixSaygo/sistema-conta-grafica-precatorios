@@ -152,16 +152,19 @@ window['VIEW_credit-requests'] = (() => {
     const n = parseFloat(String(v).replace(',', '.'));
     return Number.isFinite(n) ? n : 0;
   }
-  // Sanitiza o input enquanto o usuário digita: mantém só dígitos + 1 separador + até 2 decimais
+  // Sanitiza o input enquanto o usuário digita: mantém só dígitos + 1 separador
+  // + até N decimais (default 2). Use data-decimals="4" pro input aceitar mais
+  // (ex.: Taxa câmbio em R$/USD precisa de 4 casas).
   function sanitizeDecimalInput(el) {
     const start = el.selectionStart;
+    const maxDec = Number(el.dataset.decimals) || 2;
     let v = el.value;
     // Mantém só dígitos, ponto e vírgula
     v = v.replace(/[^\d.,]/g, '');
     // Normaliza vírgula → ponto, mas só permite 1
     const partes = v.split(/[.,]/);
     if (partes.length > 2) v = partes[0] + '.' + partes.slice(1).join('');
-    else if (partes.length === 2) v = partes[0] + '.' + partes[1].slice(0, 2);
+    else if (partes.length === 2) v = partes[0] + '.' + partes[1].slice(0, maxDec);
     if (el.value !== v) {
       el.value = v;
       try { el.setSelectionRange(start, start); } catch {}
@@ -188,9 +191,9 @@ window['VIEW_credit-requests'] = (() => {
           <div><label>Importador (CNPJ)</label><input name="importadorCnpj" value="${UI.escapeHtml(cabecalho.importadorCnpj||'')}"></div>
           <div><label>Exportador (Nome)</label><input name="exportadorNome" value="${UI.escapeHtml(cabecalho.exportadorNome||'')}"></div>
           <div><label>Exportador (País)</label><input name="exportadorPais" value="${UI.escapeHtml(cabecalho.exportadorPais||'')}"></div>
-          <div><label>UF</label><input name="uf" value="${UI.escapeHtml(cabecalho.uf||'AL')}" maxlength="2"></div>
-          <div><label>Taxa câmbio (R$/USD) *</label><input type="text" inputmode="decimal" class="num-decimal" name="taxa_cambio" value="${cabecalho.taxa_cambio || ''}" required></div>
-          <div><label>ICMS estado (%)</label><input type="text" inputmode="decimal" class="num-decimal" name="icms_aliq_estado" value="${cabecalho.icms_aliq_estado ?? 18}"></div>
+          <div><label>UF *</label><input name="uf" value="${UI.escapeHtml(cabecalho.uf||'AL')}" maxlength="2" required></div>
+          <div><label>Taxa câmbio (R$/USD) *</label><input type="text" inputmode="decimal" class="num-decimal" data-decimals="4" name="taxa_cambio" value="${cabecalho.taxa_cambio || ''}" required></div>
+          <div><label>ICMS estado (%) *</label><input type="text" inputmode="decimal" class="num-decimal" name="icms_aliq_estado" value="${cabecalho.icms_aliq_estado ?? 18}" required></div>
         </div>
 
         <div style="border-top:1px solid var(--bd);padding-top:.6rem;margin-top:.8rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
@@ -681,8 +684,14 @@ window['VIEW_credit-requests'] = (() => {
         ${r.inputPdfName ? `<div class="muted small" style="margin-top:.4rem">📎 PDF original: <a href="/api/credit-requests/${r.id}/pdf" target="_blank">${UI.escapeHtml(r.inputPdfName)}</a></div>` : ''}
       </div>
       ${r.message ? `<div class="panel"><h3>Mensagem do solicitante</h3><p>${UI.escapeHtml(r.message)}</p></div>` : ''}
-      ${r.resolutionNote ? `<div class="panel"><h3>Resposta do interveniente</h3><p>${UI.escapeHtml(r.resolutionNote)}</p>
-        ${r.resolutionAttachmentName ? `<div class="muted small" style="margin-top:.4rem">📎 Evidência: <a href="/api/credit-requests/${r.id}/evidence" target="_blank">${UI.escapeHtml(r.resolutionAttachmentName)}</a></div>` : ''}
+      ${(r.resolutionNote || r.resolutionAttachmentName) ? `<div class="panel"><h3>Resposta do interveniente</h3>
+        ${r.resolutionNote ? `<p>${UI.escapeHtml(r.resolutionNote)}</p>` : ''}
+        ${r.resolutionAttachmentName ? `<div style="margin-top:.6rem;padding:.6rem;background:var(--s2);border-radius:6px;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <span>📎 <strong>${UI.escapeHtml(r.resolutionAttachmentName)}</strong></span>
+          <span style="flex:1"></span>
+          <button class="btn small" data-act="view-evidence" data-name="${UI.escapeHtml(r.resolutionAttachmentName)}">👁 Visualizar</button>
+          <a class="btn small primary" href="/api/credit-requests/${r.id}/evidence" download="${UI.escapeHtml(r.resolutionAttachmentName)}">⬇ Baixar</a>
+        </div>` : ''}
       </div>` : ''}
       <div id="cr-actions"></div>
     `);
@@ -696,13 +705,20 @@ window['VIEW_credit-requests'] = (() => {
     actDiv.innerHTML = html ? `<div class="form-actions">${html}</div>` : '';
 
     document.getElementById('modal-body').onclick = async e => {
-      const act = e.target.getAttribute('data-act');
+      const btn = e.target.closest('[data-act]');
+      const act = btn?.getAttribute('data-act');
       if (!act) return;
       try {
         if (act === 'send')    { await API.post(`/api/credit-requests/${r.id}/send`); UI.toast('Enviada'); UI.closeModal(); render(); }
         if (act === 'cancel')  { await API.post(`/api/credit-requests/${r.id}/cancel`); UI.toast('Cancelada'); UI.closeModal(); render(); }
         if (act === 'start')   { await API.post(`/api/credit-requests/${r.id}/start`); UI.toast('Em andamento'); UI.closeModal(); render(); }
         if (act === 'resolve') { openResolveForm(r); }
+        if (act === 'view-evidence') {
+          VIEWER.open({
+            url: `/api/credit-requests/${r.id}/evidence`,
+            filename: btn.dataset.name || r.resolutionAttachmentName || 'evidencia',
+          });
+        }
       } catch (er) { UI.toast(er.message, 'err'); }
     };
   }
