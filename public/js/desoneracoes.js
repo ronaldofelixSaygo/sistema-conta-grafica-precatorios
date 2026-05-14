@@ -3,22 +3,22 @@ window.VIEW_desoneracoes = (() => {
   let parceirosCache = [];
   let clientesCache = [];
 
+  // ENVIO_NF_OFICIAL foi removida do fluxo. A re-anexação de NFs rejeitadas
+  // acontece dentro da EMISSAO_NF (volta pra etapa 3 quando há rejeitada).
   const STEP_LABELS = {
     DOCS_DESPACHANTE:  '1. Docs do Despachante',
     EMISSAO_DMI:       '2. Emissão DMI',
     EMISSAO_NF:        '3. Emissão NFs',
     VALIDACAO_NF:      '4. Validação NFs',
-    ENVIO_NF_OFICIAL:  '5. NFs Oficiais',
-    PROTOCOLO_ICMS:    '6. Protocolo ICMS',
+    PROTOCOLO_ICMS:    '5. Protocolo ICMS',
     CONCLUIDO:         '✓ Concluído',
   };
-  const STEP_ORDER = ['DOCS_DESPACHANTE','EMISSAO_DMI','EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL','PROTOCOLO_ICMS'];
+  const STEP_ORDER = ['DOCS_DESPACHANTE','EMISSAO_DMI','EMISSAO_NF','VALIDACAO_NF','PROTOCOLO_ICMS'];
   const ETAPA_DOC_TIPOS = {
     DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL','CCT','OUTRO'],
     EMISSAO_DMI:      ['DMI','OUTRO'],
     EMISSAO_NF:       ['OUTRO'],
     VALIDACAO_NF:     ['OUTRO'],
-    ENVIO_NF_OFICIAL: ['OUTRO'],
     PROTOCOLO_ICMS:   ['DESPACHO','OUTRO'],
   };
   function isStepReached(d, target) {
@@ -438,17 +438,17 @@ window.VIEW_desoneracoes = (() => {
       </div>`;
     }
 
-    // Renderiza TODAS as etapas operacionais em ordem, com headers leves.
-    // As 3 etapas de NF (EMISSAO_NF, VALIDACAO_NF, ENVIO_NF_OFICIAL) ficam
-    // entre EMISSAO_DMI e PROTOCOLO_ICMS, usando o renderEtapaNotas pra mostrar
-    // a lista de NFs ou "aguardando etapa anterior" se ainda não chegaram.
+    // 5 etapas operacionais. EMISSAO_NF (3) e VALIDACAO_NF (4) ficam entre
+    // EMISSAO_DMI e PROTOCOLO_ICMS. Re-anexo de NF rejeitada acontece dentro
+    // da própria EMISSAO_NF — o fluxo volta pra etapa 3 quando o parceiro
+    // rejeita alguma NF na etapa 4.
     const todasEtapas = [
       'DOCS_DESPACHANTE','EMISSAO_DMI',
-      'EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL',
+      'EMISSAO_NF','VALIDACAO_NF',
       'PROTOCOLO_ICMS',
     ];
     const sections = todasEtapas.map(etapa => {
-      const conteudo = ['EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL'].includes(etapa)
+      const conteudo = ['EMISSAO_NF','VALIDACAO_NF'].includes(etapa)
         ? renderEtapaNotas(d, etapa, isStaff, podeAtuarAgora)
         : `<div class="doc-grid">${rowsByEtapa[etapa].map(t => renderLinha(etapa, t)).join('')}</div>`;
       return `<div style="margin-bottom:.6rem">
@@ -464,10 +464,11 @@ window.VIEW_desoneracoes = (() => {
   }
 
   // Renderiza uma etapa de NF como linha-padrão (mesmo visual dos docs).
-  // EMISSAO_NF: cliente sobe NFs (entrada+saída) — upload múltiplo.
-  // VALIDACAO_NF: parceiro escritório valida (✓) ou rejeita (✗) cada NF.
-  // ENVIO_NF_OFICIAL: só é acionada quando há NFs rejeitadas — cliente
-  //                   re-anexa. Se todas validadas na etapa 4, é pulada.
+  // EMISSAO_NF (3): cliente sobe NFs. Se voltou aqui depois da etapa 4 com
+  //                 alguma NF rejeitada, mostra o motivo bem visível e
+  //                 permite excluir as rejeitadas + anexar novas.
+  // VALIDACAO_NF (4): parceiro escritório valida (✓) ou rejeita (✗) cada NF.
+  //                   Rejeitar exige motivo (prompt) que fica visível.
   function renderEtapaNotas(d, etapa, isStaff, podeAtuarAgora) {
     const reached = isStepReached(d, etapa);
     if (!reached) {
@@ -480,33 +481,30 @@ window.VIEW_desoneracoes = (() => {
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
     const isCurrent = d.currentStep === etapa;
     const ativo = !!cur?.podeAtuar || isStaff;
-    const podeAdicionar = ativo && isCurrent && (etapa === 'EMISSAO_NF' || etapa === 'ENVIO_NF_OFICIAL');
+    const podeAdicionar = ativo && isCurrent && etapa === 'EMISSAO_NF';
     const podeValidar   = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
     const podeRejeitar  = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
     const podeRemover   = ativo && etapa === 'EMISSAO_NF' && isCurrent;
 
-    let notas = d.notas || [];
-    // Na etapa 5 (re-anexo), só mostra as NFs rejeitadas — o cliente substitui essas
-    if (etapa === 'ENVIO_NF_OFICIAL') {
-      notas = notas.filter(n => n.rejeitada);
-    }
+    const notas = d.notas || [];
+    const temRejeitada = notas.some(n => n.rejeitada);
 
     if (!notas.length && !podeAdicionar) {
-      const msg = etapa === 'ENVIO_NF_OFICIAL'
-        ? 'Etapa não acionada — NFs aprovadas direto na validação'
-        : (etapa === 'EMISSAO_NF' ? 'Aguardando anexo' : 'Sem NFs anexadas');
       return `<div class="doc-grid"><div class="doc-row disabled">
         <div class="doc-tipo">NF</div>
-        <div class="doc-file"><span class="muted small">${msg}</span></div>
+        <div class="doc-file"><span class="muted small">${etapa === 'EMISSAO_NF' ? 'Aguardando anexo' : 'Sem NFs anexadas'}</span></div>
         <div class="doc-actions"></div>
       </div></div>`;
     }
 
     const linhas = notas.map(n => {
-      const statusPill = n.rejeitada
-        ? `<span class="pill red" style="margin-top:.2rem;font-size:10px" title="${UI.escapeHtml(n.rejeitadaMotivo||'Reprovada')}">Rejeitada</span>`
+      const statusBlock = n.rejeitada
+        ? `<div style="margin-top:.3rem">
+             <span class="pill red" style="font-size:10px">Rejeitada</span>
+             ${n.rejeitadaMotivo ? `<div class="nf-motivo">⚠ <strong>Motivo:</strong> ${UI.escapeHtml(n.rejeitadaMotivo)}</div>` : ''}
+           </div>`
         : n.validada
-          ? '<span class="pill green" style="margin-top:.2rem;font-size:10px">Validada</span>'
+          ? '<span class="pill green" style="margin-top:.2rem;font-size:10px;display:inline-block">Validada</span>'
           : '';
       return `
       <div class="doc-row ${n.rejeitada?'rejeitada':''}">
@@ -516,7 +514,7 @@ window.VIEW_desoneracoes = (() => {
             <span class="doc-name" title="${UI.escapeHtml(n.oficialNome || n.numero)}">📄 ${UI.escapeHtml(n.oficialNome || n.numero)}</span>
             ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
           </div>
-          ${statusPill}
+          ${statusBlock}
         </div>
         <div class="doc-actions">
           ${(n.oficialBytes || n.oficialNome) ? `<button class="btn small" data-nf-view="${n.id}" data-nf-name="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Visualizar">👁</button>` : ''}
@@ -527,22 +525,27 @@ window.VIEW_desoneracoes = (() => {
       </div>`;
     }).join('');
 
+    // Aviso de retorno: se está na etapa 3 com NF rejeitada, sinaliza claro
+    const avisoRetorno = (etapa === 'EMISSAO_NF' && isCurrent && temRejeitada)
+      ? `<div class="aviso-rejeicao">⚠ <strong>NFs rejeitadas pelo parceiro</strong> — exclua as rejeitadas e re-anexe as corretas antes de avançar.</div>`
+      : '';
+
     const hint = etapa === 'EMISSAO_NF'
-      ? 'Anexe NFs de entrada e saída como arquivos PDF. Múltiplos suportados.'
-      : etapa === 'ENVIO_NF_OFICIAL'
-        ? 'NFs rejeitadas pelo parceiro. Re-anexe os arquivos corretos.'
-        : 'Aprove (✓) ou rejeite (✗) cada NF. Rejeitadas voltam pro cliente re-anexar.';
+      ? (temRejeitada
+          ? 'Substitua as NFs rejeitadas. Você também pode anexar outras NFs.'
+          : 'Anexe NFs de entrada e saída como arquivos PDF. Múltiplos suportados.')
+      : 'Aprove (✓) ou rejeite (✗) cada NF. Rejeitadas voltam pro cliente re-anexar nesta mesma etapa.';
 
     const adicionarHtml = podeAdicionar ? `
       <div style="margin-top:.4rem">
         <label class="btn primary small btn-anexar" style="cursor:pointer">
-          📎 ${etapa === 'ENVIO_NF_OFICIAL' ? 'Re-anexar NF(s)' : 'Anexar NF(s)'}
+          📎 Anexar NF(s)
           <input type="file" id="nf-upload" multiple accept=".pdf,.xml,image/*" style="display:none">
         </label>
         <div class="muted small" style="margin-top:.2rem">${hint}</div>
       </div>` : (isCurrent ? `<div class="muted small" style="margin-top:.3rem">${hint}</div>` : '');
 
-    return `<div class="doc-grid">${linhas || ''}</div>${adicionarHtml}`;
+    return `${avisoRetorno}<div class="doc-grid">${linhas || ''}</div>${adicionarHtml}`;
   }
 
   function renderHistorico(d) {

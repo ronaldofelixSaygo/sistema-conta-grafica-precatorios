@@ -139,12 +139,14 @@ export async function upsertStepConfig({ etapa, responsavelTipo, kindCode, label
   });
 }
 
+// ENVIO_NF_OFICIAL foi removida do fluxo. Re-anexação de NF rejeitada
+// acontece dentro da própria EMISSAO_NF (parceiro rejeita → cliente refaz na
+// mesma etapa 3 → parceiro valida de novo na etapa 4 → vai pra etapa 5).
 const STEPS_ORDER = [
   'DOCS_DESPACHANTE',
   'EMISSAO_DMI',
   'EMISSAO_NF',
   'VALIDACAO_NF',
-  'ENVIO_NF_OFICIAL',
   'PROTOCOLO_ICMS',
   'CONCLUIDO',
 ];
@@ -515,12 +517,12 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
       e.status = 400; throw e;
     }
   }
-  // ENVIO_NF_OFICIAL: as NFs rejeitadas precisam ter sido re-anexadas
-  // (cliente sobe NF nova ou indica que substituiu)
-  if (etapaAtual === 'ENVIO_NF_OFICIAL') {
-    const rejeitadasSemNovoArquivo = cur.notas.filter(n => n.rejeitada && !n.oficialBytes);
-    if (rejeitadasSemNovoArquivo.length) {
-      const e = new Error('Há NFs rejeitadas sem novo arquivo anexado');
+  // EMISSAO_NF (retorno): se o cliente voltou pra etapa 3 por NFs rejeitadas,
+  // ele precisa ter EXCLUÍDO ou substituído as rejeitadas antes de avançar.
+  if (etapaAtual === 'EMISSAO_NF') {
+    const aindaRejeitada = cur.notas.filter(n => n.rejeitada);
+    if (aindaRejeitada.length) {
+      const e = new Error(`${aindaRejeitada.length} NF(s) ainda marcada(s) como rejeitada — exclua e anexe novas no lugar antes de avançar`);
       e.status = 400; throw e;
     }
   }
@@ -528,45 +530,65 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
   // === Define próxima etapa (com lógica condicional pra fluxo de NF) ===
   let proxima = nextStep(etapaAtual);
   if (etapaAtual === 'VALIDACAO_NF') {
-    // Se há NFs rejeitadas → cliente precisa re-anexar (etapa 5)
-    // Se todas validadas → pula direto pra PROTOCOLO_ICMS
+    // Se há NFs rejeitadas → volta pra EMISSAO_NF pra cliente substituir.
+    // Se todas validadas → segue normal pra PROTOCOLO_ICMS.
     const temRejeitada = cur.notas.some(n => n.rejeitada);
-    proxima = temRejeitada ? 'ENVIO_NF_OFICIAL' : 'PROTOCOLO_ICMS';
-  } else if (etapaAtual === 'ENVIO_NF_OFICIAL') {
-    // Depois do cliente re-anexar, volta pra validação
-    proxima = 'VALIDACAO_NF';
+    proxima = temRejeitada ? 'EMISSAO_NF' : 'PROTOCOLO_ICMS';
   }
+  // Detecta retorno (etapa "próxima" vem antes da atual na ordem) — caso de
+  // rejeição na VALIDACAO_NF que volta o fluxo pra EMISSAO_NF.
+  const idxAtual = STEPS_ORDER.indexOf(etapaAtual);
+  const idxProx  = STEPS_ORDER.indexOf(proxima);
+  const isReturn = idxProx >= 0 && idxProx < idxAtual;
+
   await prisma.$transaction(async (tx) => {
-    await tx.desoneracaoStep.update({
-      where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: etapaAtual } },
-      data: {
-        completedAt: new Date(),
-        completedById: user.id,
-        parceiroId: parceiroId || undefined,
-        notes: notes || undefined,
-      },
-    });
-    if (proxima === 'CONCLUIDO') {
-      // Última etapa real foi PROTOCOLO_ICMS — agora aguarda aprovação pra criar movimentação
-      await tx.desoneracao.update({
-        where: { id },
-        data: { status: 'AGUARDANDO_APROVACAO', currentStep: 'CONCLUIDO' },
+    if (isReturn) {
+      // Marca etapa atual como "rejeitada/devolvida" — não completedAt pra não
+      // bagunçar SLA agregado, mas registra notes do parceiro.
+      await tx.desoneracaoStep.update({
+        where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: etapaAtual } },
+        data: {
+          completedAt: null, startedAt: null,
+          notes: notes || 'Devolvido — NFs rejeitadas',
+        },
       });
-    } else {
-      await tx.desoneracao.update({
-        where: { id },
-        data: { currentStep: proxima },
-      });
-      // Inicia o relógio de SLA da próxima etapa
+      // Reabre a etapa anterior (limpa completedAt + novo startedAt)
       await tx.desoneracaoStep.update({
         where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: proxima } },
-        data: { startedAt: new Date() },
+        data: { completedAt: null, completedById: null, startedAt: new Date() },
       });
+      await tx.desoneracao.update({ where: { id }, data: { currentStep: proxima } });
+    } else {
+      // Avanço normal
+      await tx.desoneracaoStep.update({
+        where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: etapaAtual } },
+        data: {
+          completedAt: new Date(),
+          completedById: user.id,
+          parceiroId: parceiroId || undefined,
+          notes: notes || undefined,
+        },
+      });
+      if (proxima === 'CONCLUIDO') {
+        await tx.desoneracao.update({
+          where: { id },
+          data: { status: 'AGUARDANDO_APROVACAO', currentStep: 'CONCLUIDO' },
+        });
+      } else {
+        await tx.desoneracao.update({ where: { id }, data: { currentStep: proxima } });
+        await tx.desoneracaoStep.update({
+          where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: proxima } },
+          data: { startedAt: new Date() },
+        });
+      }
     }
     await tx.desoneracaoEvento.create({
       data: {
-        desoneracaoId: id, etapa: etapaAtual, acao: 'ETAPA_AVANCADA',
-        descricao: `Etapa ${etapaAtual} concluída por ${user.name}`,
+        desoneracaoId: id, etapa: etapaAtual,
+        acao: isReturn ? 'ETAPA_DEVOLVIDA' : 'ETAPA_AVANCADA',
+        descricao: isReturn
+          ? `Etapa ${etapaAtual} devolveu pra ${proxima} (NFs rejeitadas) por ${user.name}`
+          : `Etapa ${etapaAtual} concluída por ${user.name}`,
         byUserId: user.id,
       },
     });
