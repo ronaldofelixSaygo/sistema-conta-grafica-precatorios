@@ -836,11 +836,15 @@ model DesoneracaoNota {
   validadaAt     DateTime?
   validadaPorId  String?
   // Rejeição: marca NF que o parceiro reprovou na etapa VALIDACAO_NF.
-  // Quando há rejeitadas no avanço, o fluxo vai pra ENVIO_NF_OFICIAL pra
-  // o cliente re-anexar. Quando todas validadas, pula direto pra PROTOCOLO_ICMS.
+  // Cliente substitui (anexa nova) e exclui essa via soft delete.
   rejeitada      Boolean      @default(false)
   rejeitadaAt    DateTime?
   rejeitadaMotivo String?
+  // Soft delete: nota excluída pelo cliente após rejeição. Some das listagens
+  // mas fica no banco pra preservar trilha de auditoria + permitir mostrar no
+  // histórico do processo (motivo, tipo, arquivo original).
+  deletedAt      DateTime?
+  deletedById    String?
 
   // PDF oficial — anexado na etapa ENVIO_NF_OFICIAL
   oficialBytes   Bytes?

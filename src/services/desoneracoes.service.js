@@ -232,7 +232,7 @@ export async function listDesoneracoes(user, filters = {}) {
     include: {
       cliente: { select: { id: true, nome: true, escritorio: true } },
       steps: { include: { parceiro: { select: { id: true, nome: true } } } },
-      _count: { select: { notas: true, documentos: true } },
+      _count: { select: { notas: { where: { deletedAt: null } }, documentos: true } },
     },
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
   });
@@ -253,7 +253,7 @@ export async function getDesoneracao(id, user = null) {
         },
         orderBy: { etapa: 'asc' },
       },
-      notas: { orderBy: { createdAt: 'asc' } },
+      notas: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' } },
       documentos: {
         select: { id: true, tipo: true, nome: true, mime: true, createdAt: true, uploadedBy: { select: { name: true } } },
         orderBy: { createdAt: 'asc' },
@@ -468,7 +468,7 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
     where: { id },
     include: {
       steps: true,
-      notas: true,
+      notas: { where: { deletedAt: null } },
       documentos: { select: { tipo: true } },
     },
   });
@@ -716,7 +716,7 @@ export async function addNota(user, id, data) {
 
 export async function validarNota(user, notaId) {
   const cur = await prisma.desoneracaoNota.findUnique({ where: { id: notaId }, include: { desoneracao: true } });
-  if (!cur) { const e = new Error('NF não encontrada'); e.status = 404; throw e; }
+  if (!cur || cur.deletedAt) { const e = new Error('NF não encontrada'); e.status = 404; throw e; }
   if (cur.desoneracao.currentStep !== 'VALIDACAO_NF') {
     const e = new Error('Validação só pode ser feita na etapa "Validação NFs"');
     e.status = 400; throw e;
@@ -736,7 +736,7 @@ export async function validarNota(user, notaId) {
 // pra o cliente re-anexar as rejeitadas.
 export async function rejeitarNota(user, notaId, motivo) {
   const cur = await prisma.desoneracaoNota.findUnique({ where: { id: notaId }, include: { desoneracao: true } });
-  if (!cur) { const e = new Error('NF não encontrada'); e.status = 404; throw e; }
+  if (!cur || cur.deletedAt) { const e = new Error('NF não encontrada'); e.status = 404; throw e; }
   if (cur.desoneracao.currentStep !== 'VALIDACAO_NF') {
     const e = new Error('Rejeição só pode ser feita na etapa "Validação NFs"');
     e.status = 400; throw e;
@@ -771,7 +771,7 @@ export async function anexarOficialNota(user, notaId, { name, mime, bytes }) {
 
 export async function getOficialNota(notaId) {
   const n = await prisma.desoneracaoNota.findUnique({ where: { id: notaId } });
-  if (!n || !n.oficialBytes) { const e = new Error('NF oficial não encontrada'); e.status = 404; throw e; }
+  if (!n || !n.oficialBytes || n.deletedAt) { const e = new Error('NF oficial não encontrada'); e.status = 404; throw e; }
   return { name: n.oficialNome || 'nf.pdf', mime: n.oficialMime || 'application/pdf', bytes: n.oficialBytes };
 }
 
@@ -780,15 +780,27 @@ export async function removeNota(user, notaId) {
     where: { id: notaId }, include: { desoneracao: true },
   });
   if (!n) { const e = new Error('Não encontrada'); e.status = 404; throw e; }
-  // Só permite excluir enquanto a etapa "Emissão NFs" estiver ativa.
-  // Depois disso, congelado pra preservar trilha.
+  if (n.deletedAt) { const e = new Error('NF já excluída'); e.status = 400; throw e; }
   const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
   if (!isStaff && n.desoneracao.currentStep !== 'EMISSAO_NF') {
     const e = new Error('Só pode excluir NF enquanto a etapa "Emissão NFs" estiver em andamento'); e.status = 400; throw e;
   }
-  await prisma.desoneracaoNota.delete({ where: { id: notaId } });
+  // SOFT DELETE: preserva trilha de auditoria. A linha continua no banco,
+  // mas todas as listagens filtram por deletedAt: null.
+  await prisma.desoneracaoNota.update({
+    where: { id: notaId },
+    data: { deletedAt: new Date(), deletedById: user.id },
+  });
+  // Descrição detalhada pra ficar bom no Histórico
+  const tipoLabel = n.tipo === 'SAIDA' ? 'NF-S' : 'NF-E';
+  const arquivo = n.oficialNome || n.numero;
+  const motivo = n.rejeitada && n.rejeitadaMotivo ? ` (havia sido rejeitada — motivo: ${n.rejeitadaMotivo})` : '';
   await prisma.desoneracaoEvento.create({
-    data: { desoneracaoId: n.desoneracaoId, acao: 'NF_REMOVIDA', descricao: `NF ${n.numero} removida`, byUserId: user.id },
+    data: {
+      desoneracaoId: n.desoneracaoId, acao: 'NF_REMOVIDA',
+      descricao: `${tipoLabel} excluída: ${arquivo}${motivo}`,
+      byUserId: user.id,
+    },
   });
   return { ok: true };
 }
@@ -796,14 +808,20 @@ export async function removeNota(user, notaId) {
 // Upload simplificado: cliente sobe um arquivo e o sistema cria a NF com
 // número = nome do arquivo (sem mais prompts pra digitar tipo/data/valor).
 // O parceiro valida visualizando o arquivo na etapa de Validação.
-export async function uploadNota(user, id, file, tipo = 'ENTRADA') {
+export async function uploadNota(user, id, file, tipo) {
   if (!file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
-  const tipoNorm = (tipo || 'ENTRADA').toString().toUpperCase();
+  // Tipo OBRIGATÓRIO — sem fallback default pra evitar marcar NF de saída como
+  // entrada (e quebrar a validação de avanço "1 entrada + 1 saída").
+  if (!tipo) {
+    const e = new Error('Tipo da NF não foi enviado pelo frontend (entrada ou saída). Atualize a página (Ctrl+Shift+R) e tente de novo.');
+    e.status = 400; throw e;
+  }
+  const tipoNorm = String(tipo).toUpperCase();
   if (!['ENTRADA','SAIDA'].includes(tipoNorm)) {
     const e = new Error("Tipo da NF deve ser ENTRADA ou SAIDA"); e.status = 400; throw e;
   }
   const cur = await prisma.desoneracao.findUnique({
-    where: { id }, include: { notas: { select: { rejeitada: true } } },
+    where: { id }, include: { notas: { where: { deletedAt: null }, select: { rejeitada: true } } },
   });
   if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
   if (cur.currentStep !== 'EMISSAO_NF') {
@@ -831,7 +849,7 @@ export async function uploadNota(user, id, file, tipo = 'ENTRADA') {
 // Usado quando parceiro rejeitou NFs e quer devolver pro cliente refazer.
 export async function devolverNfsCliente(user, id) {
   const cur = await prisma.desoneracao.findUnique({
-    where: { id }, include: { notas: true },
+    where: { id }, include: { notas: { where: { deletedAt: null } } },
   });
   if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
   if (cur.currentStep !== 'VALIDACAO_NF') {

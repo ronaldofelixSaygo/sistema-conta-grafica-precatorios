@@ -569,15 +569,38 @@ window.VIEW_desoneracoes = (() => {
   }
 
   function renderHistorico(d) {
-    const eventos = (d.eventos || []).slice(0, 20);
+    const eventos = (d.eventos || []).slice(0, 50);
     if (!eventos.length) return '';
-    return `<div class="panel" style="margin-top:.6rem">
+    // Mapeia tipo de evento pra ícone + cor — facilita escanear o histórico
+    const ACAO_META = {
+      CRIADA:             { ico: '➕', cor: '#3b82f6', label: 'Criada' },
+      ETAPA_AVANCADA:     { ico: '→',  cor: '#3b82f6', label: 'Etapa avançada' },
+      ETAPA_DEVOLVIDA:    { ico: '↩',  cor: '#f59e0b', label: 'Etapa devolvida' },
+      NF_ANEXADA:         { ico: '📎', cor: '#22c55e', label: 'NF anexada' },
+      NF_VALIDADA:        { ico: '✓',  cor: '#22c55e', label: 'NF validada' },
+      NF_REJEITADA:       { ico: '✗',  cor: '#ef4444', label: 'NF rejeitada' },
+      NF_REMOVIDA:        { ico: '🗑', cor: '#94a3b8', label: 'NF excluída' },
+      NF_OFICIAL_ANEXADA: { ico: '📄', cor: '#22c55e', label: 'NF oficial anexada' },
+      DOC_ANEXADO:        { ico: '📎', cor: '#22c55e', label: 'Documento anexado' },
+      DOC_REMOVIDO:       { ico: '🗑', cor: '#94a3b8', label: 'Documento removido' },
+      CANCELADA:          { ico: '⛔', cor: '#ef4444', label: 'Cancelada' },
+      APROVADA:           { ico: '✓',  cor: '#22c55e', label: 'Aprovada' },
+    };
+    return `<div class="panel">
       <h3>Histórico</h3>
-      <div style="font-size:12px">
-        ${eventos.map(e => `<div style="padding:3px 0;border-bottom:1px dashed var(--bd)">
-          <strong>${UI.escapeHtml(e.acao)}</strong> · ${UI.fmtDateTime(e.createdAt)} · ${UI.escapeHtml(e.byUser?.name||'—')}
-          ${e.descricao ? `<div class="muted small">${UI.escapeHtml(e.descricao)}</div>` : ''}
-        </div>`).join('')}
+      <div class="hist-list">
+        ${eventos.map(e => {
+          const meta = ACAO_META[e.acao] || { ico: '•', cor: 'var(--t2)', label: e.acao };
+          return `<div class="hist-item">
+            <span class="hist-ico" style="color:${meta.cor}">${meta.ico}</span>
+            <div class="hist-body">
+              <div><strong style="color:${meta.cor}">${UI.escapeHtml(meta.label)}</strong>
+                <span class="muted small"> · ${UI.fmtDateTime(e.createdAt)} · ${UI.escapeHtml(e.byUser?.name||'—')}</span>
+              </div>
+              ${e.descricao ? `<div class="muted small">${UI.escapeHtml(e.descricao)}</div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
       </div>
     </div>`;
   }
@@ -617,23 +640,29 @@ window.VIEW_desoneracoes = (() => {
       } catch (e) { UI.toast(e.message, 'err'); }
     });
     // Upload de NFs por tipo (Entrada / Saída). Cada input tem data-nf-upload-tipo.
+    // IMPORTANTE: o campo `tipo` precisa ser appendado ANTES do `file` no
+    // FormData — multer processa multipart em ordem, e popula req.body apenas
+    // com os campos texto que vêm antes do arquivo no stream.
     document.querySelectorAll('[data-nf-upload-tipo]').forEach(inp => inp.addEventListener('change', async e => {
       const files = [...(e.target.files || [])];
       if (!files.length) return;
       const tipo = e.target.dataset.nfUploadTipo || 'ENTRADA';
+      const tipoLabel = tipo === 'SAIDA' ? 'NF de Saída' : 'NF de Entrada';
       let ok = 0, fail = 0;
       for (let i = 0; i < files.length; i++) {
-        UI.toast(`Enviando NF-${tipo==='SAIDA'?'S':'E'} ${i+1}/${files.length}: ${files[i].name}`);
+        UI.toast(`Enviando ${tipoLabel} ${i+1}/${files.length}: ${files[i].name}`);
         const fd = new FormData();
-        fd.append('file', files[i]);
-        fd.append('tipo', tipo);
+        fd.append('tipo', tipo);         // ← tipo PRIMEIRO
+        fd.append('file', files[i]);      // ← file por último
         try {
           const r = await fetch(`/api/desoneracoes/${id}/notas/upload`, { method: 'POST', credentials: 'include', body: fd });
           if (!r.ok) throw new Error(await r.text() || 'Falha no upload');
           ok++;
         } catch (er) { fail++; UI.toast(`Falhou ${files[i].name}: ${er.message}`, 'err'); }
       }
-      UI.toast(fail === 0 ? `✓ ${ok} NF(s) ${tipo} anexada(s)` : `${ok} ok, ${fail} falha(s)`, fail === 0 ? 'ok' : 'err');
+      UI.toast(fail === 0 ? `✓ ${ok} ${tipoLabel} anexada(s)` : `${ok} ok, ${fail} falha(s)`, fail === 0 ? 'ok' : 'err');
+      // Reset do input pra permitir re-selecionar o mesmo arquivo
+      e.target.value = '';
       openDetail(id);
     }));
     // Botão "Devolver pro cliente" na etapa 4
