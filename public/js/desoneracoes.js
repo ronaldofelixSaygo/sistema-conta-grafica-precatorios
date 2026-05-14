@@ -207,15 +207,11 @@ window.VIEW_desoneracoes = (() => {
         ${d.cancelReason ? `<div class="err small" style="margin-top:.3rem">Cancelada: ${UI.escapeHtml(d.cancelReason)}</div>` : ''}
       </div>
       ${stepperHtml}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:flex-start">
-        <div>
-          ${painelHtml}
-          ${notasHtml}
-        </div>
-        <div>
-          ${docsHtml}
-          ${histHtml}
-        </div>
+      <div style="display:flex;flex-direction:column;gap:1rem">
+        ${painelHtml}
+        ${docsHtml}
+        ${notasHtml}
+        ${histHtml}
       </div>`, { large: true });
     bindDetailActions(d, isStaff);
   }
@@ -338,9 +334,9 @@ window.VIEW_desoneracoes = (() => {
     // Antes disso, mostra apenas um aviso explicativo.
     const reached = isStepReached(d, 'EMISSAO_NF');
     if (!reached) {
-      return `<div class="panel" style="margin-top:.6rem">
+      return `<div class="panel">
         <h3>Notas Fiscais</h3>
-        <div class="muted small">⏳ Disponível após a etapa <strong>Emissão DMI</strong>. O cliente cadastra as NFs aqui quando a DMI for devolvida pelo escritório.</div>
+        <div class="muted small">⏳ Disponível após a etapa <strong>Emissão DMI</strong>. O cliente faz o upload das NFs aqui quando a DMI for devolvida pelo escritório.</div>
       </div>`;
     }
 
@@ -348,39 +344,44 @@ window.VIEW_desoneracoes = (() => {
     const podeAtuarAgora = !!cur?.podeAtuar || isStaff;
     const podeAdicionar = podeAtuarAgora && d.currentStep === 'EMISSAO_NF';
     const podeValidar   = podeAtuarAgora && d.currentStep === 'VALIDACAO_NF';
-    const podeOficial   = podeAtuarAgora && d.currentStep === 'ENVIO_NF_OFICIAL';
-    const podeRemover   = isStaff && d.currentStep === 'EMISSAO_NF';
+    // Exclusão: enquanto a etapa "Emissão NFs" estiver ativa (staff também)
+    const podeRemover   = podeAtuarAgora && d.currentStep === 'EMISSAO_NF';
 
     const linhas = (d.notas || []).map(n => `
-      <tr>
-        <td><span class="pill ${n.tipo==='ENTRADA'?'green':'amber'}">${n.tipo}</span></td>
-        <td>${UI.escapeHtml(n.numero)}${n.serie ? `/${UI.escapeHtml(n.serie)}` : ''}</td>
-        <td>${n.dataEmissao ? UI.fmtDate(n.dataEmissao) : '—'}</td>
-        <td class="num">${UI.fmtMoney(n.valor)}</td>
-        <td>${n.validada ? '<span class="pill green">Validada</span>' : '<span class="pill amber">Pendente</span>'}</td>
-        <td>${(n.oficialBytes || n.oficialNome) ? `
-          <button class="btn small" data-nf-view="${n.id}" data-nf-name="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Visualizar">👁</button>
-          <a class="btn small" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>
-        ` : '—'}</td>
-        <td>
-          ${podeValidar && !n.validada ? `<button class="btn small" data-nf-validar="${n.id}">Validar</button>` : ''}
-          ${podeOficial ? `<label class="btn small" style="cursor:pointer" title="Anexar oficial">📎<input type="file" data-nf-oficial="${n.id}" style="display:none" accept=".pdf,.xml,image/*"></label>` : ''}
-          ${podeRemover ? `<button class="btn small danger" data-nf-del="${n.id}">x</button>` : ''}
-        </td>
-      </tr>`).join('');
-    return `<div class="panel" style="margin-top:.6rem">
+      <div class="doc-row">
+        <div class="doc-tipo">NF</div>
+        <div class="doc-file">
+          <div class="doc-file-item">
+            <span class="doc-name" title="${UI.escapeHtml(n.oficialNome || n.numero)}">📄 ${UI.escapeHtml(n.oficialNome || n.numero)}</span>
+            ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
+          </div>
+          ${n.validada ? '<span class="pill green small" style="margin-top:.2rem">Validada</span>' : ''}
+        </div>
+        <div class="doc-actions">
+          ${(n.oficialBytes || n.oficialNome) ? `<button class="btn small" data-nf-view="${n.id}" data-nf-name="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Visualizar">👁</button>` : ''}
+          ${podeValidar && !n.validada ? `<button class="btn small" data-nf-validar="${n.id}" title="Validar">✓</button>` : ''}
+          ${podeRemover ? `<button class="btn small danger" data-nf-del="${n.id}" title="Excluir">✕</button>` : ''}
+        </div>
+      </div>`).join('');
+    return `<div class="panel">
       <h3>Notas Fiscais</h3>
-      ${linhas ? `<table class="table"><thead><tr>
-        <th>Tipo</th><th>Número</th><th>Data</th><th>Valor</th><th>Validação</th><th>Oficial</th><th></th>
-      </tr></thead><tbody>${linhas}</tbody></table>` : '<div class="muted small">Sem NFs cadastradas.</div>'}
-      ${podeAdicionar ? '<div style="margin-top:.5rem"><button class="btn" id="nf-add">+ Adicionar NF</button></div>' : ''}
+      ${d.notas?.length
+        ? `<div class="doc-grid">${linhas}</div>`
+        : '<div class="muted small">Sem NFs anexadas.</div>'}
+      ${podeAdicionar ? `<div style="margin-top:.6rem">
+        <label class="btn primary btn-anexar" style="cursor:pointer">
+          📎 Anexar NF(s)
+          <input type="file" id="nf-upload" multiple accept=".pdf,.xml,image/*" style="display:none">
+        </label>
+        <div class="muted small" style="margin-top:.3rem">Selecione 1 ou mais arquivos de NF. O parceiro escritório vai conferir e validar.</div>
+      </div>` : ''}
     </div>`;
   }
 
-  // Documentos previstos por ETAPA (linha-a-linha). A ordem aqui define a
-  // sequência visual. OUTRO é sempre opcional/extra e fica no fim quando aplicável.
+  // Documentos previstos por ETAPA (linha-a-linha). CTE_AWB_BL unifica os
+  // antigos BL e CCT — admin pode renomear/criar tipos novos em Parâmetros.
   const DOCS_PREVISTOS_POR_ETAPA = {
-    DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL'],  // CCT é condicional ao modal
+    DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','CTE_AWB_BL'],
     EMISSAO_DMI:      ['DMI'],
     PROTOCOLO_ICMS:   ['DESPACHO'],
   };
@@ -389,15 +390,9 @@ window.VIEW_desoneracoes = (() => {
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
     const podeAtuarAgora = (isStaff || cur?.podeAtuar) && d.status === 'EM_ANDAMENTO';
 
-    // Lista de "linhas a renderizar": uma por tipo previsto em cada etapa documental.
     const rowsByEtapa = {};
     for (const etapa of ['DOCS_DESPACHANTE','EMISSAO_DMI','PROTOCOLO_ICMS']) {
-      const previstos = [...DOCS_PREVISTOS_POR_ETAPA[etapa]];
-      // CCT é obrigatório só pra modal AEREO. Em outros modais aparece também
-      // mas como opcional (linha cinza com botão Anexar).
-      if (etapa === 'DOCS_DESPACHANTE' && d.modal === 'AEREO') previstos.push('CCT');
-      else if (etapa === 'DOCS_DESPACHANTE') previstos.push('CCT'); // opcional
-      rowsByEtapa[etapa] = previstos;
+      rowsByEtapa[etapa] = [...DOCS_PREVISTOS_POR_ETAPA[etapa]];
     }
 
     function renderLinha(etapa, tipo) {
@@ -505,17 +500,23 @@ window.VIEW_desoneracoes = (() => {
         UI.toast('Movimentação criada — desoneração concluída'); UI.closeModal(); render();
       } catch (e) { UI.toast(e.message, 'err'); }
     });
-    // Adicionar NF
-    document.getElementById('nf-add')?.addEventListener('click', () => {
-      const tipo = prompt('Tipo (ENTRADA ou SAIDA):', 'ENTRADA');
-      if (!tipo) return;
-      const numero = prompt('Número da NF:');
-      if (!numero) return;
-      const valor = prompt('Valor (R$):', '0');
-      const data = prompt('Data de emissão (YYYY-MM-DD, opcional):');
-      API.post(`/api/desoneracoes/${id}/notas`, { tipo: tipo.toUpperCase(), numero, valor: Number(valor)||0, dataEmissao: data || null })
-        .then(() => { UI.toast('NF adicionada'); openDetail(id); })
-        .catch(e => UI.toast(e.message, 'err'));
+    // Upload de NFs (múltiplos arquivos) — sem prompt, só pega o arquivo
+    document.getElementById('nf-upload')?.addEventListener('change', async e => {
+      const files = [...(e.target.files || [])];
+      if (!files.length) return;
+      let ok = 0, fail = 0;
+      for (let i = 0; i < files.length; i++) {
+        UI.toast(`Enviando ${i+1}/${files.length}: ${files[i].name}`);
+        const fd = new FormData();
+        fd.append('file', files[i]);
+        try {
+          const r = await fetch(`/api/desoneracoes/${id}/notas/upload`, { method: 'POST', credentials: 'include', body: fd });
+          if (!r.ok) throw new Error(await r.text() || 'Falha no upload');
+          ok++;
+        } catch (er) { fail++; UI.toast(`Falhou ${files[i].name}: ${er.message}`, 'err'); }
+      }
+      UI.toast(fail === 0 ? `✓ ${ok} NF(s) anexada(s)` : `${ok} ok, ${fail} falha(s)`, fail === 0 ? 'ok' : 'err');
+      openDetail(id);
     });
     // Validar NF
     document.querySelectorAll('[data-nf-validar]').forEach(b => b.onclick = async () => {

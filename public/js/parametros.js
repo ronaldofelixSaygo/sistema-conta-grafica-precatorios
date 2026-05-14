@@ -180,17 +180,21 @@ window.VIEW_parametros = (() => {
     { code: 'PROTOCOLO_ICMS',   label: '6. Protocolo ICMS' },
   ];
   const DESON_MODAIS = ['TODOS','MARITIMO','AEREO','RODOVIARIO'];
-  const DESON_TIPOS  = ['DUIMP','PL','PI','AFRMM','BL','CCT','DMI','DESPACHO','OUTRO'];
+  // DESON_TIPOS é puxado dinamicamente do backend (tabela DesoneracaoDocTipo).
+  // Mantemos esta variável como cache pra reuso no form de docs.
+  let DESON_TIPOS_CACHE = [];
 
   async function loadDesonConfig() {
     const c = document.getElementById('param-content');
     c.innerHTML = '<div class="muted">Carregando…</div>';
-    let docList, stepList;
+    let docList, stepList, docTipos;
     try {
-      [docList, stepList] = await Promise.all([
+      [docList, stepList, docTipos] = await Promise.all([
         API.get('/api/desoneracoes/doc-configs'),
         API.get('/api/desoneracoes/step-configs'),
+        API.get('/api/desoneracoes/doc-tipos?all=1'),
       ]);
+      DESON_TIPOS_CACHE = docTipos || [];
     } catch (e) { c.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`; return; }
 
     const TIPO_LABEL = {
@@ -214,6 +218,30 @@ window.VIEW_parametros = (() => {
             <td>${r.kindCode ? `<span class="pill">${UI.escapeHtml(r.kindCode)}</span>` : '—'}</td>
             <td class="num">${r.slaHours ?? 48}</td>
             <td><button class="btn small" data-step-edit="${r.id}" data-etapa="${r.etapa}" data-tipo="${r.responsavelTipo}" data-kind="${r.kindCode||''}" data-sla="${r.slaHours ?? 48}">Editar</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+          <h3 style="margin:0">🏷 Tipos de documento</h3>
+          <button class="btn primary" id="dtipo-new">+ Novo tipo</button>
+        </div>
+        <p class="muted small" style="margin-bottom:.6rem">
+          Catálogo de tipos de documento usados em "Documentos obrigatórios por etapa".
+          Tipos <em>builtin</em> não podem ser excluídos, só desativados.
+        </p>
+        <table class="table">
+          <thead><tr><th>Código</th><th>Rótulo</th><th>Origem</th><th>Status</th><th class="num">Ordem</th><th></th></tr></thead>
+          <tbody>${(docTipos||[]).map(t => `<tr>
+            <td><code>${UI.escapeHtml(t.code)}</code></td>
+            <td>${UI.escapeHtml(t.label)}</td>
+            <td>${t.isBuiltin ? '<span class="pill" style="background:var(--s3)">builtin</span>' : '<span class="pill green">custom</span>'}</td>
+            <td>${t.active ? '<span class="pill green">Ativo</span>' : '<span class="pill amber">Inativo</span>'}</td>
+            <td class="num">${t.sort}</td>
+            <td>
+              <button class="btn small" data-tipo-edit="${t.id}">Editar</button>
+              ${t.isBuiltin ? '' : `<button class="btn small danger" data-tipo-del="${t.id}">x</button>`}
+            </td>
           </tr>`).join('')}</tbody>
         </table>
       </div>
@@ -247,6 +275,59 @@ window.VIEW_parametros = (() => {
     c.querySelectorAll('[data-step-edit]').forEach(b => b.onclick = () => openStepConfigForm({
       etapa: b.dataset.etapa, responsavelTipo: b.dataset.tipo, kindCode: b.dataset.kind, slaHours: Number(b.dataset.sla) || 48,
     }));
+    // Tipos de documento
+    document.getElementById('dtipo-new').onclick = () => openDocTipoForm();
+    c.querySelectorAll('[data-tipo-edit]').forEach(b => b.onclick = () => {
+      const t = (docTipos || []).find(x => x.id === b.dataset.tipoEdit);
+      if (t) openDocTipoForm(t);
+    });
+    c.querySelectorAll('[data-tipo-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('Excluir tipo? Tipos builtin não são excluídos, só desativados.')) return;
+      try { await API.del(`/api/desoneracoes/doc-tipos/${b.dataset.tipoDel}`); UI.toast('Excluído'); loadDesonConfig(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    });
+  }
+  function openDocTipoForm(tipo = {}) {
+    const isEdit = !!tipo.id;
+    UI.openModal(isEdit ? `Editar tipo: ${tipo.code}` : 'Novo tipo de documento', `
+      <form id="form-doc-tipo" class="form-grid">
+        <input type="hidden" name="id" value="${tipo.id || ''}">
+        <div><label>Código *</label>
+          <input name="code" value="${UI.escapeHtml(tipo.code||'')}" required maxlength="40" ${tipo.isBuiltin?'readonly':''} placeholder="EX: CTE_AWB_BL">
+          <div class="muted small">Identificador interno. Maiúsculas e underline. ${tipo.isBuiltin?'<strong>Builtin: não pode mudar.</strong>':''}</div>
+        </div>
+        <div><label>Ordem</label>
+          <input type="number" name="sort" value="${tipo.sort ?? 0}" min="0" max="999">
+        </div>
+        <div class="full"><label>Rótulo *</label>
+          <input name="label" value="${UI.escapeHtml(tipo.label||'')}" required placeholder="Ex: Conhecimento (CTE/AWB/BL)">
+        </div>
+        <div class="full"><label>Descrição (opcional)</label>
+          <textarea name="descricao" rows="2">${UI.escapeHtml(tipo.descricao||'')}</textarea>
+        </div>
+        <div class="full"><label><input type="checkbox" name="active" ${tipo.active !== false ? 'checked':''}> Ativo (aparece nos selects)</label></div>
+        <div class="full form-actions">
+          <button type="button" class="btn" id="dtipo-cancel">Cancelar</button>
+          <button type="submit" class="btn primary">Salvar</button>
+        </div>
+      </form>`);
+    document.getElementById('dtipo-cancel').onclick = UI.closeModal;
+    document.getElementById('form-doc-tipo').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const payload = {
+        code: fd.get('code'),
+        label: fd.get('label'),
+        descricao: fd.get('descricao') || null,
+        sort: Number(fd.get('sort')) || 0,
+        active: !!fd.get('active'),
+      };
+      try {
+        if (isEdit) await API.put(`/api/desoneracoes/doc-tipos/${tipo.id}`, payload);
+        else        await API.post('/api/desoneracoes/doc-tipos', payload);
+        UI.toast('Tipo salvo'); UI.closeModal(); loadDesonConfig();
+      } catch (e) { UI.toast(e.message, 'err'); }
+    };
   }
   function openStepConfigForm(cfg) {
     UI.openModal(`Responsável: ${cfg.etapa}`, `
@@ -297,7 +378,12 @@ window.VIEW_parametros = (() => {
           <select name="modal" required>${DESON_MODAIS.map(m => `<option value="${m}">${m}</option>`).join('')}</select>
         </div>
         <div><label>Tipo de documento *</label>
-          <select name="tipoDocumento" required>${DESON_TIPOS.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+          <select name="tipoDocumento" required>${
+            (DESON_TIPOS_CACHE || [])
+              .filter(t => t.active)
+              .map(t => `<option value="${UI.escapeHtml(t.code)}">${UI.escapeHtml(t.code)} — ${UI.escapeHtml(t.label)}</option>`)
+              .join('')
+          }</select>
         </div>
         <div><label>Ordem</label><input type="number" name="sort" value="0"></div>
         <div class="full"><label><input type="checkbox" name="obrigatorio" checked> Obrigatório (bloqueia o avanço se não anexado)</label></div>

@@ -923,6 +923,21 @@ model CreditSlaConfig {
   @@map("credit_sla_config")
 }
 
+// Tipos de documento configuráveis em Parâmetros. Substitui a lista hardcoded
+// em código — admin pode renomear/criar/desativar tipos sem novo deploy.
+model DesoneracaoDocTipo {
+  id        String   @id @default(uuid())
+  code      String   @unique          // ex.: 'CTE_AWB_BL', 'DUIMP'
+  label     String                    // ex.: 'Conhecimento (CTE/AWB/BL)'
+  descricao String?
+  sort      Int      @default(0)
+  active    Boolean  @default(true)
+  isBuiltin Boolean  @default(false)  // seed automático; não pode ser deletado
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("desoneracao_doc_tipos")
+}
+
 model DesoneracaoStepConfig {
   id              String   @id @default(uuid())
   etapa           String   @unique

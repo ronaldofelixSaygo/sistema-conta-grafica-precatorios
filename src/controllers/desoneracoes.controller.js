@@ -13,6 +13,18 @@ export async function listStepConfigs(_req, res, next) {
 export async function upsertStepConfig(req, res, next) {
   try { res.json(await svc.upsertStepConfig(req.body || {})); } catch (e) { next(e); }
 }
+export async function listDocTipos(req, res, next) {
+  try { res.json(await svc.listDocTipos({ includeInactive: req.query.all === '1' })); } catch (e) { next(e); }
+}
+export async function upsertDocTipo(req, res, next) {
+  try {
+    const body = { ...(req.body || {}), id: req.params.id || req.body?.id };
+    res.json(await svc.upsertDocTipo(body));
+  } catch (e) { next(e); }
+}
+export async function deleteDocTipo(req, res, next) {
+  try { res.json(await svc.deleteDocTipo(req.params.id)); } catch (e) { next(e); }
+}
 export async function create(req, res, next) {
   try {
     const r = await svc.createDesoneracao(req.user, req.body || {});
@@ -80,6 +92,9 @@ export async function downloadOficial(req, res, next) {
 }
 export async function removeNota(req, res, next) {
   try { res.json(await svc.removeNota(req.user, req.params.notaId)); } catch (e) { next(e); }
+}
+export async function uploadNota(req, res, next) {
+  try { res.status(201).json(await svc.uploadNota(req.user, req.params.id, req.file)); } catch (e) { next(e); }
 }
 
 // === Documentos ===

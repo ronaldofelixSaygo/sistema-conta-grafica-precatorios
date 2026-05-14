@@ -48,6 +48,79 @@ export async function getStepConfig(etapa) {
   await ensureStepConfigDefaults();
   return prisma.desoneracaoStepConfig.findUnique({ where: { etapa } });
 }
+// =====================================================================
+// Tipos de documento (cadastráveis). Antes hardcoded em código.
+// =====================================================================
+const DOC_TIPOS_BUILTIN = [
+  { code: 'DUIMP',      label: 'DUIMP — Declaração Única de Importação', sort: 1 },
+  { code: 'PL',         label: 'PL — Packing List',                        sort: 2 },
+  { code: 'PI',         label: 'PI — Proforma Invoice / Commercial Invoice', sort: 3 },
+  { code: 'AFRMM',      label: 'AFRMM — Comprovante AFRMM',                sort: 4 },
+  { code: 'CTE_AWB_BL', label: 'Conhecimento de Transporte (CTE/AWB/BL)',  sort: 5 },
+  { code: 'DMI',        label: 'DMI — Documento de Movimentação Interna', sort: 6 },
+  { code: 'DESPACHO',   label: 'Despacho ICMS',                           sort: 7 },
+];
+// Tipos legados: marcamos inativos pra não aparecer em selects, mas documentos
+// já anexados com esses tipos continuam acessíveis (são histórico).
+const DOC_TIPOS_LEGACY = ['BL','CCT'];
+
+let _docTiposEnsured = false;
+async function ensureDocTiposBuiltin() {
+  if (_docTiposEnsured) return;
+  try {
+    for (const t of DOC_TIPOS_BUILTIN) {
+      await prisma.desoneracaoDocTipo.upsert({
+        where: { code: t.code },
+        create: { ...t, isBuiltin: true, active: true },
+        update: {}, // não sobrescreve edições do admin (label etc.)
+      });
+    }
+    for (const code of DOC_TIPOS_LEGACY) {
+      await prisma.desoneracaoDocTipo.upsert({
+        where: { code },
+        create: { code, label: `${code} (legado)`, sort: 99, isBuiltin: true, active: false },
+        update: {}, // se admin reativar, respeita
+      });
+    }
+    _docTiposEnsured = true;
+  } catch (e) {
+    console.warn('[desoneracoes] seed docTipos falhou:', e.message);
+  }
+}
+
+export async function listDocTipos({ includeInactive = false } = {}) {
+  await ensureDocTiposBuiltin();
+  return prisma.desoneracaoDocTipo.findMany({
+    where: includeInactive ? {} : { active: true },
+    orderBy: [{ sort: 'asc' }, { code: 'asc' }],
+  });
+}
+export async function upsertDocTipo({ id, code, label, descricao, sort, active }) {
+  const codeNorm = String(code || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+  if (!codeNorm) { const e = new Error('Código obrigatório'); e.status = 400; throw e; }
+  if (!label) { const e = new Error('Rótulo obrigatório'); e.status = 400; throw e; }
+  const data = {
+    code: codeNorm, label, descricao: descricao || null,
+    sort: Number(sort) || 0, active: active !== false,
+  };
+  if (id) {
+    return prisma.desoneracaoDocTipo.update({ where: { id }, data });
+  }
+  return prisma.desoneracaoDocTipo.upsert({
+    where: { code: codeNorm },
+    create: data, update: data,
+  });
+}
+export async function deleteDocTipo(id) {
+  const t = await prisma.desoneracaoDocTipo.findUnique({ where: { id } });
+  if (!t) { const e = new Error('Não encontrado'); e.status = 404; throw e; }
+  if (t.isBuiltin) {
+    // Built-in não deleta, só desativa
+    return prisma.desoneracaoDocTipo.update({ where: { id }, data: { active: false } });
+  }
+  return prisma.desoneracaoDocTipo.delete({ where: { id } });
+}
+
 export async function upsertStepConfig({ etapa, responsavelTipo, kindCode, label, sort, slaHours }) {
   if (!etapa) throw new Error('Etapa obrigatória');
   const valid = ['CLIENTE','PARCEIRO_KIND','CLIENTE_OU_PARCEIRO','SAYGO'];
@@ -83,14 +156,15 @@ function nextStep(cur) {
 
 // Documentos obrigatórios por etapa × modal. Padrão; pode ser sobrescrito
 // pela tabela DesoneracaoDocConfig em runtime via configs do admin.
+// CTE_AWB_BL unifica os antigos BL e CCT.
 const DEFAULT_DOCS_BY_STEP = {
   DOCS_DESPACHANTE: {
-    TODOS:    ['DUIMP', 'PL', 'PI', 'AFRMM', 'BL'],
-    MARITIMO: ['DUIMP', 'PL', 'PI', 'AFRMM', 'BL'],
-    AEREO:    ['DUIMP', 'PL', 'PI', 'AFRMM', 'BL', 'CCT'],
-    RODOVIARIO: ['DUIMP', 'PL', 'PI', 'AFRMM', 'BL'],
+    TODOS:      ['DUIMP', 'PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
+    MARITIMO:   ['DUIMP', 'PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
+    AEREO:      ['DUIMP', 'PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
+    RODOVIARIO: ['DUIMP', 'PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
   },
-  EMISSAO_DMI: { TODOS: ['DMI'] },
+  EMISSAO_DMI:    { TODOS: ['DMI'] },
   PROTOCOLO_ICMS: { TODOS: ['DESPACHO'] },
 };
 
@@ -649,13 +723,48 @@ export async function getOficialNota(notaId) {
 }
 
 export async function removeNota(user, notaId) {
-  const n = await prisma.desoneracaoNota.findUnique({ where: { id: notaId } });
+  const n = await prisma.desoneracaoNota.findUnique({
+    where: { id: notaId }, include: { desoneracao: true },
+  });
   if (!n) { const e = new Error('Não encontrada'); e.status = 404; throw e; }
+  // Só permite excluir enquanto a etapa "Emissão NFs" estiver ativa.
+  // Depois disso, congelado pra preservar trilha.
+  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
+  if (!isStaff && n.desoneracao.currentStep !== 'EMISSAO_NF') {
+    const e = new Error('Só pode excluir NF enquanto a etapa "Emissão NFs" estiver em andamento'); e.status = 400; throw e;
+  }
   await prisma.desoneracaoNota.delete({ where: { id: notaId } });
   await prisma.desoneracaoEvento.create({
     data: { desoneracaoId: n.desoneracaoId, acao: 'NF_REMOVIDA', descricao: `NF ${n.numero} removida`, byUserId: user.id },
   });
   return { ok: true };
+}
+
+// Upload simplificado: cliente sobe um arquivo e o sistema cria a NF com
+// número = nome do arquivo (sem mais prompts pra digitar tipo/data/valor).
+// O parceiro valida visualizando o arquivo na etapa de Validação.
+export async function uploadNota(user, id, file) {
+  if (!file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
+  const cur = await prisma.desoneracao.findUnique({ where: { id } });
+  if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
+  if (cur.currentStep !== 'EMISSAO_NF') {
+    const e = new Error('NFs só podem ser anexadas na etapa "Emissão NFs"'); e.status = 400; throw e;
+  }
+  const n = await prisma.desoneracaoNota.create({
+    data: {
+      desoneracaoId: id,
+      tipo: 'ENTRADA',
+      numero: file.originalname,
+      valor: 0,
+      oficialNome: file.originalname,
+      oficialMime: file.mimetype,
+      oficialBytes: file.buffer,
+    },
+  });
+  await prisma.desoneracaoEvento.create({
+    data: { desoneracaoId: id, acao: 'NF_ANEXADA', descricao: `NF anexada: ${file.originalname}`, byUserId: user.id },
+  });
+  return { id: n.id, numero: n.numero, oficialNome: n.oficialNome };
 }
 
 // === Documentos ===
