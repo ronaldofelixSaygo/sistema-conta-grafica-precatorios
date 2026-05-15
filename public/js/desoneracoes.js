@@ -19,7 +19,7 @@ window.VIEW_desoneracoes = (() => {
     EMISSAO_DMI:      ['DMI','OUTRO'],
     EMISSAO_NF:       ['OUTRO'],
     VALIDACAO_NF:     ['OUTRO'],
-    PROTOCOLO_ICMS:   ['DESPACHO','OUTRO'],
+    PROTOCOLO_ICMS:   ['DESPACHO','CONTA_GRAFICA','OUTRO'],
   };
   function isStepReached(d, target) {
     // True se a desoneração já alcançou (ou passou) a etapa "target"
@@ -305,6 +305,8 @@ window.VIEW_desoneracoes = (() => {
       return `<div class="panel"><h3>Cancelada</h3>${d.cancelReason ? `<p>${UI.escapeHtml(d.cancelReason)}</p>` : ''}</div>`;
     }
     if (d.status === 'AGUARDANDO_APROVACAO') {
+      // Aprovar: STAFF ou o próprio cliente dono. Parceiro NÃO aprova.
+      const canApprove = isStaff || isOwnerClient;
       return `<div class="panel">
         <h3>Aguardando aprovação</h3>
         <p class="muted small">Todas as etapas foram concluídas. Confira os dados abaixo e aprove pra criar a movimentação no extrato do cliente.</p>
@@ -313,10 +315,10 @@ window.VIEW_desoneracoes = (() => {
           <tr><td>DUIMP/DI</td><td>${UI.escapeHtml(d.duimpDi || '—')}</td></tr>
           <tr><td>Valor ICMS desonerado</td><td class="num">${UI.fmtMoney(d.valorIcmsDesonerado)}</td></tr>
         </tbody></table>
-        ${(isStaff || canCancel) ? `
+        ${(canApprove || canCancel) ? `
           <div class="form-actions" style="margin-top:.6rem">
             ${canCancel ? '<button class="btn danger" id="des-cancel-btn">Cancelar desoneração</button>' : ''}
-            ${isStaff ? '<button class="btn primary" id="des-approve-btn">✓ Aprovar e criar movimentação</button>' : ''}
+            ${canApprove ? '<button class="btn primary" id="des-approve-btn">✓ Aprovar e criar movimentação</button>' : ''}
           </div>` : ''}
       </div>`;
     }

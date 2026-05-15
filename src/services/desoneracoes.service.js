@@ -62,6 +62,7 @@ const DOC_TIPOS_BUILTIN = [
   { code: 'CTE_AWB_BL',     label: 'Conhecimento de Transporte (CTE/AWB/BL)', sort: 7 },
   { code: 'DMI',            label: 'DMI — Documento de Movimentação Interna', sort: 8 },
   { code: 'DESPACHO',       label: 'Despacho ICMS',                       sort: 9 },
+  { code: 'CONTA_GRAFICA',  label: 'Conta Gráfica atualizada',            sort: 10 },
 ];
 // Tipos legados: marcamos inativos pra não aparecer em selects, mas documentos
 // já anexados com esses tipos continuam acessíveis (são histórico).
@@ -622,12 +623,20 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
 }
 
 // Aprovação final: gera Movimentação e marca status CONCLUIDA.
+// Permitida pra STAFF (ADM/SAYGO) ou pro CLIENTE dono do processo.
+// Parceiro/despachante NÃO aprova — ele só conclui as etapas.
 export async function approveAndCreateMovimentacao(user, id) {
   const d = await prisma.desoneracao.findUnique({
     where: { id },
     include: { cliente: true, steps: { include: { parceiro: true } } },
   });
   if (!d) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
+  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
+  const isOwnerClient = user.role === 'CLIENT' && user.clienteId === d.clienteId;
+  if (!isStaff && !isOwnerClient) {
+    const e = new Error('Apenas Saygo ou o cliente dono pode aprovar a desoneração');
+    e.status = 403; throw e;
+  }
   if (d.status !== 'AGUARDANDO_APROVACAO') {
     const e = new Error('Só é possível aprovar quando status = AGUARDANDO_APROVACAO'); e.status = 400; throw e;
   }
@@ -708,7 +717,7 @@ const ETAPA_DOC_TIPOS = {
   EMISSAO_NF:       ['OUTRO'],
   VALIDACAO_NF:     ['OUTRO'],
   ENVIO_NF_OFICIAL: ['OUTRO'],
-  PROTOCOLO_ICMS:   ['DESPACHO','OUTRO'],
+  PROTOCOLO_ICMS:   ['DESPACHO','CONTA_GRAFICA','OUTRO'],
 };
 export function getTiposDocPermitidos(etapa) {
   return ETAPA_DOC_TIPOS[etapa] || ['OUTRO'];

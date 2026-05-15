@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import * as ctrl from '../controllers/desoneracoes.controller.js';
 import { requireAuth } from '../middlewares/auth.middleware.js';
-import { requireStaffOrPartnerEscritorio } from '../middlewares/role.middleware.js';
+import { requireStaffOrPartnerEscritorio, requireStaffOrClient } from '../middlewares/role.middleware.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 
@@ -38,7 +38,7 @@ router.put('/:id',               requireStaffOrPartnerEscritorio, ctrl.update);
 router.post('/:id/step/:etapa',  requireStaffOrPartnerEscritorio, ctrl.setStepParceiro);
 // Advance e demais ações: autorização granular no service (canActOnStep)
 router.post('/:id/advance',      ctrl.advance);
-router.post('/:id/approve',      requireStaffOrPartnerEscritorio, ctrl.approve);
+router.post('/:id/approve',      requireStaffOrClient, ctrl.approve);
 router.post('/:id/cancel',       ctrl.cancel);
 
 // Notas — cliente também precisa adicionar/anexar na sua etapa
