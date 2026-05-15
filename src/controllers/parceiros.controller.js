@@ -2,7 +2,11 @@ import * as svc from '../services/parceiros.service.js';
 import { logAction } from '../services/audit.service.js';
 
 export async function list(req, res, next) {
-  try { res.json(await svc.listParceiros(req.query)); } catch (e) { next(e); }
+  try {
+    // Lista de parceiros muda pouco — cache 2min do lado do navegador
+    res.set('Cache-Control', 'private, max-age=120, stale-while-revalidate=30');
+    res.json(await svc.listParceiros(req.query));
+  } catch (e) { next(e); }
 }
 export async function create(req, res, next) {
   try {

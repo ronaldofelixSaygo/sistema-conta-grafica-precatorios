@@ -63,14 +63,28 @@ export async function listRequests(user) {
   });
 }
 
+// SELECT explícito EXCLUINDO inputPdfBytes e resolutionAttachmentBytes
+// (PDFs inteiros, vários MB cada). Faz a query do modal abrir ~10x mais rápido.
+const REQUEST_SELECT_NO_BYTES = {
+  id: true, clienteId: true, partnerOfficeName: true,
+  inputs: true, result: true, creditosACompar: true, modalidade: true,
+  message: true, status: true,
+  inputPdfName: true, // não inclui inputPdfBytes
+  resolutionNote: true,
+  resolutionAttachmentName: true, // não inclui resolutionAttachmentBytes
+  resolutionAttachmentMime: true,
+  aiPromptVersion: true,
+  requestedById: true, resolvedById: true,
+  createdAt: true, sentAt: true, inProgressAt: true, resolvedAt: true, updatedAt: true,
+  cliente: { select: { id: true, nome: true, escritorio: true } },
+  requestedBy: { select: { id: true, name: true, email: true } },
+  resolvedBy:  { select: { id: true, name: true } },
+};
+
 export async function getRequest(user, id) {
   const r = await prisma.creditRequest.findUnique({
     where: { id },
-    include: {
-      cliente: { select: { id: true, nome: true, escritorio: true } },
-      requestedBy: { select: { id: true, name: true, email: true } },
-      resolvedBy:  { select: { id: true, name: true } },
-    },
+    select: REQUEST_SELECT_NO_BYTES,
   });
   if (!r) { const e = new Error('Solicitação não encontrada'); e.status = 404; throw e; }
   // permissão de visualização
@@ -81,6 +95,14 @@ export async function getRequest(user, id) {
   if (!isResolver && !isClient && !isStaff) {
     const e = new Error('Sem permissão'); e.status = 403; throw e;
   }
+  return r;
+}
+
+// Helper interno pra downloads — carrega só o byte que precisa.
+async function _loadBytes(id, field) {
+  const r = await prisma.creditRequest.findUnique({
+    where: { id }, select: { [field]: true, partnerOfficeName: true, clienteId: true },
+  });
   return r;
 }
 
@@ -225,17 +247,24 @@ export async function cancelRequest(user, id) {
   return prisma.creditRequest.update({ where: { id }, data: { status: 'CANCELED' } });
 }
 
-// Download do PDF original (input)
+// Download do PDF original (input) — valida permissão pelo metadado primeiro
 export async function getInputPdf(user, id) {
-  const r = await getRequest(user, id);
-  if (!r.inputPdfBytes) { const e = new Error('Sem PDF anexado'); e.status = 404; throw e; }
+  // valida permissão sem carregar bytes
+  await getRequest(user, id);
+  const r = await prisma.creditRequest.findUnique({
+    where: { id }, select: { inputPdfBytes: true, inputPdfName: true },
+  });
+  if (!r?.inputPdfBytes) { const e = new Error('Sem PDF anexado'); e.status = 404; throw e; }
   return { filename: r.inputPdfName || 'invoice.pdf', bytes: r.inputPdfBytes };
 }
 
 // Download do anexo de resolução
 export async function getResolutionAttachment(user, id) {
-  const r = await getRequest(user, id);
-  if (!r.resolutionAttachmentBytes) { const e = new Error('Sem anexo de resolução'); e.status = 404; throw e; }
+  await getRequest(user, id);
+  const r = await prisma.creditRequest.findUnique({
+    where: { id }, select: { resolutionAttachmentBytes: true, resolutionAttachmentName: true, resolutionAttachmentMime: true },
+  });
+  if (!r?.resolutionAttachmentBytes) { const e = new Error('Sem anexo de resolução'); e.status = 404; throw e; }
   return {
     filename: r.resolutionAttachmentName || 'evidencia',
     mime: r.resolutionAttachmentMime || 'application/octet-stream',

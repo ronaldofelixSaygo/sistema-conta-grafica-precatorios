@@ -859,6 +859,8 @@ model DesoneracaoNota {
   updatedAt      DateTime     @updatedAt
 
   @@index([desoneracaoId])
+  // Composto: a query mais comum filtra por desoneracaoId E deletedAt IS NULL
+  @@index([desoneracaoId, deletedAt])
   @@map("desoneracao_notas")
 }
 

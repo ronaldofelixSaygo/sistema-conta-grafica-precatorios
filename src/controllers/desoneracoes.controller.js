@@ -7,14 +7,23 @@ export async function list(req, res, next) {
 export async function get(req, res, next) {
   try { res.json(await svc.getDesoneracao(req.params.id, req.user)); } catch (e) { next(e); }
 }
+// Cache curto pra endpoints semi-estáticos: front pode reusar por 60s sem
+// ir no servidor, e mesmo se for, o ETag/304 corta a maior parte do payload.
+function setShortCache(res, seconds = 60) {
+  res.set('Cache-Control', `private, max-age=${seconds}, stale-while-revalidate=30`);
+}
+
 export async function listStepConfigs(_req, res, next) {
-  try { res.json(await svc.listStepConfigs()); } catch (e) { next(e); }
+  try { setShortCache(res, 120); res.json(await svc.listStepConfigs()); } catch (e) { next(e); }
 }
 export async function upsertStepConfig(req, res, next) {
   try { res.json(await svc.upsertStepConfig(req.body || {})); } catch (e) { next(e); }
 }
 export async function listDocTipos(req, res, next) {
-  try { res.json(await svc.listDocTipos({ includeInactive: req.query.all === '1' })); } catch (e) { next(e); }
+  try {
+    setShortCache(res, 120);
+    res.json(await svc.listDocTipos({ includeInactive: req.query.all === '1' }));
+  } catch (e) { next(e); }
 }
 export async function upsertDocTipo(req, res, next) {
   try {
