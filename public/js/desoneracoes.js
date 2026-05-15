@@ -572,16 +572,12 @@ window.VIEW_desoneracoes = (() => {
     const avisoRetorno = (etapa === 'EMISSAO_NF' && isCurrent && temRejeitada)
       ? `<div class="aviso-rejeicao">⚠ <strong>NFs rejeitadas pelo parceiro</strong> — exclua as rejeitadas e anexe as corretas antes de avançar.</div>`
       : '';
-    // Aviso pro parceiro na etapa 4: bloqueio de avanço quando há rejeitada
-    const avisoBloqueio = (etapa === 'VALIDACAO_NF' && isCurrent && temRejeitada)
-      ? `<div class="aviso-rejeicao">⚠ Há NFs rejeitadas — você precisa clicar em "Devolver pro cliente" pra esta etapa voltar pra ele substituir os arquivos.</div>`
-      : '';
-
+    const avisoBloqueio = '';
     const hint = etapa === 'EMISSAO_NF'
       ? (temRejeitada
           ? 'Substitua as NFs rejeitadas. Mínimo: 1 NF de Entrada e 1 NF de Saída.'
           : 'Anexe pelo menos 1 NF de Entrada e 1 NF de Saída.')
-      : 'Aprove (✓) ou rejeite (✗) cada NF. Para avançar: nenhuma rejeitada + pelo menos 1 NF-E e 1 NF-S validadas.';
+      : 'Aprove (✓) ou rejeite (✗) cada NF. Ao rejeitar, o processo volta automaticamente pro cliente substituir.';
 
     // 2 botões dedicados (Entrada / Saída) na etapa 3
     const adicionarHtml = podeAdicionar ? `
@@ -597,13 +593,7 @@ window.VIEW_desoneracoes = (() => {
       </div>
       <div class="muted small" style="margin-top:.3rem">${hint}</div>` : (isCurrent ? `<div class="muted small" style="margin-top:.3rem">${hint}</div>` : '');
 
-    // Botão "Devolver pro cliente" — só pro parceiro na etapa 4 quando há rejeitada
-    const devolverHtml = (etapa === 'VALIDACAO_NF' && isCurrent && temRejeitada && ativo)
-      ? `<div style="margin-top:.5rem">
-           <button class="btn danger small" id="nf-devolver">↩ Devolver pro cliente</button>
-         </div>` : '';
-
-    return `${avisoRetorno}${avisoBloqueio}<div class="doc-grid">${linhas || ''}</div>${adicionarHtml}${devolverHtml}`;
+    return `${avisoRetorno}${avisoBloqueio}<div class="doc-grid">${linhas || ''}</div>${adicionarHtml}`;
   }
 
   function renderHistorico(d) {
@@ -703,26 +693,24 @@ window.VIEW_desoneracoes = (() => {
       e.target.value = '';
       openDetail(id);
     }));
-    // Botão "Devolver pro cliente" na etapa 4
-    document.getElementById('nf-devolver')?.addEventListener('click', async () => {
-      if (!confirm('Devolver o processo pro cliente substituir as NFs rejeitadas?')) return;
-      try {
-        await API.post(`/api/desoneracoes/${id}/devolver-nfs`);
-        UI.toast('Devolvido pro cliente');
-        openDetail(id); render();
-      } catch (e) { UI.toast(e.message, 'err'); }
-    });
+    // Após rejeitar uma NF, o backend já volta o processo pra etapa 3 — o
+    // handler de rejeição abaixo dispara o reload do modal, então o cliente
+    // vê imediatamente o estado novo.
     // Validar NF
     document.querySelectorAll('[data-nf-validar]').forEach(b => b.onclick = async () => {
       try { await API.post(`/api/desoneracoes/notas/${b.dataset.nfValidar}/validar`); openDetail(id); }
       catch (e) { UI.toast(e.message, 'err'); }
     });
-    // Rejeitar NF (parceiro escritório na etapa VALIDACAO_NF)
+    // Rejeitar NF (parceiro escritório na etapa VALIDACAO_NF).
+    // Ao rejeitar, o backend automaticamente devolve o processo pra etapa 3.
     document.querySelectorAll('[data-nf-rejeitar]').forEach(b => b.onclick = async () => {
-      const motivo = prompt('Motivo da rejeição (opcional, mas ajuda o cliente):', '');
+      const motivo = prompt('Motivo da rejeição (ajuda o cliente a corrigir):', '');
       if (motivo === null) return;
-      try { await API.post(`/api/desoneracoes/notas/${b.dataset.nfRejeitar}/rejeitar`, { motivo: motivo || null }); openDetail(id); }
-      catch (e) { UI.toast(e.message, 'err'); }
+      try {
+        await API.post(`/api/desoneracoes/notas/${b.dataset.nfRejeitar}/rejeitar`, { motivo: motivo || null });
+        UI.toast('NF rejeitada — processo devolvido pro cliente');
+        openDetail(id); render();
+      } catch (e) { UI.toast(e.message, 'err'); }
     });
     // Excluir NF
     document.querySelectorAll('[data-nf-del]').forEach(b => b.onclick = async () => {

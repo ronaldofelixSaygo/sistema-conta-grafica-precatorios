@@ -6,6 +6,7 @@
 import { prisma } from '../../config/prisma.js';
 import { calcularInvoice } from './taxCalculator.service.js';
 import * as email from '../email.service.js';
+import * as storage from '../storage.service.js';
 
 // Quem pode CRIAR solicitação: CLIENT (próprio) ou SAYGO/ADM (em nome de qualquer cliente)
 function ensureRequester(user) {
@@ -122,6 +123,22 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
   const creditosACompar = modalidade === 'AL_DIF' ? result.creditos.al_dif : result.creditos.al_nf;
   const autoSend = !!payload.autoSend;
 
+  // Sobe PDF de entrada pro S3 (se configurado). Senão, bytes inline.
+  let inputPdfS3Key = null;
+  let inputPdfBytesData = null;
+  if (pdfBuffer) {
+    if (storage.isEnabled()) {
+      // ID temporário pra criar a key — vamos refinar depois pelo id real
+      const tmpKey = storage.buildKey('credit-requests', ['_tmp'], pdfName || 'invoice.pdf');
+      await storage.uploadBuffer({
+        key: tmpKey, buffer: pdfBuffer, contentType: 'application/pdf',
+        contentDisposition: `inline; filename="${encodeURIComponent(pdfName || 'invoice.pdf')}"`,
+      });
+      inputPdfS3Key = tmpKey;
+    } else {
+      inputPdfBytesData = pdfBuffer;
+    }
+  }
   const created = await prisma.creditRequest.create({
     data: {
       clienteId: cli.id,
@@ -135,7 +152,8 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
       status: autoSend ? 'SENT' : 'DRAFT',
       sentAt: autoSend ? new Date() : null,
       inputPdfName: pdfName || null,
-      inputPdfBytes: pdfBuffer || null,
+      inputPdfBytes: inputPdfBytesData,
+      inputPdfS3Key,
       aiPromptVersion: aiPromptVersion ?? null,
     },
     select: {
@@ -211,9 +229,19 @@ export async function resolveRequest(user, id, { note, attachmentName, attachmen
     resolutionNote: note || null,
   };
   if (attachmentBytes) {
-    data.resolutionAttachmentName  = attachmentName  || 'evidencia';
-    data.resolutionAttachmentMime  = attachmentMime  || 'application/octet-stream';
-    data.resolutionAttachmentBytes = attachmentBytes;
+    const safeName = attachmentName || 'evidencia';
+    data.resolutionAttachmentName = safeName;
+    data.resolutionAttachmentMime = attachmentMime || 'application/octet-stream';
+    if (storage.isEnabled()) {
+      const key = storage.buildKey('credit-requests', [id, 'resolution'], safeName);
+      await storage.uploadBuffer({
+        key, buffer: attachmentBytes, contentType: data.resolutionAttachmentMime,
+        contentDisposition: `inline; filename="${encodeURIComponent(safeName)}"`,
+      });
+      data.resolutionAttachmentS3Key = key;
+    } else {
+      data.resolutionAttachmentBytes = attachmentBytes;
+    }
   }
 
   const updated = await prisma.creditRequest.update({ where: { id }, data });
@@ -247,13 +275,16 @@ export async function cancelRequest(user, id) {
   return prisma.creditRequest.update({ where: { id }, data: { status: 'CANCELED' } });
 }
 
-// Download do PDF original (input) — valida permissão pelo metadado primeiro
+// Download do PDF original (input). S3 quando disponível, bytes inline legado.
 export async function getInputPdf(user, id) {
-  // valida permissão sem carregar bytes
-  await getRequest(user, id);
+  await getRequest(user, id); // valida permissão
   const r = await prisma.creditRequest.findUnique({
-    where: { id }, select: { inputPdfBytes: true, inputPdfName: true },
+    where: { id }, select: { inputPdfBytes: true, inputPdfName: true, inputPdfS3Key: true },
   });
+  if (r?.inputPdfS3Key) {
+    const url = await storage.getDownloadUrl(r.inputPdfS3Key, { filename: r.inputPdfName || 'invoice.pdf', inline: true });
+    return { redirectUrl: url };
+  }
   if (!r?.inputPdfBytes) { const e = new Error('Sem PDF anexado'); e.status = 404; throw e; }
   return { filename: r.inputPdfName || 'invoice.pdf', bytes: r.inputPdfBytes };
 }
@@ -262,8 +293,17 @@ export async function getInputPdf(user, id) {
 export async function getResolutionAttachment(user, id) {
   await getRequest(user, id);
   const r = await prisma.creditRequest.findUnique({
-    where: { id }, select: { resolutionAttachmentBytes: true, resolutionAttachmentName: true, resolutionAttachmentMime: true },
+    where: { id }, select: {
+      resolutionAttachmentBytes: true, resolutionAttachmentS3Key: true,
+      resolutionAttachmentName: true, resolutionAttachmentMime: true,
+    },
   });
+  if (r?.resolutionAttachmentS3Key) {
+    const url = await storage.getDownloadUrl(r.resolutionAttachmentS3Key, {
+      filename: r.resolutionAttachmentName || 'evidencia', inline: true,
+    });
+    return { redirectUrl: url };
+  }
   if (!r?.resolutionAttachmentBytes) { const e = new Error('Sem anexo de resolução'); e.status = 404; throw e; }
   return {
     filename: r.resolutionAttachmentName || 'evidencia',

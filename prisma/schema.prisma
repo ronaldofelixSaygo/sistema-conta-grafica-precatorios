@@ -40,9 +40,10 @@ model User {
   // Preferência de tema do usuário (persistida)
   themePref    String    @default("dark") // 'dark' | 'light'
 
-  // Avatar (foto do perfil). Guardado como bytes inline pra evitar dependência
-  // de storage externo. Limitamos no upload pra ~2 MB.
+  // Avatar (foto do perfil). Quando AWS S3 configurado, fica em
+  // `avatarS3Key`. `avatarBytes` continua pra retrocompat (nullable).
   avatarBytes  Bytes?
+  avatarS3Key  String?
   avatarMime   String?
   avatarUpdated DateTime?  // pra cache-busting do <img src>
 
@@ -338,7 +339,8 @@ model KanbanAttachment {
   filename     String
   mimeType     String
   size         Int
-  content      Bytes      // bytea - arquivo armazenado no banco
+  content      Bytes?     // bytea inline (legado). Pode ser nulo se s3Key estiver setado.
+  s3Key        String?    // chave do objeto no S3 (novos uploads vão aqui)
 
   uploadedById String?
   uploadedBy   User?      @relation("KanbanUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
@@ -605,14 +607,16 @@ model CreditRequest {
   creditosACompar Float    @default(0)
   modalidade      String   @default("AL_NF") // AL_NF (4%) | AL_DIF (1.2%)
 
-  // Anexos do PDF de entrada (opcional)
+  // Anexos do PDF de entrada (opcional). bytes inline (legado) ou s3Key (novo).
   inputPdfName    String?
   inputPdfBytes   Bytes?
+  inputPdfS3Key   String?
 
   // anexo de evidência da resolução (opcional — não bloqueia conclusão)
   resolutionAttachmentName  String?
   resolutionAttachmentMime  String?
   resolutionAttachmentBytes Bytes?
+  resolutionAttachmentS3Key String?
   resolutionNote  String?  @db.Text
 
   status          CreditRequestStatus @default(DRAFT)
@@ -850,8 +854,9 @@ model DesoneracaoNota {
   deletedAt      DateTime?
   deletedById    String?
 
-  // PDF oficial — anexado na etapa ENVIO_NF_OFICIAL
+  // PDF oficial. bytes inline (legado) ou s3Key (novo)
   oficialBytes   Bytes?
+  oficialS3Key   String?
   oficialNome    String?
   oficialMime    String?
 
@@ -868,10 +873,11 @@ model DesoneracaoDocumento {
   id             String       @id @default(uuid())
   desoneracaoId  String
   desoneracao    Desoneracao  @relation(fields: [desoneracaoId], references: [id], onDelete: Cascade)
-  tipo           String       // 'DUIMP' | 'PL' | 'PI' | 'AFRMM' | 'BL' | 'CCT' | 'DMI' | 'DESPACHO' | 'OUTRO'
+  tipo           String       // 'DUIMP' | 'DI' | 'DI_JUSTIFICATIVA' | 'PL' | 'PI' | 'AFRMM' | 'CTE_AWB_BL' | 'DMI' | 'DESPACHO' | 'OUTRO'
   nome           String
   mime           String
-  bytes          Bytes
+  bytes          Bytes?       // legado (anexos antigos antes do S3)
+  s3Key          String?      // novos uploads vão pra S3 e gravam a key aqui
   uploadedById   String
   uploadedBy     User         @relation("DesoneracaoDocBy", fields: [uploadedById], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())

@@ -168,10 +168,13 @@ export async function resolve(req, res, next) {
 }
 export async function downloadEvidence(req, res, next) {
   try {
-    const { filename, mime, bytes } = await svc.getResolutionAttachment(req.user, req.params.id);
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(filename)}"`);
-    res.end(Buffer.from(bytes));
+    const r = await svc.getResolutionAttachment(req.user, req.params.id);
+    // S3: redirect 302 pra URL assinada (zero peso no servidor)
+    if (r.redirectUrl) return res.redirect(r.redirectUrl);
+    // Legado: bytes inline
+    res.setHeader('Content-Type', r.mime);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(r.filename)}"`);
+    res.end(Buffer.from(r.bytes));
   } catch (e) { next(e); }
 }
 export async function cancel(req, res, next) {
@@ -183,9 +186,12 @@ export async function cancel(req, res, next) {
 }
 export async function downloadPdf(req, res, next) {
   try {
-    const { filename, bytes } = await svc.getInputPdf(req.user, req.params.id);
+    const r = await svc.getInputPdf(req.user, req.params.id);
+    // S3: redirect 302 pra URL assinada
+    if (r.redirectUrl) return res.redirect(r.redirectUrl);
+    // Legado: bytes inline
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(filename)}"`);
-    res.end(Buffer.from(bytes));
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(r.filename)}"`);
+    res.end(Buffer.from(r.bytes));
   } catch (e) { next(e); }
 }

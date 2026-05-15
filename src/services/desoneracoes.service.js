@@ -12,6 +12,7 @@
 //   - EMISSAO_NF, ENVIO_NF_OFICIAL → cliente (não tem parceiroId)
 // =====================================================================
 import { prisma } from '../config/prisma.js';
+import * as storage from './storage.service.js';
 
 // Defaults da config de responsáveis por etapa (semeadas no boot).
 const STEP_CONFIG_DEFAULTS = [
@@ -768,6 +769,9 @@ export async function validarNota(user, notaId) {
 // Rejeita uma NF — disponível na etapa VALIDACAO_NF. Quando há ao menos
 // uma NF rejeitada e o parceiro avança, o fluxo passa por ENVIO_NF_OFICIAL
 // pra o cliente re-anexar as rejeitadas.
+// Rejeitar uma NF — disponível na etapa VALIDACAO_NF.
+// Side effect importante: ao rejeitar, o processo VOLTA AUTOMATICAMENTE pra
+// EMISSAO_NF pra o cliente substituir o arquivo. Não precisa de botão extra.
 export async function rejeitarNota(user, notaId, motivo) {
   const cur = await prisma.desoneracaoNota.findUnique({ where: { id: notaId }, include: { desoneracao: true } });
   if (!cur || cur.deletedAt) { const e = new Error('NF não encontrada'); e.status = 404; throw e; }
@@ -775,14 +779,36 @@ export async function rejeitarNota(user, notaId, motivo) {
     const e = new Error('Rejeição só pode ser feita na etapa "Validação NFs"');
     e.status = 400; throw e;
   }
-  const n = await prisma.desoneracaoNota.update({
-    where: { id: notaId },
-    data: { rejeitada: true, rejeitadaAt: new Date(), rejeitadaMotivo: motivo || null, validada: false, validadaAt: null, validadaPorId: null },
+  const desoneracaoId = cur.desoneracaoId;
+  await prisma.$transaction(async (tx) => {
+    // 1) Marca a NF como rejeitada
+    await tx.desoneracaoNota.update({
+      where: { id: notaId },
+      data: {
+        rejeitada: true, rejeitadaAt: new Date(), rejeitadaMotivo: motivo || null,
+        validada: false, validadaAt: null, validadaPorId: null,
+      },
+    });
+    // 2) Volta o processo pra EMISSAO_NF (cliente substitui o arquivo)
+    await tx.desoneracaoStep.update({
+      where: { desoneracaoId_etapa: { desoneracaoId, etapa: 'VALIDACAO_NF' } },
+      data: { completedAt: null, startedAt: null, notes: 'Devolvido — NF rejeitada' },
+    });
+    await tx.desoneracaoStep.update({
+      where: { desoneracaoId_etapa: { desoneracaoId, etapa: 'EMISSAO_NF' } },
+      data: { completedAt: null, completedById: null, startedAt: new Date() },
+    });
+    await tx.desoneracao.update({ where: { id: desoneracaoId }, data: { currentStep: 'EMISSAO_NF' } });
+    // 3) Evento de auditoria
+    await tx.desoneracaoEvento.create({
+      data: {
+        desoneracaoId, etapa: 'VALIDACAO_NF', acao: 'NF_REJEITADA',
+        descricao: `NF ${cur.tipo === 'SAIDA' ? 'de Saída' : 'de Entrada'} ${cur.oficialNome || cur.numero} rejeitada${motivo?': '+motivo:''} — devolvido pro cliente`,
+        byUserId: user.id,
+      },
+    });
   });
-  await prisma.desoneracaoEvento.create({
-    data: { desoneracaoId: n.desoneracaoId, acao: 'NF_REJEITADA', descricao: `NF ${n.numero} rejeitada${motivo?': '+motivo:''}`, byUserId: user.id },
-  });
-  return n;
+  return { ok: true, currentStep: 'EMISSAO_NF' };
 }
 
 export async function anexarOficialNota(user, notaId, { name, mime, bytes }) {
@@ -803,9 +829,19 @@ export async function anexarOficialNota(user, notaId, { name, mime, bytes }) {
   return { id: n.id };
 }
 
+// Retorna ou os bytes (legado) OU uma URL assinada do S3 (novos). O caller
+// (controller) decide: se vier `redirectUrl`, faz 302; senão, envia os bytes.
 export async function getOficialNota(notaId) {
-  const n = await prisma.desoneracaoNota.findUnique({ where: { id: notaId } });
-  if (!n || !n.oficialBytes || n.deletedAt) { const e = new Error('NF oficial não encontrada'); e.status = 404; throw e; }
+  const n = await prisma.desoneracaoNota.findUnique({
+    where: { id: notaId },
+    select: { oficialBytes: true, oficialS3Key: true, oficialNome: true, oficialMime: true, deletedAt: true },
+  });
+  if (!n || n.deletedAt) { const e = new Error('NF oficial não encontrada'); e.status = 404; throw e; }
+  if (n.oficialS3Key) {
+    const url = await storage.getDownloadUrl(n.oficialS3Key, { filename: n.oficialNome, inline: true });
+    return { redirectUrl: url };
+  }
+  if (!n.oficialBytes) { const e = new Error('NF oficial não encontrada'); e.status = 404; throw e; }
   return { name: n.oficialNome || 'nf.pdf', mime: n.oficialMime || 'application/pdf', bytes: n.oficialBytes };
 }
 
@@ -819,8 +855,8 @@ export async function removeNota(user, notaId) {
   if (!isStaff && n.desoneracao.currentStep !== 'EMISSAO_NF') {
     const e = new Error('Só pode excluir NF enquanto a etapa "Emissão NFs" estiver em andamento'); e.status = 400; throw e;
   }
-  // SOFT DELETE: preserva trilha de auditoria. A linha continua no banco,
-  // mas todas as listagens filtram por deletedAt: null.
+  // SOFT DELETE no banco. O objeto no S3 fica preservado por enquanto pra não
+  // perder trilha (delete físico só rodaria via job de retenção futuro).
   await prisma.desoneracaoNota.update({
     where: { id: notaId },
     data: { deletedAt: new Date(), deletedById: user.id },
@@ -862,6 +898,20 @@ export async function uploadNota(user, id, file, tipo) {
     const e = new Error('NFs só podem ser anexadas na etapa "Emissão NFs". Se houver NFs rejeitadas, o parceiro precisa devolver pro cliente primeiro.');
     e.status = 400; throw e;
   }
+  // Se S3 está configurado, sobe pro bucket e grava só a key (banco fica leve).
+  // Senão, fallback pra Bytes inline (retrocompat).
+  let oficialS3Key = null;
+  let oficialBytes = null;
+  if (storage.isEnabled()) {
+    const key = storage.buildKey('desoneracoes', [id, 'notas'], file.originalname);
+    await storage.uploadBuffer({
+      key, buffer: file.buffer, contentType: file.mimetype,
+      contentDisposition: `inline; filename="${encodeURIComponent(file.originalname)}"`,
+    });
+    oficialS3Key = key;
+  } else {
+    oficialBytes = file.buffer;
+  }
   const n = await prisma.desoneracaoNota.create({
     data: {
       desoneracaoId: id,
@@ -870,7 +920,8 @@ export async function uploadNota(user, id, file, tipo) {
       valor: 0,
       oficialNome: file.originalname,
       oficialMime: file.mimetype,
-      oficialBytes: file.buffer,
+      oficialBytes,
+      oficialS3Key,
     },
   });
   await prisma.desoneracaoEvento.create({
@@ -931,8 +982,21 @@ export async function addDocumento(user, id, { tipo, name, mime, bytes }) {
     const e = new Error(`Documento "${tipoFinal}" não é esperado nesta etapa. Permitidos: ${permitidos.join(', ')}`);
     e.status = 400; throw e;
   }
+  // S3 quando habilitado; senão fallback pra bytes inline.
+  let s3Key = null;
+  let bytesData = null;
+  if (storage.isEnabled()) {
+    const key = storage.buildKey('desoneracoes', [id, 'docs', tipoFinal], name);
+    await storage.uploadBuffer({
+      key, buffer: bytes, contentType: mime,
+      contentDisposition: `inline; filename="${encodeURIComponent(name)}"`,
+    });
+    s3Key = key;
+  } else {
+    bytesData = bytes;
+  }
   const doc = await prisma.desoneracaoDocumento.create({
-    data: { desoneracaoId: id, tipo: tipoFinal, nome: name, mime, bytes, uploadedById: user.id },
+    data: { desoneracaoId: id, tipo: tipoFinal, nome: name, mime, bytes: bytesData, s3Key, uploadedById: user.id },
   });
   await prisma.desoneracaoEvento.create({
     data: { desoneracaoId: id, acao: 'DOC_ANEXADO', descricao: `${tipo}: ${name}`, byUserId: user.id },
@@ -941,8 +1005,15 @@ export async function addDocumento(user, id, { tipo, name, mime, bytes }) {
 }
 
 export async function getDocumento(docId) {
-  const d = await prisma.desoneracaoDocumento.findUnique({ where: { id: docId } });
+  const d = await prisma.desoneracaoDocumento.findUnique({
+    where: { id: docId },
+    select: { nome: true, mime: true, bytes: true, s3Key: true },
+  });
   if (!d) { const e = new Error('Documento não encontrado'); e.status = 404; throw e; }
+  if (d.s3Key) {
+    const url = await storage.getDownloadUrl(d.s3Key, { filename: d.nome, inline: true });
+    return { redirectUrl: url };
+  }
   return { name: d.nome, mime: d.mime, bytes: d.bytes };
 }
 
@@ -970,6 +1041,8 @@ export async function removeDocumento(user, docId) {
     }
   }
   await prisma.desoneracaoDocumento.delete({ where: { id: docId } });
+  // Best-effort: apaga o objeto no S3 também. Falha não bloqueia.
+  if (d.s3Key) storage.deleteObject(d.s3Key).catch(() => {});
   await prisma.desoneracaoEvento.create({
     data: { desoneracaoId: d.desoneracaoId, acao: 'DOC_REMOVIDO', descricao: `${d.tipo}: ${d.nome}`, byUserId: user.id },
   });

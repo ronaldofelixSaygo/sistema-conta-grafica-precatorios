@@ -1,6 +1,7 @@
 import * as authSvc from '../services/auth.service.js';
 import { env } from '../config/env.js';
 import { effectivePerms } from '../services/permissions.service.js';
+import * as storage from '../services/storage.service.js';
 
 export async function login(req, res, next) {
   try {
@@ -60,24 +61,48 @@ export async function uploadAvatar(req, res, next) {
       const e = new Error('Formato não suportado (use PNG, JPG ou WEBP)'); e.status = 400; throw e;
     }
     const { prisma } = await import('../config/prisma.js');
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: {
-        avatarBytes: req.file.buffer,
-        avatarMime: req.file.mimetype,
-        avatarUpdated: new Date(),
-      },
-    });
-    res.json({ ok: true, updatedAt: new Date() });
+
+    // Se S3 está habilitado, sobe no bucket. Senão, fallback pro Bytes inline.
+    let data = {
+      avatarMime: req.file.mimetype,
+      avatarUpdated: new Date(),
+    };
+    if (storage.isEnabled()) {
+      // Apaga o antigo (best-effort) pra não acumular lixo
+      const existing = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { avatarS3Key: true },
+      });
+      if (existing?.avatarS3Key) {
+        storage.deleteObject(existing.avatarS3Key).catch(() => {});
+      }
+      const ext = (req.file.mimetype.split('/')[1] || 'png').toLowerCase();
+      const key = storage.buildKey('avatars', req.user.id, `avatar.${ext}`);
+      await storage.uploadBuffer({
+        key, buffer: req.file.buffer, contentType: req.file.mimetype,
+      });
+      data.avatarS3Key = key;
+      data.avatarBytes = null; // libera espaço do Bytes legado
+    } else {
+      data.avatarBytes = req.file.buffer;
+      data.avatarS3Key = null;
+    }
+    await prisma.user.update({ where: { id: req.user.id }, data });
+    res.json({ ok: true, updatedAt: data.avatarUpdated });
   } catch (e) { next(e); }
 }
 
 export async function deleteAvatar(req, res, next) {
   try {
     const { prisma } = await import('../config/prisma.js');
+    const u = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { avatarS3Key: true },
+    });
+    if (u?.avatarS3Key) storage.deleteObject(u.avatarS3Key).catch(() => {});
     await prisma.user.update({
       where: { id: req.user.id },
-      data: { avatarBytes: null, avatarMime: null, avatarUpdated: new Date() },
+      data: { avatarBytes: null, avatarS3Key: null, avatarMime: null, avatarUpdated: new Date() },
     });
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -91,8 +116,13 @@ export async function getAvatar(req, res, next) {
     const { prisma } = await import('../config/prisma.js');
     const u = await prisma.user.findUnique({
       where: { id: req.params.userId },
-      select: { avatarBytes: true, avatarMime: true },
+      select: { avatarBytes: true, avatarMime: true, avatarS3Key: true },
     });
+    // S3: redirect 302 pra URL assinada
+    if (u?.avatarS3Key) {
+      const url = await storage.getDownloadUrl(u.avatarS3Key, { expiresIn: 3600 });
+      return res.redirect(url);
+    }
     if (!u?.avatarBytes) { res.status(404).end(); return; }
     res.setHeader('Content-Type', u.avatarMime || 'image/png');
     res.setHeader('Cache-Control', 'private, max-age=3600');

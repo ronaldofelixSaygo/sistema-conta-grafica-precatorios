@@ -3,6 +3,7 @@ import { clienteScope } from '../utils/scope.js';
 import { MAX_UPLOAD_BYTES } from '../utils/kanban.constants.js';
 import * as stageDef from './stageDef.service.js';
 import * as email from './email.service.js';
+import * as storage from './storage.service.js';
 
 // Atualiza campos de status do Cliente quando uma etapa é concluída.
 // O mapeamento é por LABEL da etapa (case-insensitive) pra ser robusto a mudanças de key.
@@ -308,6 +309,19 @@ export async function uploadAttachment(user, cardId, file, { stageProgressId = n
   });
   if (!card) { const e = new Error('Card nao encontrado'); e.status = 404; throw e; }
 
+  // S3 quando habilitado; senão fallback pra bytes inline.
+  let s3Key = null;
+  let content = null;
+  if (storage.isEnabled()) {
+    const key = storage.buildKey('kanban', [cardId], file.originalname);
+    await storage.uploadBuffer({
+      key, buffer: file.buffer, contentType: file.mimetype,
+      contentDisposition: `inline; filename="${encodeURIComponent(file.originalname)}"`,
+    });
+    s3Key = key;
+  } else {
+    content = file.buffer;
+  }
   return prisma.kanbanAttachment.create({
     data: {
       cardId,
@@ -315,7 +329,8 @@ export async function uploadAttachment(user, cardId, file, { stageProgressId = n
       filename: file.originalname,
       mimeType: file.mimetype,
       size: file.size,
-      content: file.buffer,
+      content,
+      s3Key,
       uploadedById: user.id,
     },
     select: { id: true, filename: true, mimeType: true, size: true, createdAt: true },
@@ -327,6 +342,10 @@ export async function downloadAttachment(user, attachmentId) {
     where: { id: attachmentId, card: cardScopeWhere(user) },
   });
   if (!att) { const e = new Error('Anexo nao encontrado'); e.status = 404; throw e; }
+  if (att.s3Key) {
+    const url = await storage.getDownloadUrl(att.s3Key, { filename: att.filename, inline: true });
+    return { redirectUrl: url };
+  }
   return att;
 }
 
@@ -339,5 +358,6 @@ export async function deleteAttachment(user, attachmentId) {
     const e = new Error('Sem permissao'); e.status = 403; throw e;
   }
   await prisma.kanbanAttachment.delete({ where: { id: attachmentId } });
+  if (att.s3Key) storage.deleteObject(att.s3Key).catch(() => {});
   return { ok: true };
 }
