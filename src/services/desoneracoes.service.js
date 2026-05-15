@@ -52,13 +52,15 @@ export async function getStepConfig(etapa) {
 // Tipos de documento (cadastráveis). Antes hardcoded em código.
 // =====================================================================
 const DOC_TIPOS_BUILTIN = [
-  { code: 'DUIMP',      label: 'DUIMP — Declaração Única de Importação', sort: 1 },
-  { code: 'PL',         label: 'PL — Packing List',                        sort: 2 },
-  { code: 'PI',         label: 'PI — Proforma Invoice / Commercial Invoice', sort: 3 },
-  { code: 'AFRMM',      label: 'AFRMM — Comprovante AFRMM',                sort: 4 },
-  { code: 'CTE_AWB_BL', label: 'Conhecimento de Transporte (CTE/AWB/BL)',  sort: 5 },
-  { code: 'DMI',        label: 'DMI — Documento de Movimentação Interna', sort: 6 },
-  { code: 'DESPACHO',   label: 'Despacho ICMS',                           sort: 7 },
+  { code: 'DUIMP',          label: 'DUIMP — Extrato da Declaração Única', sort: 1 },
+  { code: 'DI',             label: 'DI — Extrato da Declaração de Importação', sort: 2 },
+  { code: 'DI_JUSTIFICATIVA', label: 'DI — Declaração de Justificativa',  sort: 3 },
+  { code: 'PL',             label: 'PL — Packing List',                   sort: 4 },
+  { code: 'PI',             label: 'PI — Proforma Invoice / Commercial Invoice', sort: 5 },
+  { code: 'AFRMM',          label: 'AFRMM — Comprovante AFRMM',           sort: 6 },
+  { code: 'CTE_AWB_BL',     label: 'Conhecimento de Transporte (CTE/AWB/BL)', sort: 7 },
+  { code: 'DMI',            label: 'DMI — Documento de Movimentação Interna', sort: 8 },
+  { code: 'DESPACHO',       label: 'Despacho ICMS',                       sort: 9 },
 ];
 // Tipos legados: marcamos inativos pra não aparecer em selects, mas documentos
 // já anexados com esses tipos continuam acessíveis (são histórico).
@@ -159,20 +161,23 @@ function nextStep(cur) {
 // Documentos obrigatórios por etapa × modal. Padrão; pode ser sobrescrito
 // pela tabela DesoneracaoDocConfig em runtime via configs do admin.
 // CTE_AWB_BL unifica os antigos BL e CCT.
+// Os tipos DUIMP/DI/DI_JUSTIFICATIVA são resolvidos em runtime pelo
+// tipoDocImport da desoneração (ver getRequiredDocs).
 const DEFAULT_DOCS_BY_STEP = {
   DOCS_DESPACHANTE: {
-    TODOS:      ['DUIMP', 'PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
-    MARITIMO:   ['DUIMP', 'PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
-    AEREO:      ['DUIMP', 'PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
-    RODOVIARIO: ['DUIMP', 'PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
+    TODOS:      ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
+    MARITIMO:   ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
+    AEREO:      ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
+    RODOVIARIO: ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
   },
   EMISSAO_DMI:    { TODOS: ['DMI'] },
   PROTOCOLO_ICMS: { TODOS: ['DESPACHO'] },
 };
 
 // Resolve quais documentos são EXIGIDOS ao avançar uma etapa, considerando
-// modal e overrides do admin. Retorna [{ tipo, obrigatorio }].
-async function getRequiredDocs(modal, etapa) {
+// modal, overrides do admin e tipoDocImport (DI/DUIMP).
+// Retorna array de tipos obrigatórios.
+async function getRequiredDocs(modal, etapa, tipoDocImport = null) {
   // overrides do admin (tabela DesoneracaoDocConfig)
   const overrides = await prisma.desoneracaoDocConfig.findMany({
     where: {
@@ -180,14 +185,23 @@ async function getRequiredDocs(modal, etapa) {
       OR: [{ modal }, { modal: 'TODOS' }],
     },
   });
+  let baseDocs;
   if (overrides.length) {
-    // se há config, usa só ela (admin tem controle total)
-    return overrides
-      .filter(o => o.obrigatorio)
-      .map(o => o.tipoDocumento);
+    baseDocs = overrides.filter(o => o.obrigatorio).map(o => o.tipoDocumento);
+  } else {
+    const def = DEFAULT_DOCS_BY_STEP[etapa] || {};
+    baseDocs = def[modal] || def.TODOS || [];
   }
-  const def = DEFAULT_DOCS_BY_STEP[etapa] || {};
-  return def[modal] || def.TODOS || [];
+  // Etapa 1 (DOCS_DESPACHANTE): adiciona DUIMP, ou DI+JUSTIFICATIVA, conforme escolha do user
+  if (etapa === 'DOCS_DESPACHANTE' && tipoDocImport) {
+    if (tipoDocImport === 'DI') {
+      if (!baseDocs.includes('DI'))               baseDocs = ['DI', ...baseDocs];
+      if (!baseDocs.includes('DI_JUSTIFICATIVA')) baseDocs = ['DI_JUSTIFICATIVA', ...baseDocs];
+    } else if (tipoDocImport === 'DUIMP') {
+      if (!baseDocs.includes('DUIMP'))            baseDocs = ['DUIMP', ...baseDocs];
+    }
+  }
+  return baseDocs;
 }
 
 // === CRUD principal ===
@@ -253,7 +267,19 @@ export async function getDesoneracao(id, user = null) {
         },
         orderBy: { etapa: 'asc' },
       },
-      notas: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' } },
+      // SELECT explicito EXCLUINDO oficialBytes (PDF inteiro). Sem isso, cada
+      // NF inflava o payload em MB e travava a tela.
+      notas: {
+        where: { deletedAt: null },
+        select: {
+          id: true, tipo: true, numero: true, serie: true, dataEmissao: true, valor: true,
+          validada: true, validadaAt: true, validadaPorId: true,
+          rejeitada: true, rejeitadaAt: true, rejeitadaMotivo: true,
+          oficialNome: true, oficialMime: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      },
       documentos: {
         select: { id: true, tipo: true, nome: true, mime: true, createdAt: true, uploadedBy: { select: { name: true } } },
         orderBy: { createdAt: 'asc' },
@@ -357,12 +383,16 @@ export async function createDesoneracao(user, data) {
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    const tipoDocImport = data.tipoDocImport === 'DI' ? 'DI'
+                        : data.tipoDocImport === 'DUIMP' ? 'DUIMP'
+                        : null;
     const d = await tx.desoneracao.create({
       data: {
         clienteId: cliente.id,
         creditRequestId: data.creditRequestId || null,
         numeroProcesso: data.numeroProcesso || null,
         duimpDi: data.duimpDi || null,
+        tipoDocImport,
         modal: data.modal,
         valorMercadoria: data.valorMercadoria != null ? Number(data.valorMercadoria) : null,
         valorIcmsDesonerado: data.valorIcmsDesonerado != null ? Number(data.valorIcmsDesonerado) : null,
@@ -468,7 +498,11 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
     where: { id },
     include: {
       steps: true,
-      notas: { where: { deletedAt: null } },
+      // SELECT sem oficialBytes — só campos de controle
+      notas: {
+        where: { deletedAt: null },
+        select: { id: true, tipo: true, validada: true, rejeitada: true, oficialNome: true },
+      },
       documentos: { select: { tipo: true } },
     },
   });
@@ -487,7 +521,7 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
   const tipos = new Set(cur.documentos.map(d => d.tipo));
 
   // Docs obrigatórios pra etapa atual
-  const obrigatorios = await getRequiredDocs(cur.modal, etapaAtual);
+  const obrigatorios = await getRequiredDocs(cur.modal, etapaAtual, cur.tipoDocImport);
   const faltando = obrigatorios.filter(t => !tipos.has(t));
   if (faltando.length) {
     const e = new Error(`Documentos obrigatórios faltando: ${faltando.join(', ')}`);
@@ -668,7 +702,7 @@ export async function cancelDesoneracao(user, id, reason) {
 // CTE_AWB_BL é o tipo unificado novo; BL/CCT são legados mas continuam aceitos
 // pra retrocompat com documentos já anexados antes da unificação.
 const ETAPA_DOC_TIPOS = {
-  DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','CTE_AWB_BL','BL','CCT','OUTRO'],
+  DOCS_DESPACHANTE: ['DUIMP','DI','DI_JUSTIFICATIVA','PL','PI','AFRMM','CTE_AWB_BL','BL','CCT','OUTRO'],
   EMISSAO_DMI:      ['DMI','OUTRO'],
   EMISSAO_NF:       ['OUTRO'],
   VALIDACAO_NF:     ['OUTRO'],
@@ -849,7 +883,8 @@ export async function uploadNota(user, id, file, tipo) {
 // Usado quando parceiro rejeitou NFs e quer devolver pro cliente refazer.
 export async function devolverNfsCliente(user, id) {
   const cur = await prisma.desoneracao.findUnique({
-    where: { id }, include: { notas: { where: { deletedAt: null } } },
+    where: { id },
+    include: { notas: { where: { deletedAt: null }, select: { rejeitada: true } } },
   });
   if (!cur) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
   if (cur.currentStep !== 'VALIDACAO_NF') {

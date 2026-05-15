@@ -109,6 +109,7 @@ window.VIEW_desoneracoes = (() => {
       cols: [
         { label: 'Quando', get: r => UI.fmtDateTime(r.createdAt) },
         { label: 'Cliente', get: r => r.cliente?.nome },
+        { label: 'Nº Processo', get: r => r.numeroProcesso || '—' },
         { label: 'DUIMP/DI', get: r => r.duimpDi || '—' },
         { label: 'Modal', get: r => MODAL_LABELS[r.modal] || r.modal },
         { label: 'Etapa', get: r => STEP_LABELS[r.currentStep] || r.currentStep },
@@ -147,8 +148,16 @@ window.VIEW_desoneracoes = (() => {
             <option value="RODOVIARIO">Rodoviário</option>
           </select>
         </div>
-        <div><label>DUIMP/DI</label><input name="duimpDi" placeholder="ex: 26/0123456-7"></div>
-        <div><label>Nº Processo</label><input name="numeroProcesso" placeholder="opcional"></div>
+        <div><label>Tipo do documento *</label>
+          <select name="tipoDocImport" required>
+            <option value="">—</option>
+            <option value="DUIMP">DUIMP</option>
+            <option value="DI">DI (Declaração de Importação)</option>
+          </select>
+          <div class="muted small" style="margin-top:.2rem">Se DI, será necessário anexar também a declaração de justificativa na etapa 1.</div>
+        </div>
+        <div><label>DUIMP/DI *</label><input name="duimpDi" placeholder="ex: 26/0123456-7" required></div>
+        <div><label>Nº Processo *</label><input name="numeroProcesso" placeholder="número de controle do cliente" required></div>
         <div><label>Valor mercadoria (R$)</label><input type="number" step="0.01" name="valorMercadoria" placeholder="opcional"></div>
         <div class="full muted small" style="border-top:1px solid var(--bd);padding-top:.4rem;margin-top:.2rem">
           ℹ O <strong>valor do ICMS a desonerar</strong> é preenchido na etapa <strong>Emissão DMI</strong>, quando o escritório devolve a DMI com o valor calculado.
@@ -168,7 +177,7 @@ window.VIEW_desoneracoes = (() => {
         duimpDi: fd.get('duimpDi') || null,
         numeroProcesso: fd.get('numeroProcesso') || null,
         valorMercadoria: fd.get('valorMercadoria') ? Number(fd.get('valorMercadoria')) : null,
-        // Sem valorIcmsDesonerado nem parceiros — backend resolve automaticamente.
+        tipoDocImport: fd.get('tipoDocImport') || null,
       };
       try {
         const r = await API.post('/api/desoneracoes', payload);
@@ -182,10 +191,27 @@ window.VIEW_desoneracoes = (() => {
   // ─────────────────────────────────────────────────────────────────────
   // Tela de detalhe (modal grande, stepper horizontal)
   // ─────────────────────────────────────────────────────────────────────
+  // Cache dos tipos de documento (code → label) — usado pra mostrar rótulo
+  // amigável em vez do código nas linhas de documento. Atualiza com TTL.
+  let docTipoLabelMap = null;
+  async function getDocTipoLabels() {
+    if (docTipoLabelMap) return docTipoLabelMap;
+    try {
+      const tipos = await API.get('/api/desoneracoes/doc-tipos?all=1', null, { ttl: 60000 });
+      docTipoLabelMap = Object.fromEntries((tipos || []).map(t => [t.code, t.label]));
+    } catch { docTipoLabelMap = {}; }
+    return docTipoLabelMap;
+  }
+
   async function openDetail(id) {
-    let d;
-    try { d = await API.get(`/api/desoneracoes/${id}`); }
-    catch (e) { return UI.toast(e.message, 'err'); }
+    let d, tipoLabels;
+    try {
+      [d, tipoLabels] = await Promise.all([
+        API.get(`/api/desoneracoes/${id}`),
+        getDocTipoLabels(),
+      ]);
+    } catch (e) { return UI.toast(e.message, 'err'); }
+    window._desoneracaoTipoLabels = tipoLabels;
 
     // ⚠ ATENÇÃO: isStaff aqui é só ADM/SAYGO. Antes incluía PARTNER ESCRITORIO,
     // o que vazava poderes que devem ser exclusivos do staff (excluir documento,
@@ -379,8 +405,9 @@ window.VIEW_desoneracoes = (() => {
 
   // Documentos previstos por ETAPA (linha-a-linha). CTE_AWB_BL unifica os
   // antigos BL e CCT — admin pode renomear/criar tipos novos em Parâmetros.
+  // Etapa 1: DI/DUIMP é determinado pelo tipoDocImport da desoneração.
   const DOCS_PREVISTOS_POR_ETAPA = {
-    DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','CTE_AWB_BL'],
+    DOCS_DESPACHANTE: ['PL','PI','AFRMM','CTE_AWB_BL'],
     EMISSAO_DMI:      ['DMI'],
     PROTOCOLO_ICMS:   ['DESPACHO'],
   };
@@ -392,6 +419,16 @@ window.VIEW_desoneracoes = (() => {
     const rowsByEtapa = {};
     for (const etapa of ['DOCS_DESPACHANTE','EMISSAO_DMI','PROTOCOLO_ICMS']) {
       rowsByEtapa[etapa] = [...DOCS_PREVISTOS_POR_ETAPA[etapa]];
+    }
+    // Etapa 1 ganha DUIMP ou DI+JUSTIFICATIVA conforme tipoDocImport
+    if (d.tipoDocImport === 'DI') {
+      rowsByEtapa.DOCS_DESPACHANTE.unshift('DI_JUSTIFICATIVA');
+      rowsByEtapa.DOCS_DESPACHANTE.unshift('DI');
+    } else if (d.tipoDocImport === 'DUIMP') {
+      rowsByEtapa.DOCS_DESPACHANTE.unshift('DUIMP');
+    } else {
+      // Fallback (desonerações antigas sem tipoDocImport setado): mantém DUIMP
+      rowsByEtapa.DOCS_DESPACHANTE.unshift('DUIMP');
     }
 
     function renderLinha(etapa, tipo) {
@@ -431,8 +468,9 @@ window.VIEW_desoneracoes = (() => {
             </label>` : ''}`;
       })();
 
+      const tipoRotulo = (window._desoneracaoTipoLabels?.[tipo]) || tipo;
       return `<div class="doc-row ${disabled?'disabled':''}">
-        <div class="doc-tipo">${tipo}</div>
+        <div class="doc-tipo" title="${UI.escapeHtml(tipo)}">${UI.escapeHtml(tipoRotulo)}</div>
         <div class="doc-file">${arquivosHtml}</div>
         <div class="doc-actions">${acoesHtml}</div>
       </div>`;

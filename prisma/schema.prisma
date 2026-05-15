@@ -771,6 +771,10 @@ model Desoneracao {
 
   numeroProcesso  String?      // identificação amigável (auto-gerado ou manual)
   duimpDi         String?      // número do DUIMP/DI
+  // Tipo da declaração de importação: DUIMP (anexa só extrato) ou DI (anexa
+  // extrato + declaração de justificativa). Define quais docs são obrigatórios
+  // na etapa 1 (DOCS_DESPACHANTE).
+  tipoDocImport   String?      // 'DUIMP' | 'DI'
   modal           DesonModal
 
   // Valores principais

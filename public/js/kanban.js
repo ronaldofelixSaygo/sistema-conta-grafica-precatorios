@@ -259,11 +259,10 @@ window.VIEW_kanban = (() => {
 
   // ------ NOVO CARD: form com parceiros para todas as etapas ------
   async function openNewCardModal() {
-    // Recarrega a lista de clientes sem cache. Sem isso, clientes cadastrados
-    // em outra view enquanto o Kanban está aberto não aparecem no select.
+    // Usa cache com TTL curto — invalidação automática quando algum cliente
+    // é cadastrado/editado/deletado (clientes.js chama API.invalidate).
     try {
-      API.invalidate?.('/api/clientes');
-      clientesCache = await API.get('/api/clientes', null, { ttl: 0 });
+      clientesCache = await API.get('/api/clientes', null, { ttl: 30000 });
     } catch {}
     const usados = new Set(cards.map(c => c.clienteId));
     // Mostra TODOS os clientes; os que já têm card ficam desabilitados com

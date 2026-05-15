@@ -35,9 +35,10 @@ window.API = (() => {
     return s ? `?${s}` : '';
   }
 
-  // GET com cache opcional (passe { ttl: 30000 } no 3o arg em milissegundos).
-  // Quando ttl === 0, força fetch com `cache: 'no-store'` pra ignorar tanto o
-  // cache em memória quanto qualquer cache HTTP do navegador / proxy.
+  // GET com cache opcional. Cache em memória controlado por `ttl` (ms).
+  // Não força mais `cache: 'no-store'` no fetch — só passa quando o caller
+  // pede explicitamente via `opts.noStore: true`. Forçar no-store em todas
+  // as requisições deixava tudo lento.
   async function get(u, q, opts = {}) {
     const fullUrl = u + qs(q);
     const ttl = Number(opts.ttl) || 0;
@@ -45,7 +46,7 @@ window.API = (() => {
       const c = cache.get(fullUrl);
       if (c && c.expiresAt > Date.now()) return c.data;
     }
-    const data = await req('GET', fullUrl, undefined, { noStore: ttl === 0 });
+    const data = await req('GET', fullUrl, undefined, { noStore: !!opts.noStore });
     if (ttl > 0) cache.set(fullUrl, { data, expiresAt: Date.now() + ttl });
     return data;
   }
