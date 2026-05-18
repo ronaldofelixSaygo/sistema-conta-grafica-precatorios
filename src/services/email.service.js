@@ -20,14 +20,16 @@ export async function getSettingsSafe() {
     apiUrl: s.apiUrl || '',
     sender: s.sender || '',
     hasApiToken: !!(s.apiToken && s.apiToken.length > 0),
-    notifyKanbanStageChange: !!s.notifyKanbanStageChange,
-    notifyKanbanStageDone:   !!s.notifyKanbanStageDone,
-    notifyPartnerRequest:    !!s.notifyPartnerRequest,
-    notifyCreditRequest:     s.notifyCreditRequest !== false,
-    notifyKanbanStageChangeRoles: s.notifyKanbanStageChangeRoles || ['ADM','SAYGO','PARTNER','CLIENT'],
-    notifyKanbanStageDoneRoles:   s.notifyKanbanStageDoneRoles   || ['ADM','SAYGO','PARTNER','CLIENT'],
-    notifyPartnerRequestRoles:    s.notifyPartnerRequestRoles    || ['ADM','SAYGO','PARTNER'],
-    notifyCreditRequestRoles:     s.notifyCreditRequestRoles     || ['ADM','SAYGO','PARTNER'],
+    notifyKanbanStageChange:     !!s.notifyKanbanStageChange,
+    notifyKanbanStageDone:       !!s.notifyKanbanStageDone,
+    notifyPartnerRequest:        !!s.notifyPartnerRequest,
+    notifyCreditRequest:         s.notifyCreditRequest !== false,
+    notifyDesoneracaoStepChange: s.notifyDesoneracaoStepChange !== false,
+    notifyKanbanStageChangeRoles:      s.notifyKanbanStageChangeRoles      || ['ADM','SAYGO','PARTNER','CLIENT'],
+    notifyKanbanStageDoneRoles:        s.notifyKanbanStageDoneRoles        || ['ADM','SAYGO','PARTNER','CLIENT'],
+    notifyPartnerRequestRoles:         s.notifyPartnerRequestRoles         || ['ADM','SAYGO','PARTNER'],
+    notifyCreditRequestRoles:          s.notifyCreditRequestRoles          || ['ADM','SAYGO','PARTNER'],
+    notifyDesoneracaoStepChangeRoles:  s.notifyDesoneracaoStepChangeRoles  || ['ADM','SAYGO','PARTNER','CLIENT'],
     briefingRecipients: s.briefingRecipients || '',
     updatedAt: s.updatedAt,
   };
@@ -53,13 +55,15 @@ export async function updateSettings(data) {
   // Triggers
   if (data.notifyKanbanStageChange !== undefined) upd.notifyKanbanStageChange = !!data.notifyKanbanStageChange;
   if (data.notifyKanbanStageDone   !== undefined) upd.notifyKanbanStageDone   = !!data.notifyKanbanStageDone;
-  if (data.notifyPartnerRequest    !== undefined) upd.notifyPartnerRequest    = !!data.notifyPartnerRequest;
-  if (data.notifyCreditRequest     !== undefined) upd.notifyCreditRequest     = !!data.notifyCreditRequest;
+  if (data.notifyPartnerRequest        !== undefined) upd.notifyPartnerRequest         = !!data.notifyPartnerRequest;
+  if (data.notifyCreditRequest         !== undefined) upd.notifyCreditRequest          = !!data.notifyCreditRequest;
+  if (data.notifyDesoneracaoStepChange !== undefined) upd.notifyDesoneracaoStepChange  = !!data.notifyDesoneracaoStepChange;
   // Roles por trigger
-  if (data.notifyKanbanStageChangeRoles !== undefined) upd.notifyKanbanStageChangeRoles = sanitizeRoles(data.notifyKanbanStageChangeRoles);
-  if (data.notifyKanbanStageDoneRoles   !== undefined) upd.notifyKanbanStageDoneRoles   = sanitizeRoles(data.notifyKanbanStageDoneRoles);
-  if (data.notifyPartnerRequestRoles    !== undefined) upd.notifyPartnerRequestRoles    = sanitizeRoles(data.notifyPartnerRequestRoles);
-  if (data.notifyCreditRequestRoles     !== undefined) upd.notifyCreditRequestRoles     = sanitizeRoles(data.notifyCreditRequestRoles);
+  if (data.notifyKanbanStageChangeRoles      !== undefined) upd.notifyKanbanStageChangeRoles      = sanitizeRoles(data.notifyKanbanStageChangeRoles);
+  if (data.notifyKanbanStageDoneRoles        !== undefined) upd.notifyKanbanStageDoneRoles        = sanitizeRoles(data.notifyKanbanStageDoneRoles);
+  if (data.notifyPartnerRequestRoles         !== undefined) upd.notifyPartnerRequestRoles         = sanitizeRoles(data.notifyPartnerRequestRoles);
+  if (data.notifyCreditRequestRoles          !== undefined) upd.notifyCreditRequestRoles          = sanitizeRoles(data.notifyCreditRequestRoles);
+  if (data.notifyDesoneracaoStepChangeRoles  !== undefined) upd.notifyDesoneracaoStepChangeRoles  = sanitizeRoles(data.notifyDesoneracaoStepChangeRoles);
 
   return prisma.emailSettings.upsert({
     where: { id: 'default' },
@@ -340,6 +344,8 @@ export async function notifyPartnerRequest({ requestId, byUser }) {
   for (const to of tos) sendMail({ ...tpl, to, context: 'partner_request', contextId: requestId });
 }
 
+// Eventos suportados: 'sent' (cliente enviou), 'in_progress' (parceiro aceitou),
+// 'resolved' (parceiro concluiu), 'canceled' (cliente cancelou).
 export async function notifyCreditRequest({ requestId, event = 'sent', byUser }) {
   const s = await getSettings();
   if (!s.enabled || !s.notifyCreditRequest) return;
@@ -350,10 +356,24 @@ export async function notifyCreditRequest({ requestId, event = 'sent', byUser })
   const roles = Array.isArray(s.notifyCreditRequestRoles) ? s.notifyCreditRequestRoles : ['ADM','SAYGO','PARTNER'];
   const tos = await recipientsForCliente(req.clienteId, roles);
   if (!tos.length) return;
+  const EVT_LABEL = {
+    sent:        'Nova solicitação enviada',
+    in_progress: 'Em andamento (parceiro aceitou)',
+    resolved:    'Solicitação concluída',
+    canceled:    'Solicitação cancelada',
+  };
+  const EVT_SHORT = {
+    sent:        'nova solicitação',
+    in_progress: 'em andamento',
+    resolved:    'concluída',
+    canceled:    'cancelada',
+  };
+  const label = EVT_LABEL[event] || event;
+  const short = EVT_SHORT[event] || event;
   const tpl = {
-    subject: `[Solicitação de Créditos] ${req.cliente.nome} — ${event === 'sent' ? 'nova solicitação' : 'concluída'}`,
+    subject: `[Solicitação de Créditos] ${req.cliente.nome} — ${short}`,
     html: baseTemplate(`Solicitação de Créditos — ${req.cliente.nome}`, `
-      <p>Status: <strong>${escape(event === 'sent' ? 'Nova solicitação enviada' : 'Solicitação concluída')}</strong></p>
+      <p>Status: <strong>${escape(label)}</strong></p>
       <p style="background:#f4f5f8;padding:12px;border-radius:6px">
         <strong>Cliente:</strong> ${escape(req.cliente.nome)}<br>
         <strong>Modalidade:</strong> ${escape(req.modalidade)}<br>
@@ -364,6 +384,69 @@ export async function notifyCreditRequest({ requestId, event = 'sent', byUser })
     `),
   };
   for (const to of tos) sendMail({ ...tpl, to, context: `credit_request_${event}`, contextId: requestId });
+}
+
+// =====================================================================
+// Desonerações — notifica avanço de etapa, aprovação e cancelamento.
+// =====================================================================
+const DES_STEP_LABELS = {
+  DOCS_DESPACHANTE: '1. Docs do Despachante',
+  EMISSAO_DMI:      '2. Emissão DMI',
+  EMISSAO_NF:       '3. Emissão NFs',
+  VALIDACAO_NF:     '4. Validação NFs',
+  PROTOCOLO_ICMS:   '5. Protocolo ICMS',
+  CONCLUIDO:        'Concluído',
+};
+
+export function templateDesoneracaoStepChange({ clienteName, fromStep, toStep, byUserName, motivo }) {
+  return {
+    subject: `[Desoneração] ${clienteName}: ${toStep}`,
+    html: baseTemplate(`Desoneração — ${clienteName}`, `
+      <p>O processo de desoneração avançou de etapa.</p>
+      <p style="background:#f4f5f8;padding:12px;border-radius:6px">
+        <strong>De:</strong> ${escape(fromStep || '—')}<br>
+        <strong>Para:</strong> ${escape(toStep)}<br>
+        <strong>Por:</strong> ${escape(byUserName || '—')}
+      </p>
+      ${motivo ? `<p><strong>Observação:</strong> ${escape(motivo)}</p>` : ''}
+      <p>Acesse o sistema para tomar as próximas ações.</p>
+    `),
+  };
+}
+
+// Notifica avanço de etapa no fluxo de desoneração. Chamada como fire-and-forget
+// (setImmediate) — nunca bloqueia a operação.
+export async function notifyDesoneracaoStepAdvance({ desoneracaoId, fromStep, toStep, byUser, motivo }) {
+  const s = await getSettings();
+  console.log('[email] notifyDesoneracaoStepAdvance', { desoneracaoId, fromStep, toStep, enabled: s.enabled, flag: s.notifyDesoneracaoStepChange });
+  if (!s.enabled) { console.warn('[email] notifyDesoneracaoStepAdvance skip: email desabilitado'); return; }
+  if (s.notifyDesoneracaoStepChange === false) {
+    console.warn('[email] notifyDesoneracaoStepAdvance skip: trigger desativado em Parâmetros > E-mail');
+    return;
+  }
+  const des = await prisma.desoneracao.findUnique({
+    where: { id: desoneracaoId }, include: { cliente: true },
+  });
+  if (!des) return;
+  const roles = Array.isArray(s.notifyDesoneracaoStepChangeRoles) ? s.notifyDesoneracaoStepChangeRoles : ['ADM','SAYGO','PARTNER','CLIENT'];
+  const tos = await recipientsForCliente(des.clienteId, roles);
+  if (!tos.length) {
+    console.warn('[email] notifyDesoneracaoStepAdvance skip: nenhum destinatário pro cliente', des.clienteId);
+    await logEmail({ to: '(sem destinatários)', subject: `Desoneração ${fromStep}→${toStep}`, status: 'error', error: `Sem destinatários nas roles ${roles.join(',')} pro cliente ${des.cliente.nome}`, context: 'desoneracao_step_change', contextId: desoneracaoId });
+    return;
+  }
+  const tpl = templateDesoneracaoStepChange({
+    clienteName: des.cliente.nome,
+    fromStep: DES_STEP_LABELS[fromStep] || fromStep,
+    toStep:   DES_STEP_LABELS[toStep]   || toStep,
+    byUserName: byUser?.name,
+    motivo,
+  });
+  console.log('[email] notifyDesoneracaoStepAdvance enviando pra', tos);
+  for (const to of tos) {
+    try { await sendMail({ ...tpl, to, context: 'desoneracao_step_change', contextId: desoneracaoId }); }
+    catch (e) { console.error('[email] notifyDesoneracaoStepAdvance falha pra', to, ':', e.message); }
+  }
 }
 
 export async function sendTestMail(to) {

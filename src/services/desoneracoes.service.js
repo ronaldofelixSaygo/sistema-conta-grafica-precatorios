@@ -13,6 +13,7 @@
 // =====================================================================
 import { prisma } from '../config/prisma.js';
 import * as storage from './storage.service.js';
+import * as email from './email.service.js';
 
 // Defaults da config de responsáveis por etapa (semeadas no boot).
 const STEP_CONFIG_DEFAULTS = [
@@ -173,7 +174,7 @@ const DEFAULT_DOCS_BY_STEP = {
     RODOVIARIO: ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
   },
   EMISSAO_DMI:    { TODOS: ['DMI'] },
-  PROTOCOLO_ICMS: { TODOS: ['DESPACHO'] },
+  PROTOCOLO_ICMS: { TODOS: ['DESPACHO', 'CONTA_GRAFICA'] },
 };
 
 // Resolve quais documentos são EXIGIDOS ao avançar uma etapa, considerando
@@ -243,11 +244,23 @@ export async function listDesoneracoes(user, filters = {}) {
     }
   }
 
+  // PERF: limita a 200 processos por listagem. Volume real raramente passa disso,
+  // e impede pico de payload em clientes com histórico grande. Frontend pode
+  // pedir mais via ?take=N e ?skip=N quando virar problema.
+  const take = Math.min(Math.max(Number(query.take) || 200, 1), 500);
+  const skip = Math.max(Number(query.skip) || 0, 0);
+  // PERF: steps com `select` (sem `include`) — evita trazer campos pesados
+  // tipo `notes` desnecessariamente na grade de listagem.
   return prisma.desoneracao.findMany({
-    where,
+    where, take, skip,
     include: {
       cliente: { select: { id: true, nome: true, escritorio: true } },
-      steps: { include: { parceiro: { select: { id: true, nome: true } } } },
+      steps: {
+        select: {
+          id: true, etapa: true, status: true, completedAt: true, parceiroId: true,
+          parceiro: { select: { id: true, nome: true } },
+        },
+      },
       _count: { select: { notas: { where: { deletedAt: null } }, documentos: true } },
     },
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
@@ -296,19 +309,43 @@ export async function getDesoneracao(id, user = null) {
   if (!r) { const e = new Error('Desoneração não encontrada'); e.status = 404; throw e; }
 
   // Anexa configs das etapas + flag "podeAtuar" pra cada etapa (se user fornecido)
+  // PERF: carrega configs UMA vez e passa pra canActOnStepCached — antes o
+  // canActOnStep fazia findUnique por step (N+1 brutal num modal com 6 steps).
   await ensureStepConfigDefaults();
   const configs = await prisma.desoneracaoStepConfig.findMany();
   const cfgByEtapa = new Map(configs.map(c => [c.etapa, c]));
-  r.steps = await Promise.all(r.steps.map(async (s) => {
+  r.steps = r.steps.map((s) => {
     const cfg = cfgByEtapa.get(s.etapa) || null;
-    let podeAtuar = false;
-    if (user) {
-      const auth = await canActOnStep(user, r, s);
-      podeAtuar = auth.ok;
-    }
+    const podeAtuar = user ? canActOnStepCached(user, r, s, cfg).ok : false;
     return { ...s, config: cfg, podeAtuar };
-  }));
+  });
   return r;
+}
+
+// Versão "sync" do canActOnStep que recebe cfg já carregado — usado pelo
+// getDesoneracao pra evitar N+1.
+function canActOnStepCached(user, desoneracao, step, cfg) {
+  if (user.role === 'ADM' || user.role === 'SAYGO') return { ok: true };
+  if (!cfg) return { ok: false, motivo: 'Configuração da etapa não encontrada' };
+  const isCliente = user.role === 'CLIENT' && user.clienteId === desoneracao.clienteId;
+  const userPartnerKind = user.partnerKindCode || user.partnerType || null;
+  const isParceiroDaEtapa = step.parceiroId && user.parceiroId === step.parceiroId;
+  const isParceiroDoKind  = userPartnerKind && cfg.kindCode && userPartnerKind === cfg.kindCode;
+  if (cfg.responsavelTipo === 'CLIENTE') {
+    return isCliente ? { ok: true } : { ok: false, motivo: 'Apenas o cliente desse processo pode avançar esta etapa' };
+  }
+  if (cfg.responsavelTipo === 'PARCEIRO_KIND') {
+    if (!step.parceiroId) return { ok: false, motivo: 'Parceiro responsável não definido nesta etapa' };
+    return (isParceiroDoKind && isParceiroDaEtapa) ? { ok: true } : { ok: false, motivo: `Apenas o parceiro do tipo ${cfg.kindCode} vinculado a esta etapa pode avançar` };
+  }
+  if (cfg.responsavelTipo === 'CLIENTE_OU_PARCEIRO') {
+    if (isCliente) return { ok: true };
+    if (isParceiroDoKind && isParceiroDaEtapa) return { ok: true };
+    if (!step.parceiroId) return { ok: false, motivo: 'Apenas o cliente pode avançar (não há parceiro vinculado a esta etapa)' };
+    return { ok: false, motivo: 'Sem permissão pra atuar nesta etapa' };
+  }
+  if (cfg.responsavelTipo === 'SAYGO') return { ok: false, motivo: 'Apenas Saygo/Admin pode avançar esta etapa' };
+  return { ok: false, motivo: 'Tipo de responsável desconhecido' };
 }
 
 // Resolve automaticamente o parceiro responsável de cada etapa com base no
@@ -618,6 +655,12 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
         byUserId: user.id,
       },
     });
+  });
+  // Notifica próximo responsável (fire-and-forget — não bloqueia a resposta)
+  setImmediate(() => {
+    email.notifyDesoneracaoStepAdvance({
+      desoneracaoId: id, fromStep: etapaAtual, toStep: proxima, byUser: user, motivo: notes,
+    }).catch(err => console.warn('[desoneracoes] notify step falhou:', err.message));
   });
   return getDesoneracao(id);
 }

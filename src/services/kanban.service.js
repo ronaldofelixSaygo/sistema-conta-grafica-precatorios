@@ -234,31 +234,35 @@ export async function completeStage(user, cardId, stage, { force = false } = {})
     e.status = 400; e.code = 'PENDING_CHECKLIST'; e.pending = pending.length; throw e;
   }
 
-  await prisma.kanbanStageProgress.update({
-    where: { id: sp.id },
-    data: { status: 'COMPLETED', completedAt: new Date() },
+  // PERF: tudo em UMA transação só — antes eram 4 idas separadas ao banco
+  // em série. Em Neon (latência ~50ms), isso virava 200-300ms desnecessários
+  // por clique em "Concluir etapa".
+  const nx = await stageDef.nextActiveStageKey(stage);
+  const nxDef = nx ? await prisma.kanbanStageDef.findUnique({ where: { key: nx } }) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.kanbanStageProgress.update({
+      where: { id: sp.id },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+    });
+    if (nx) {
+      await tx.kanbanStageProgress.updateMany({
+        where: { cardId, stage: nx },
+        data: { status: 'IN_PROGRESS', startedAt: new Date() },
+      });
+      await tx.kanbanCard.update({
+        where: { id: cardId },
+        data: { currentStage: nx, ...(nxDef?.isFinal ? { completedAt: new Date() } : {}) },
+      });
+    }
   });
 
-  // Auto-update dos campos do Cliente baseado no label da etapa concluída
-  await autoUpdateClienteFromStage(cardId, stage).catch(err => console.warn('autoUpdateCliente falhou:', err.message));
-
-  // Notifica e-mail: etapa concluida
-  email.notifyStageDone({ cardId, stageKey: stage, byUser: user }).catch(()=>{});
-
-  const nx = await stageDef.nextActiveStageKey(stage);
-  if (nx) {
-    await prisma.kanbanStageProgress.updateMany({
-      where: { cardId, stage: nx },
-      data: { status: 'IN_PROGRESS', startedAt: new Date() },
-    });
-    const nxDef = await prisma.kanbanStageDef.findUnique({ where: { key: nx } });
-    await prisma.kanbanCard.update({
-      where: { id: cardId },
-      data: { currentStage: nx, ...(nxDef?.isFinal ? { completedAt: new Date() } : {}) },
-    });
-    // Notifica e-mail: mudanca de etapa
-    email.notifyStageChange({ cardId, fromStage: stage, toStage: nx, byUser: user }).catch(()=>{});
-  }
+  // Pós-transação (fire-and-forget): auto-update do cliente + e-mails.
+  // Não bloqueia o response — usuário não espera por isso.
+  setImmediate(() => {
+    autoUpdateClienteFromStage(cardId, stage).catch(err => console.warn('autoUpdateCliente falhou:', err.message));
+    email.notifyStageDone({ cardId, stageKey: stage, byUser: user }).catch(()=>{});
+    if (nx) email.notifyStageChange({ cardId, fromStage: stage, toStage: nx, byUser: user }).catch(()=>{});
+  });
   return { ok: true, nextStage: nx };
 }
 
@@ -275,26 +279,42 @@ export async function moveCard(user, cardId, toStage) {
   if (!card) { const e = new Error('Card nao encontrado'); e.status = 404; throw e; }
   const tIdx = keys.indexOf(toStage);
 
-  for (let i = 0; i < keys.length; i++) {
-    const stage = keys[i];
-    let data = {};
-    if (i <  tIdx) data = { status: 'COMPLETED',   completedAt: new Date(), startedAt: new Date() };
-    if (i === tIdx) data = { status: 'IN_PROGRESS', startedAt: new Date(), completedAt: null };
-    if (i >  tIdx) data = { status: 'PENDING',      startedAt: null,        completedAt: null };
-    await prisma.kanbanStageProgress.updateMany({ where: { cardId, stage }, data });
-  }
   const toDef = stages[tIdx];
   const fromStage = card.currentStage;
-  await prisma.kanbanCard.update({
-    where: { id: cardId },
-    data: {
-      currentStage: toStage,
-      completedAt:  toDef?.isFinal ? new Date() : null,
-    },
+  const now = new Date();
+  // PERF: antes era um for loop com N updateMany sequenciais (1 query por etapa,
+  // ~6-8 roundtrips no Neon = 300-400ms). Agora: 3 updateMany via $in + 1 update
+  // do card, tudo em UMA transação = ~50-80ms total.
+  const passed  = keys.slice(0, tIdx);
+  const current = keys[tIdx];
+  const future  = keys.slice(tIdx + 1);
+  await prisma.$transaction(async (tx) => {
+    if (passed.length) {
+      await tx.kanbanStageProgress.updateMany({
+        where: { cardId, stage: { in: passed } },
+        data: { status: 'COMPLETED', completedAt: now, startedAt: now },
+      });
+    }
+    await tx.kanbanStageProgress.updateMany({
+      where: { cardId, stage: current },
+      data: { status: 'IN_PROGRESS', startedAt: now, completedAt: null },
+    });
+    if (future.length) {
+      await tx.kanbanStageProgress.updateMany({
+        where: { cardId, stage: { in: future } },
+        data: { status: 'PENDING', startedAt: null, completedAt: null },
+      });
+    }
+    await tx.kanbanCard.update({
+      where: { id: cardId },
+      data: { currentStage: toStage, completedAt: toDef?.isFinal ? now : null },
+    });
   });
-  // Notifica e-mail: mudanca manual de etapa
+  // E-mail pós-transação (fire-and-forget)
   if (fromStage !== toStage) {
-    email.notifyStageChange({ cardId, fromStage, toStage, byUser: user }).catch(()=>{});
+    setImmediate(() => {
+      email.notifyStageChange({ cardId, fromStage, toStage, byUser: user }).catch(()=>{});
+    });
   }
   return { ok: true };
 }

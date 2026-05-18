@@ -325,6 +325,7 @@ model KanbanStageProgress {
   @@unique([cardId, stage])
   @@index([status])
   @@index([responsibleUserId])
+  @@index([parceiroId])
   @@map("kanban_stage_progress")
 }
 
@@ -533,16 +534,19 @@ model EmailSettings {
   fromName    String?  @default("Sistema Conta Gráfica - Saygo")
 
   // Triggers ligados/desligados
-  notifyKanbanStageChange  Boolean @default(true)
-  notifyKanbanStageDone    Boolean @default(true)
-  notifyPartnerRequest     Boolean @default(true)
-  notifyCreditRequest      Boolean @default(true)
+  notifyKanbanStageChange      Boolean @default(true)
+  notifyKanbanStageDone        Boolean @default(true)
+  notifyPartnerRequest         Boolean @default(true)
+  notifyCreditRequest          Boolean @default(true)
+  // Desoneração: avança de etapa (avisa o próximo responsável) e aprovação/cancelamento
+  notifyDesoneracaoStepChange  Boolean @default(true)
 
   // Quais perfis recebem cada tipo de notificação (array de roles: ADM, SAYGO, PARTNER, CLIENT)
-  notifyKanbanStageChangeRoles Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\",\"CLIENT\"]")
-  notifyKanbanStageDoneRoles   Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\",\"CLIENT\"]")
-  notifyPartnerRequestRoles    Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\"]")
-  notifyCreditRequestRoles     Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\"]")
+  notifyKanbanStageChangeRoles      Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\",\"CLIENT\"]")
+  notifyKanbanStageDoneRoles        Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\",\"CLIENT\"]")
+  notifyPartnerRequestRoles         Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\"]")
+  notifyCreditRequestRoles          Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\"]")
+  notifyDesoneracaoStepChangeRoles  Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\",\"CLIENT\"]")
 
   // Lista fixa de e-mails que recebem briefing diário (separados por ; ou ,)
   briefingRecipients String? @db.Text

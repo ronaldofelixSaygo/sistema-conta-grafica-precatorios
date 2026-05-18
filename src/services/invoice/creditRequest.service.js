@@ -209,9 +209,15 @@ export async function startResolution(user, id) {
   if (!(r.status === 'SENT' || r.status === 'DRAFT')) {
     const e = new Error('Status inválido para iniciar'); e.status = 400; throw e;
   }
-  return prisma.creditRequest.update({
+  const updated = await prisma.creditRequest.update({
     where: { id }, data: { status: 'IN_PROGRESS', inProgressAt: new Date() },
   });
+  // Notifica o cliente que o parceiro aceitou a solicitação
+  setImmediate(() => {
+    email.notifyCreditRequest({ requestId: id, event: 'in_progress', byUser: user })
+      .catch(err => console.warn('[creditRequest] notify in_progress falhou:', err.message));
+  });
+  return updated;
 }
 
 // Conclui — opcionalmente com anexo de evidência. Atualiza certificado do cliente se for a 1ª resolução.

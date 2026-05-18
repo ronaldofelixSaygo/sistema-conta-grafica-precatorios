@@ -47,8 +47,10 @@ window.VIEW_desoneracoes = (() => {
     const el = document.getElementById('view-desoneracoes');
     el.innerHTML = '<div class="muted">Carregando...</div>';
     try {
+      // PERF: TTL de 15s na listagem — POST/PUT já invalida via API.mutate,
+      // então TTL só protege navegação repetida (abrir e fechar modal etc.).
       [listCache, parceirosCache, clientesCache] = await Promise.all([
-        API.get('/api/desoneracoes'),
+        API.get('/api/desoneracoes', null, { ttl: 15000 }),
         API.get('/api/parceiros', null, { ttl: 60000 }).catch(() => []),
         API.get('/api/clientes', null, { ttl: 30000 }).catch(() => []),
       ]);
@@ -651,7 +653,9 @@ window.VIEW_desoneracoes = (() => {
       try {
         await API.post(`/api/desoneracoes/${id}/advance`, { parceiroId: parc });
         UI.toast('Etapa avançada');
-        openDetail(id); render();
+        // PERF: só re-abre o modal (a lista é atualizada quando o user fechar).
+        // Antes era openDetail() + render() em paralelo — payload duplo a cada clique.
+        openDetail(id);
       } catch (e) { UI.toast(e.message, 'err'); }
     });
     // Cancelar
@@ -711,7 +715,8 @@ window.VIEW_desoneracoes = (() => {
       try {
         await API.post(`/api/desoneracoes/notas/${b.dataset.nfRejeitar}/rejeitar`, { motivo: motivo || null });
         UI.toast('NF rejeitada — processo devolvido pro cliente');
-        openDetail(id); render();
+        // PERF: só re-abre o modal — lista atualiza ao fechar
+        openDetail(id);
       } catch (e) { UI.toast(e.message, 'err'); }
     });
     // Excluir NF

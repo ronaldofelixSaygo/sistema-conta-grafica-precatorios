@@ -105,7 +105,8 @@ window.VIEW_kanban = (() => {
     try {
       [meta, cards] = await Promise.all([
         API.get('/api/kanban/meta', null, { ttl: 120000 }),
-        API.get('/api/kanban/cards'),
+        // PERF: TTL de 15s. Mutações (mover/concluir etapa) invalidam via API.mutate.
+        API.get('/api/kanban/cards', null, { ttl: 15000 }),
       ]);
       if (!clientesCache.length) {
         try { clientesCache = await API.get('/api/clientes', null, { ttl: 60000 }); } catch {}
