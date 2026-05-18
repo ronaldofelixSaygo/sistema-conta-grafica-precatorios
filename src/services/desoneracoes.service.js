@@ -251,13 +251,15 @@ export async function listDesoneracoes(user, filters = {}) {
   const skip = Math.max(Number(filters.skip) || 0, 0);
   // PERF: steps com `select` (sem `include`) — evita trazer campos pesados
   // tipo `notes` desnecessariamente na grade de listagem.
+  // OBS: DesoneracaoStep NÃO tem campo `status` (só Kanban tem). Aqui o
+  // "andamento" é inferido por completedAt/startedAt.
   return prisma.desoneracao.findMany({
     where, take, skip,
     include: {
       cliente: { select: { id: true, nome: true, escritorio: true } },
       steps: {
         select: {
-          id: true, etapa: true, status: true, completedAt: true, parceiroId: true,
+          id: true, etapa: true, startedAt: true, completedAt: true, parceiroId: true,
           parceiro: { select: { id: true, nome: true } },
         },
       },
