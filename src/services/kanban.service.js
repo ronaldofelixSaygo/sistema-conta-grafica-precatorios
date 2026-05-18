@@ -260,8 +260,10 @@ export async function completeStage(user, cardId, stage, { force = false } = {})
   // Não bloqueia o response — usuário não espera por isso.
   setImmediate(() => {
     autoUpdateClienteFromStage(cardId, stage).catch(err => console.warn('autoUpdateCliente falhou:', err.message));
-    email.notifyStageDone({ cardId, stageKey: stage, byUser: user }).catch(()=>{});
-    if (nx) email.notifyStageChange({ cardId, fromStage: stage, toStage: nx, byUser: user }).catch(()=>{});
+    email.notifyStageDone({ cardId, stageKey: stage, byUser: user })
+      .catch(err => console.error('[kanban] notifyStageDone falhou:', err.message, err.stack));
+    if (nx) email.notifyStageChange({ cardId, fromStage: stage, toStage: nx, byUser: user })
+        .catch(err => console.error('[kanban] notifyStageChange falhou:', err.message, err.stack));
   });
   return { ok: true, nextStage: nx };
 }
@@ -313,7 +315,8 @@ export async function moveCard(user, cardId, toStage) {
   // E-mail pós-transação (fire-and-forget)
   if (fromStage !== toStage) {
     setImmediate(() => {
-      email.notifyStageChange({ cardId, fromStage, toStage, byUser: user }).catch(()=>{});
+      email.notifyStageChange({ cardId, fromStage, toStage, byUser: user })
+        .catch(err => console.error('[kanban] notifyStageChange (moveCard) falhou:', err.message, err.stack));
     });
   }
   return { ok: true };

@@ -179,22 +179,22 @@ const DEFAULT_DOCS_BY_STEP = {
 
 // Resolve quais documentos são EXIGIDOS ao avançar uma etapa, considerando
 // modal, overrides do admin e tipoDocImport (DI/DUIMP).
-// Retorna array de tipos obrigatórios.
+// MERGE: defaults sempre entram. Overrides com `obrigatorio=true` adicionam.
+// Overrides com `obrigatorio=false` REMOVEM do conjunto (opt-out explícito).
+// Antes overrides substituía 100% o default — daí adicionar CONTA_GRAFICA ao
+// default não aparecia se já havia um config qualquer pra etapa.
 async function getRequiredDocs(modal, etapa, tipoDocImport = null) {
-  // overrides do admin (tabela DesoneracaoDocConfig)
   const overrides = await prisma.desoneracaoDocConfig.findMany({
     where: {
       etapa,
       OR: [{ modal }, { modal: 'TODOS' }],
     },
   });
-  let baseDocs;
-  if (overrides.length) {
-    baseDocs = overrides.filter(o => o.obrigatorio).map(o => o.tipoDocumento);
-  } else {
-    const def = DEFAULT_DOCS_BY_STEP[etapa] || {};
-    baseDocs = def[modal] || def.TODOS || [];
-  }
+  const def = DEFAULT_DOCS_BY_STEP[etapa] || {};
+  const defaultDocs = def[modal] || def.TODOS || [];
+  const overrideOn  = overrides.filter(o => o.obrigatorio).map(o => o.tipoDocumento);
+  const overrideOff = new Set(overrides.filter(o => !o.obrigatorio).map(o => o.tipoDocumento));
+  let baseDocs = [...new Set([...defaultDocs, ...overrideOn])].filter(d => !overrideOff.has(d));
   // Etapa 1 (DOCS_DESPACHANTE): adiciona DUIMP, ou DI+JUSTIFICATIVA, conforme escolha do user
   if (etapa === 'DOCS_DESPACHANTE' && tipoDocImport) {
     if (tipoDocImport === 'DI') {
