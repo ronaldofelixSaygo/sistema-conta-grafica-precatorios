@@ -261,9 +261,9 @@ export async function completeStage(user, cardId, stage, { force = false } = {})
   setImmediate(() => {
     autoUpdateClienteFromStage(cardId, stage).catch(err => console.warn('autoUpdateCliente falhou:', err.message));
     email.notifyStageDone({ cardId, stageKey: stage, byUser: user })
-      .catch(err => console.error('[kanban] notifyStageDone falhou:', err.message, err.stack));
+      .catch(err => console.error('[kanban] notifyStageDone falhou:', err));
     if (nx) email.notifyStageChange({ cardId, fromStage: stage, toStage: nx, byUser: user })
-        .catch(err => console.error('[kanban] notifyStageChange falhou:', err.message, err.stack));
+        .catch(err => console.error('[kanban] notifyStageChange falhou:', err));
   });
   return { ok: true, nextStage: nx };
 }
@@ -316,7 +316,7 @@ export async function moveCard(user, cardId, toStage) {
   if (fromStage !== toStage) {
     setImmediate(() => {
       email.notifyStageChange({ cardId, fromStage, toStage, byUser: user })
-        .catch(err => console.error('[kanban] notifyStageChange (moveCard) falhou:', err.message, err.stack));
+        .catch(err => console.error('[kanban] notifyStageChange (moveCard) falhou:', err));
     });
   }
   return { ok: true };

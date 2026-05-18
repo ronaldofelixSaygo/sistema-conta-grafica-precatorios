@@ -305,61 +305,81 @@ export async function sendMailStrict({ to, subject, html, text, context, context
 }
 
 export async function notifyStageChange({ cardId, fromStage, toStage, byUser }) {
-  const s = await getSettings();
-  console.log('[email] notifyStageChange', { cardId, fromStage, toStage, enabled: s.enabled, flag: s.notifyKanbanStageChange });
-  if (!s.enabled) {
-    console.warn('[email] notifyStageChange skip: email desabilitado');
-    return;
-  }
-  if (!s.notifyKanbanStageChange) {
-    console.warn('[email] notifyStageChange skip: trigger notifyKanbanStageChange desativado (vá em Parâmetros > E-mail e marque)');
-    return;
-  }
-  const card = await prisma.kanbanCard.findUnique({
-    where: { id: cardId }, include: { cliente: true },
-  });
-  if (!card) { console.warn('[email] notifyStageChange skip: card não encontrado', cardId); return; }
-  const roles = Array.isArray(s.notifyKanbanStageChangeRoles) ? s.notifyKanbanStageChangeRoles : ['ADM','SAYGO','PARTNER','CLIENT'];
-  const tos = await recipientsForCliente(card.clienteId, roles);
-  if (!tos.length) {
-    console.warn('[email] notifyStageChange skip: nenhum destinatário pro cliente', card.clienteId, 'roles:', roles);
-    // Loga no histórico de e-mails pra ficar visível em Parâmetros > E-mail
-    await logEmail({ to: '(sem destinatários)', subject: `Kanban mudança ${fromStage}→${toStage}`, status: 'error', error: `Sem destinatários nas roles ${roles.join(',')} pro cliente ${card.cliente.nome}`, context: 'kanban_stage_change', contextId: cardId });
-    return;
-  }
-  const stages = await prisma.kanbanStageDef.findMany();
-  const stgFrom = stages.find(s => s.key === fromStage)?.label || fromStage;
-  const stgTo   = stages.find(s => s.key === toStage)?.label   || toStage;
-  const tpl = templateKanbanStageChange({ clienteName: card.cliente.nome, fromStage: stgFrom, toStage: stgTo, byUserName: byUser?.name });
-  console.log('[email] notifyStageChange enviando pra', tos);
-  for (const to of tos) {
-    try { await sendMail({ ...tpl, to, context: 'kanban_stage_change', contextId: cardId }); }
-    catch (e) { console.error('[email] notifyStageChange falha pra', to, ':', e.message); }
+  try {
+    const s = await getSettings();
+    console.log('[email] notifyStageChange', { cardId, fromStage, toStage, enabled: s.enabled, flag: s.notifyKanbanStageChange });
+    if (!s.enabled) {
+      console.warn('[email] notifyStageChange skip: email desabilitado');
+      return;
+    }
+    if (!s.notifyKanbanStageChange) {
+      console.warn('[email] notifyStageChange skip: trigger notifyKanbanStageChange desativado (vá em Parâmetros > E-mail e marque)');
+      return;
+    }
+    const card = await prisma.kanbanCard.findUnique({
+      where: { id: cardId }, include: { cliente: true },
+    });
+    if (!card) { console.warn('[email] notifyStageChange skip: card não encontrado', cardId); return; }
+    const roles = Array.isArray(s.notifyKanbanStageChangeRoles) ? s.notifyKanbanStageChangeRoles : ['ADM','SAYGO','PARTNER','CLIENT'];
+    const tos = await recipientsForCliente(card.clienteId, roles);
+    if (!tos.length) {
+      console.warn('[email] notifyStageChange skip: nenhum destinatário pro cliente', card.clienteId, 'roles:', roles);
+      await logEmail({ to: '(sem destinatários)', subject: `Kanban mudança ${fromStage}→${toStage}`, status: 'error', error: `Sem destinatários nas roles ${roles.join(',')} pro cliente ${card.cliente.nome}`, context: 'kanban_stage_change', contextId: cardId });
+      return;
+    }
+    const stages = await prisma.kanbanStageDef.findMany();
+    const stgFrom = stages.find(s => s.key === fromStage)?.label || fromStage;
+    const stgTo   = stages.find(s => s.key === toStage)?.label   || toStage;
+    const tpl = templateKanbanStageChange({ clienteName: card.cliente.nome, fromStage: stgFrom, toStage: stgTo, byUserName: byUser?.name });
+    console.log('[email] notifyStageChange enviando pra', tos);
+    for (const to of tos) {
+      try { await sendMail({ ...tpl, to, context: 'kanban_stage_change', contextId: cardId }); }
+      catch (e) { console.error('[email] notifyStageChange falha pra', to, ':', e.message); }
+    }
+  } catch (err) {
+    console.error('[email] notifyStageChange CRASH:', err);
+    // Persiste no log pra ficar visível em Parâmetros > E-mail
+    await logEmail({
+      to: '(crash)', subject: `Kanban ${fromStage}→${toStage}`, status: 'error',
+      error: `Crash: ${err?.message || String(err)}`,
+      context: 'kanban_stage_change', contextId: cardId,
+    }).catch(() => {});
+    throw err; // re-raise pra o .catch externo logar também
   }
 }
 
 export async function notifyStageDone({ cardId, stageKey, byUser }) {
-  const s = await getSettings();
-  console.log('[email] notifyStageDone', { cardId, stageKey, enabled: s.enabled, flag: s.notifyKanbanStageDone });
-  if (!s.enabled) { console.warn('[email] notifyStageDone skip: email desabilitado'); return; }
-  if (!s.notifyKanbanStageDone) { console.warn('[email] notifyStageDone skip: trigger desativado'); return; }
-  const card = await prisma.kanbanCard.findUnique({
-    where: { id: cardId }, include: { cliente: true },
-  });
-  if (!card) return;
-  const roles = Array.isArray(s.notifyKanbanStageDoneRoles) ? s.notifyKanbanStageDoneRoles : ['ADM','SAYGO','PARTNER','CLIENT'];
-  const tos = await recipientsForCliente(card.clienteId, roles);
-  if (!tos.length) {
-    console.warn('[email] notifyStageDone skip: nenhum destinatário pro cliente', card.clienteId);
-    await logEmail({ to: '(sem destinatários)', subject: `Kanban etapa ${stageKey} concluída`, status: 'error', error: `Sem destinatários nas roles ${roles.join(',')}`, context: 'kanban_stage_done', contextId: cardId });
-    return;
-  }
-  const stg = await prisma.kanbanStageDef.findFirst({ where: { key: stageKey } });
-  const tpl = templateKanbanStageDone({ clienteName: card.cliente.nome, stage: stg?.label || stageKey, byUserName: byUser?.name });
-  console.log('[email] notifyStageDone enviando pra', tos);
-  for (const to of tos) {
-    try { await sendMail({ ...tpl, to, context: 'kanban_stage_done', contextId: cardId }); }
-    catch (e) { console.error('[email] notifyStageDone falha pra', to, ':', e.message); }
+  try {
+    const s = await getSettings();
+    console.log('[email] notifyStageDone', { cardId, stageKey, enabled: s.enabled, flag: s.notifyKanbanStageDone });
+    if (!s.enabled) { console.warn('[email] notifyStageDone skip: email desabilitado'); return; }
+    if (!s.notifyKanbanStageDone) { console.warn('[email] notifyStageDone skip: trigger desativado'); return; }
+    const card = await prisma.kanbanCard.findUnique({
+      where: { id: cardId }, include: { cliente: true },
+    });
+    if (!card) return;
+    const roles = Array.isArray(s.notifyKanbanStageDoneRoles) ? s.notifyKanbanStageDoneRoles : ['ADM','SAYGO','PARTNER','CLIENT'];
+    const tos = await recipientsForCliente(card.clienteId, roles);
+    if (!tos.length) {
+      console.warn('[email] notifyStageDone skip: nenhum destinatário pro cliente', card.clienteId);
+      await logEmail({ to: '(sem destinatários)', subject: `Kanban etapa ${stageKey} concluída`, status: 'error', error: `Sem destinatários nas roles ${roles.join(',')}`, context: 'kanban_stage_done', contextId: cardId });
+      return;
+    }
+    const stg = await prisma.kanbanStageDef.findFirst({ where: { key: stageKey } });
+    const tpl = templateKanbanStageDone({ clienteName: card.cliente.nome, stage: stg?.label || stageKey, byUserName: byUser?.name });
+    console.log('[email] notifyStageDone enviando pra', tos);
+    for (const to of tos) {
+      try { await sendMail({ ...tpl, to, context: 'kanban_stage_done', contextId: cardId }); }
+      catch (e) { console.error('[email] notifyStageDone falha pra', to, ':', e.message); }
+    }
+  } catch (err) {
+    console.error('[email] notifyStageDone CRASH:', err);
+    await logEmail({
+      to: '(crash)', subject: `Kanban ${stageKey} concluída`, status: 'error',
+      error: `Crash: ${err?.message || String(err)}`,
+      context: 'kanban_stage_done', contextId: cardId,
+    }).catch(() => {});
+    throw err;
   }
 }
 
