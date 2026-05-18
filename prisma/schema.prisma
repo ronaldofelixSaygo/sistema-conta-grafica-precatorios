@@ -211,6 +211,10 @@ model Message {
   toUserId       String
   content        String       @db.Text
   readAt         DateTime?
+  // Última vez que o sistema mandou e-mail de aviso pro destinatário sobre
+  // essa mensagem. Usado pelo cron de re-notificação (a cada N min, se ainda
+  // não foi lida, manda de novo). Null = nunca notificou.
+  lastChatNotifiedAt DateTime?
   createdAt      DateTime     @default(now())
 
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -540,6 +544,10 @@ model EmailSettings {
   notifyCreditRequest          Boolean @default(true)
   // Desoneração: avança de etapa (avisa o próximo responsável) e aprovação/cancelamento
   notifyDesoneracaoStepChange  Boolean @default(true)
+  // Chat: avisa por e-mail o destinatário se mensagem não foi lida.
+  // Manda imediato + repete a cada `chatNotifyMinutes` minutos enquanto não lida.
+  notifyChat                   Boolean @default(true)
+  chatNotifyMinutes            Int     @default(15)
 
   // Quais perfis recebem cada tipo de notificação (array de roles: ADM, SAYGO, PARTNER, CLIENT)
   notifyKanbanStageChangeRoles      Json @default("[\"ADM\",\"SAYGO\",\"PARTNER\",\"CLIENT\"]")

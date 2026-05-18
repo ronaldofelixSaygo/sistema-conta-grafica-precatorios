@@ -58,6 +58,8 @@ export async function getSettingsSafe() {
     notifyPartnerRequest:        !!s.notifyPartnerRequest,
     notifyCreditRequest:         s.notifyCreditRequest !== false,
     notifyDesoneracaoStepChange: s.notifyDesoneracaoStepChange !== false,
+    notifyChat:                  s.notifyChat !== false,
+    chatNotifyMinutes:           Number(s.chatNotifyMinutes) || 15,
     notifyKanbanStageChangeRoles:      s.notifyKanbanStageChangeRoles      || ['ADM','SAYGO','PARTNER','CLIENT'],
     notifyKanbanStageDoneRoles:        s.notifyKanbanStageDoneRoles        || ['ADM','SAYGO','PARTNER','CLIENT'],
     notifyPartnerRequestRoles:         s.notifyPartnerRequestRoles         || ['ADM','SAYGO','PARTNER'],
@@ -91,6 +93,8 @@ export async function updateSettings(data) {
   if (data.notifyPartnerRequest        !== undefined) upd.notifyPartnerRequest         = !!data.notifyPartnerRequest;
   if (data.notifyCreditRequest         !== undefined) upd.notifyCreditRequest          = !!data.notifyCreditRequest;
   if (data.notifyDesoneracaoStepChange !== undefined) upd.notifyDesoneracaoStepChange  = !!data.notifyDesoneracaoStepChange;
+  if (data.notifyChat                  !== undefined) upd.notifyChat                   = !!data.notifyChat;
+  if (data.chatNotifyMinutes           !== undefined) upd.chatNotifyMinutes            = Math.max(1, Math.min(1440, Number(data.chatNotifyMinutes) || 15));
   // Roles por trigger
   if (data.notifyKanbanStageChangeRoles      !== undefined) upd.notifyKanbanStageChangeRoles      = sanitizeRoles(data.notifyKanbanStageChangeRoles);
   if (data.notifyKanbanStageDoneRoles        !== undefined) upd.notifyKanbanStageDoneRoles        = sanitizeRoles(data.notifyKanbanStageDoneRoles);
@@ -150,16 +154,16 @@ function baseTemplate(title, bodyHtml) {
   return `
   <div style="font-family:-apple-system,'Segoe UI',sans-serif;background:#f4f5f8;padding:20px">
     <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
-      <div style="background:#1E2A3A;color:#fff;padding:14px 20px;display:flex;align-items:center;gap:10px">
-        <div style="background:#F58220;width:30px;height:30px;border-radius:7px;color:#fff;font-weight:700;display:inline-flex;align-items:center;justify-content:center">S</div>
-        <strong style="font-size:15px">Sistema Conta Gráfica</strong>
+      <div style="background:#1E2A3A;color:#fff;padding:14px 20px">
+        <div style="font-size:16px;font-weight:700;letter-spacing:.3px">Vision</div>
+        <div style="font-size:12px;color:#cbd2dc;margin-top:2px">Interveniente do comércio exterior</div>
       </div>
       <div style="padding:24px;color:#1a1a1a">
         <h2 style="margin:0 0 16px;color:#1E2A3A;font-size:18px">${escape(title)}</h2>
         ${bodyHtml}
       </div>
       <div style="background:#f0f1f4;padding:12px 20px;color:#777;font-size:11px;text-align:center">
-        Este é um e-mail automático do Sistema Conta Gráfica — Saygo Group.
+        Este é um e-mail automático do Vision — Saygo Group.
       </div>
     </div>
   </div>`;
@@ -501,6 +505,39 @@ export async function notifyDesoneracaoStepAdvance({ desoneracaoId, fromStep, to
   for (const to of tos) {
     try { await sendMail({ ...tpl, to, context: 'desoneracao_step_change', contextId: desoneracaoId }); }
     catch (e) { console.error('[email] notifyDesoneracaoStepAdvance falha pra', to, ':', e.message); }
+  }
+}
+
+// =====================================================================
+// Chat — avisa o destinatário por e-mail.
+// Chamado IMEDIATAMENTE quando mensagem é enviada + pelo cron de re-notificação
+// a cada N min enquanto a mensagem continua não lida.
+// =====================================================================
+export async function notifyChatMessage({ messageId, fromUser, toUser, content }) {
+  try {
+    if (!toUser?.email) return;
+    const s = await getSettings();
+    if (!s.enabled) { console.warn('[email] notifyChatMessage skip: email desabilitado'); return; }
+    if (s.notifyChat === false) { console.warn('[email] notifyChatMessage skip: trigger desativado'); return; }
+    const preview = String(content || '').slice(0, 200);
+    const tpl = {
+      subject: `[Vision] Nova mensagem de ${fromUser?.name || 'um usuário'}`,
+      html: baseTemplate(`Mensagem de ${fromUser?.name || 'um usuário'}`, `
+        <p>Você recebeu uma nova mensagem no chat.</p>
+        <blockquote style="border-left:3px solid #F58220;padding:10px 14px;color:#333;background:#faf9f7;margin:14px 0;border-radius:0 6px 6px 0">
+          ${escape(preview)}${content && content.length > 200 ? '…' : ''}
+        </blockquote>
+        <p>Acesse o sistema para responder.</p>
+      `),
+    };
+    await sendMail({ ...tpl, to: toUser.email, context: 'chat_message', contextId: messageId });
+  } catch (err) {
+    console.error('[email] notifyChatMessage CRASH:', err);
+    await logEmail({
+      to: toUser?.email || '(?)', subject: 'Chat message', status: 'error',
+      error: `Crash: ${err?.message || String(err)}`,
+      context: 'chat_message', contextId: messageId,
+    }).catch(() => {});
   }
 }
 

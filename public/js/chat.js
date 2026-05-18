@@ -235,8 +235,10 @@ window.CHAT = (() => {
   }
 
   // ── toast no topo da tela ─────────────────────────────────────────
+  // Aparece SÓ quando o chat está fechado OU outra conversa está ativa
+  // (já que `onIncoming` só chama `showTopToast` no caminho else).
+  // Inclui som curto pra chamar atenção. Auto-dismiss em 7s.
   function showTopToast(msg) {
-    const me = AUTH.user();
     const c = contacts.find(x => x.id === msg.fromUserId);
     const name = c?.name || 'Alguém';
     const initials = avatarInitials(name);
@@ -255,14 +257,65 @@ window.CHAT = (() => {
       <div class="chat-toast-body">
         <strong>${UI.escapeHtml(name)}</strong>
         <span>${UI.escapeHtml((msg.content || '').slice(0, 120))}</span>
-      </div>`;
-    card.onclick = () => {
+      </div>
+      <button type="button" class="chat-toast-close" aria-label="Fechar">&times;</button>`;
+    card.onclick = (ev) => {
+      if (ev.target.classList.contains('chat-toast-close')) {
+        card.remove(); return;
+      }
       panel.classList.remove('hidden');
       loadContacts().then(() => openThread(msg.fromUserId));
       card.remove();
     };
     stack.appendChild(card);
-    setTimeout(() => { card.classList.add('chat-toast-out'); setTimeout(() => card.remove(), 300); }, 5000);
+    playNotificationSound();
+    // Tenta notificação nativa do sistema (se o user deu permissão).
+    // Funciona mesmo com a aba em segundo plano.
+    showSystemNotification(name, msg.content);
+    setTimeout(() => { card.classList.add('chat-toast-out'); setTimeout(() => card.remove(), 300); }, 7000);
+  }
+
+  // Toca um beep curto via Web Audio API — não depende de arquivo externo.
+  let _audioCtx = null;
+  function playNotificationSound() {
+    try {
+      if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = _audioCtx;
+      // Dois tons curtos (ding-dong)
+      [880, 660].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.18);
+        gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + i * 0.18 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.18 + 0.18);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(ctx.currentTime + i * 0.18);
+        osc.stop(ctx.currentTime + i * 0.18 + 0.2);
+      });
+    } catch {} // se falhar (autoplay policy etc.) ignora silenciosamente
+  }
+
+  // Notificação nativa do sistema operacional (Chrome/Edge mostram fora da página).
+  // Pede permissão na primeira mensagem se ainda não tiver.
+  function showSystemNotification(name, content) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'denied') return;
+    const fire = () => {
+      try {
+        const n = new Notification(`Vision · ${name}`, {
+          body: String(content || '').slice(0, 200),
+          tag: 'vision-chat', // notificações antigas são substituídas
+          silent: true, // o beep do toast já toca
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+      } catch {}
+    };
+    if (Notification.permission === 'granted') fire();
+    else if (Notification.permission === 'default') {
+      Notification.requestPermission().then(p => { if (p === 'granted') fire(); });
+    }
   }
 
   // ── helpers ───────────────────────────────────────────────────────

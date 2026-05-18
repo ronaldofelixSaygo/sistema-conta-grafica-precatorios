@@ -970,6 +970,16 @@ window.VIEW_parametros = (() => {
           <div class="full"><label><input type="checkbox" name="notifyCreditRequest" ${s.notifyCreditRequest?'checked':''}> <strong>Solicitação de Créditos</strong></label></div>
           ${rolesRow('notifyCreditRequestRoles', s.notifyCreditRequestRoles||[])}
 
+          <div class="full"><label><input type="checkbox" name="notifyDesoneracaoStepChange" ${s.notifyDesoneracaoStepChange!==false?'checked':''}> <strong>Avanço de etapa em Desoneração</strong></label></div>
+          ${rolesRow('notifyDesoneracaoStepChangeRoles', s.notifyDesoneracaoStepChangeRoles||['ADM','SAYGO','PARTNER','CLIENT'])}
+
+          <div class="full"><label><input type="checkbox" name="notifyChat" ${s.notifyChat!==false?'checked':''}> <strong>Chat — avisar destinatário por e-mail</strong></label></div>
+          <div class="full" style="display:flex;align-items:center;gap:.6rem">
+            <label style="margin:0">Re-notificar a cada</label>
+            <input type="number" name="chatNotifyMinutes" min="1" max="1440" step="1" value="${s.chatNotifyMinutes||15}" style="width:90px">
+            <span class="muted small">minutos enquanto a mensagem não for lida</span>
+          </div>
+
           <div class="full form-actions">
             <button type="button" class="btn" id="email-test">Enviar e-mail de teste</button>
             <span style="flex:1"></span>
@@ -1014,6 +1024,10 @@ window.VIEW_parametros = (() => {
         notifyKanbanStageDoneRoles:   fd.getAll('notifyKanbanStageDoneRoles'),
         notifyPartnerRequestRoles:    fd.getAll('notifyPartnerRequestRoles'),
         notifyCreditRequestRoles:     fd.getAll('notifyCreditRequestRoles'),
+        notifyDesoneracaoStepChange:  !!fd.get('notifyDesoneracaoStepChange'),
+        notifyDesoneracaoStepChangeRoles: fd.getAll('notifyDesoneracaoStepChangeRoles'),
+        notifyChat:                   !!fd.get('notifyChat'),
+        chatNotifyMinutes:            Number(fd.get('chatNotifyMinutes')) || 15,
       };
       if (tokenVal) data.apiToken = tokenVal;
       const fb = document.getElementById('email-feedback');

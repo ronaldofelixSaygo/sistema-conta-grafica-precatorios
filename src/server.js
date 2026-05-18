@@ -8,6 +8,7 @@ import { bindChatSockets } from './sockets/chat.socket.js';
 import { prisma } from './config/prisma.js';
 import { ensureBuiltin as ensureBuiltinPartnerKinds } from './services/partnerKind.service.js';
 import { startStorageMonitor } from './services/storageAlert.service.js';
+import { startChatRemindersJob } from './jobs/chat-reminders.job.js';
 
 // Seed dos tipos built-in. Não bloqueia o boot — se falhar, os endpoints
 // que dependem disso fazem ensureBuiltin sob demanda também.
@@ -16,6 +17,10 @@ ensureBuiltinPartnerKinds().catch(e => console.warn('[partnerKind] seed builtin 
 // Monitor periódico de storage — checa a cada 1h e dispara e-mail pros
 // admins quando passar de 80% do limite Neon Free (500 MB).
 startStorageMonitor();
+
+// Job de re-notificação de chat: a cada N min (configurável em Parâmetros),
+// avisa por e-mail destinatários de mensagens ainda não lidas.
+startChatRemindersJob();
 
 const app = createApp();
 const server = http.createServer(app);

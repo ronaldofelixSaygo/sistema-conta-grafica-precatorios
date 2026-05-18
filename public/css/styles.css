@@ -284,6 +284,8 @@ html[data-theme="light"] .msg.them{background:#fff;border:1px solid var(--bd)}
 .chat-toast-body{flex:1;display:flex;flex-direction:column;min-width:0}
 .chat-toast-body strong{color:var(--t1);font-size:13px}
 .chat-toast-body span{color:var(--t2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-toast-close{background:transparent;border:0;color:var(--t3);font-size:18px;line-height:1;cursor:pointer;padding:0 .25rem;align-self:flex-start;margin-top:-2px}
+.chat-toast-close:hover{color:var(--t1)}
 .chat-toast-out{animation:chatToastOut .3s ease-in forwards}
 @keyframes chatToastIn  { from{transform:translateX(120%);opacity:0} to{transform:translateX(0);opacity:1} }
 @keyframes chatToastOut { from{transform:translateX(0);opacity:1} to{transform:translateX(120%);opacity:0} }

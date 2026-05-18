@@ -3,6 +3,8 @@
 // =====================================================================
 import { authenticateSocket } from '../middlewares/auth.middleware.js';
 import * as chat from '../services/chat.service.js';
+import * as email from '../services/email.service.js';
+import { prisma } from '../config/prisma.js';
 
 function parseCookieHeader(h) {
   const out = {};
@@ -63,6 +65,27 @@ export function bindChatSockets(io) {
         const msg = await chat.sendMessage(me, toUserId, content);
         emitToPair('chat:message', msg, toUserId);
         if (typeof ack === 'function') ack({ ok: true, message: msg });
+        // E-mail imediato pro destinatário (fire-and-forget). Cron de
+        // re-notificação cuida das mensagens que continuarem sem leitura.
+        // Pequeno delay de 5s permite que se o destinatário ler na hora
+        // (socket marca readAt), a gente cancela o envio inicial.
+        setTimeout(async () => {
+          try {
+            const m = await prisma.message.findUnique({
+              where: { id: msg.id },
+              select: { id: true, content: true, readAt: true, lastChatNotifiedAt: true },
+            });
+            if (!m || m.readAt) return; // já leu — não notifica
+            const to = await prisma.user.findUnique({
+              where: { id: toUserId }, select: { id: true, email: true, name: true, active: true },
+            });
+            if (!to?.active || !to.email) return;
+            await email.notifyChatMessage({
+              messageId: msg.id, fromUser: me, toUser: to, content: m.content,
+            });
+            await prisma.message.update({ where: { id: msg.id }, data: { lastChatNotifiedAt: new Date() } });
+          } catch (e) { console.error('[socket] chat notify imediato falhou:', e.message); }
+        }, 5000);
       } catch (e) {
         console.error('[socket] chat:send erro:', e.message);
         if (typeof ack === 'function') ack({ ok: false, error: e.message });
