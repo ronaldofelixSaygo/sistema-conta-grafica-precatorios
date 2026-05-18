@@ -413,7 +413,7 @@ window.VIEW_desoneracoes = (() => {
   const DOCS_PREVISTOS_POR_ETAPA = {
     DOCS_DESPACHANTE: ['PL','PI','AFRMM','CTE_AWB_BL'],
     EMISSAO_DMI:      ['DMI'],
-    PROTOCOLO_ICMS:   ['DESPACHO'],
+    PROTOCOLO_ICMS:   ['DESPACHO','CONTA_GRAFICA'],
   };
   function renderDocs(d, isStaff) {
     const docs = d.documentos || [];
