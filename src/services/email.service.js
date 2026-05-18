@@ -226,7 +226,7 @@ async function recipientsForCliente(clienteId, allowedRoles = ['ADM','SAYGO','PA
     const office = String(cli.escritorio).trim();
     const partners = await prisma.user.findMany({
       where: {
-        role: 'PARTNER', active: true, email: { not: null },
+        role: 'PARTNER', active: true,
         officeName: { equals: office, mode: 'insensitive' },
       },
       select: { email: true },
@@ -236,7 +236,7 @@ async function recipientsForCliente(clienteId, allowedRoles = ['ADM','SAYGO','PA
   const staffRoles = ['SAYGO','ADM'].filter(r => allowedRoles.includes(r));
   if (staffRoles.length) {
     const staff = await prisma.user.findMany({
-      where: { role: { in: staffRoles }, active: true, email: { not: null } },
+      where: { role: { in: staffRoles }, active: true },
       select: { email: true },
     });
     for (const s of staff) emails.add(s.email);
