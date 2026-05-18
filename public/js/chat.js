@@ -58,19 +58,22 @@ window.CHAT = (() => {
     if (!me) return;
     const isMine = msg.fromUserId === me.id;
     const otherId = isMine ? msg.toUserId : msg.fromUserId;
-    // Se eu enviei, atualiza visual da conversa aberta
-    if (openWith === otherId) {
+    // Se a conversa do outro lado está aberta, mostra inline E marca como lido.
+    // Se não, incrementa contador.
+    const conversationOpen = openWith === otherId;
+    if (conversationOpen) {
       appendMsg(msg);
       if (!isMine) socket.emit('chat:read', { otherId });
     } else if (!isMine) {
-      // mensagem de outro usuário, conversa NÃO aberta:
       unreadByUser[otherId] = (unreadByUser[otherId] || 0) + 1;
       lastSenderId = otherId;
       bumpBadge();
-      // Mostra toast no topo da tela
-      showTopToast(msg);
-      // Se o painel estiver aberto na lista, atualiza
       if (!panel.classList.contains('hidden') && !openWith) renderListView();
+    }
+    // SEMPRE mostra toast pra mensagens recebidas — mas SEM som quando a
+    // conversa já está aberta (usuário tá vendo, não precisa de barulho).
+    if (!isMine) {
+      showTopToast(msg, { silent: conversationOpen });
     }
   }
 
@@ -235,10 +238,10 @@ window.CHAT = (() => {
   }
 
   // ── toast no topo da tela ─────────────────────────────────────────
-  // Aparece SÓ quando o chat está fechado OU outra conversa está ativa
-  // (já que `onIncoming` só chama `showTopToast` no caminho else).
-  // Inclui som curto pra chamar atenção. Auto-dismiss em 7s.
-  function showTopToast(msg) {
+  // Aparece pra TODA mensagem recebida (não importa o estado do chat).
+  // `silent: true` suprime o som — usado quando a conversa do remetente já está
+  // aberta (usuário está vendo, não precisa de barulho).
+  function showTopToast(msg, { silent = false } = {}) {
     const c = contacts.find(x => x.id === msg.fromUserId);
     const name = c?.name || 'Alguém';
     const initials = avatarInitials(name);
@@ -268,10 +271,12 @@ window.CHAT = (() => {
       card.remove();
     };
     stack.appendChild(card);
-    playNotificationSound();
-    // Tenta notificação nativa do sistema (se o user deu permissão).
-    // Funciona mesmo com a aba em segundo plano.
-    showSystemNotification(name, msg.content);
+    if (!silent) playNotificationSound();
+    // Notificação nativa do SO só quando aba não tem foco — evita poluir
+    // quem está olhando a tela.
+    if (!silent && !document.hasFocus()) {
+      showSystemNotification(name, msg.content);
+    }
     setTimeout(() => { card.classList.add('chat-toast-out'); setTimeout(() => card.remove(), 300); }, 7000);
   }
 
