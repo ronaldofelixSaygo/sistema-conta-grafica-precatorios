@@ -4,11 +4,44 @@
 // =====================================================================
 import { prisma } from '../config/prisma.js';
 
+// PERF/SAFETY: cache curto (5min) — getSettings é chamado em todo envio de e-mail
+// e em vários hot paths (advanceStep, completeStage, moveCard). Sem cache,
+// era 1 query por evento.
+let _settingsCache = { data: null, expiresAt: 0 };
+function invalidateSettingsCache() { _settingsCache = { data: null, expiresAt: 0 }; }
+
 async function getSettings() {
-  let s = await prisma.emailSettings.findUnique({ where: { id: 'default' } });
-  if (!s) {
-    s = await prisma.emailSettings.create({ data: { id: 'default' } });
+  if (_settingsCache.data && _settingsCache.expiresAt > Date.now()) {
+    return _settingsCache.data;
   }
+  let s;
+  try {
+    s = await prisma.emailSettings.findUnique({ where: { id: 'default' } });
+  } catch (e) {
+    // Defensivo: se schema novo (com colunas que talvez não existam ainda no
+    // banco), evita quebrar TODO o fluxo de e-mail. Lê apenas colunas seguras.
+    console.warn('[email] getSettings falhou no findUnique — usando SELECT reduzido:', e.message);
+    try {
+      const rows = await prisma.$queryRaw`
+        SELECT id, enabled, "apiUrl", "apiToken", sender,
+               "notifyKanbanStageChange", "notifyKanbanStageDone",
+               "notifyPartnerRequest", "notifyCreditRequest",
+               "notifyKanbanStageChangeRoles", "notifyKanbanStageDoneRoles",
+               "notifyPartnerRequestRoles", "notifyCreditRequestRoles",
+               "briefingRecipients", "updatedAt"
+        FROM email_settings WHERE id = 'default' LIMIT 1
+      `;
+      s = Array.isArray(rows) && rows.length ? rows[0] : null;
+    } catch (e2) {
+      console.error('[email] getSettings raw query falhou:', e2.message);
+      s = null;
+    }
+  }
+  if (!s) {
+    try { s = await prisma.emailSettings.create({ data: { id: 'default' } }); }
+    catch { s = { id: 'default', enabled: false }; }
+  }
+  _settingsCache = { data: s, expiresAt: Date.now() + 5 * 60 * 1000 };
   return s;
 }
 
@@ -65,11 +98,13 @@ export async function updateSettings(data) {
   if (data.notifyCreditRequestRoles          !== undefined) upd.notifyCreditRequestRoles          = sanitizeRoles(data.notifyCreditRequestRoles);
   if (data.notifyDesoneracaoStepChangeRoles  !== undefined) upd.notifyDesoneracaoStepChangeRoles  = sanitizeRoles(data.notifyDesoneracaoStepChangeRoles);
 
-  return prisma.emailSettings.upsert({
+  const r = await prisma.emailSettings.upsert({
     where: { id: 'default' },
     create: { id: 'default', ...upd },
     update: upd,
   });
+  invalidateSettingsCache(); // garante que próxima leitura traz o novo valor
+  return r;
 }
 
 async function logEmail({ to, subject, status, error, context, contextId }) {

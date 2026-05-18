@@ -247,8 +247,8 @@ export async function listDesoneracoes(user, filters = {}) {
   // PERF: limita a 200 processos por listagem. Volume real raramente passa disso,
   // e impede pico de payload em clientes com histórico grande. Frontend pode
   // pedir mais via ?take=N e ?skip=N quando virar problema.
-  const take = Math.min(Math.max(Number(query.take) || 200, 1), 500);
-  const skip = Math.max(Number(query.skip) || 0, 0);
+  const take = Math.min(Math.max(Number(filters.take) || 200, 1), 500);
+  const skip = Math.max(Number(filters.skip) || 0, 0);
   // PERF: steps com `select` (sem `include`) — evita trazer campos pesados
   // tipo `notes` desnecessariamente na grade de listagem.
   return prisma.desoneracao.findMany({
