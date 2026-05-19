@@ -120,7 +120,10 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
 
   const result = calcularInvoice(payload.inputs || {});
   const modalidade = payload.modalidade === 'AL_DIF' ? 'AL_DIF' : 'AL_NF';
-  const creditosACompar = modalidade === 'AL_DIF' ? result.creditos.al_dif : result.creditos.al_nf;
+  // REGRA: o crédito a comprar SEMPRE é o ICMS reduzido de Alagoas (4% via NF).
+  // O cenário 1,2% (diferimento) é só informativo — o cliente alimenta a conta
+  // gráfica com os 4%, e a sugestão de compra acrescenta +10% de margem.
+  const creditosACompar = result.creditos.al_nf;
   const autoSend = !!payload.autoSend;
 
   // Sobe PDF de entrada pro S3 (se configurado). Senão, bytes inline.
