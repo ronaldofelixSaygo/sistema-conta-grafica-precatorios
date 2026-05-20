@@ -4,50 +4,84 @@ import { prisma } from '../config/prisma.js';
 // Regras de quem pode conversar com quem:
 //  ADM     → todos
 //  SAYGO   → todos
-//  PARTNER → SAYGO/ADM + Clientes do mesmo escritório (User.role=CLIENT cujo
-//            cliente.escritorio == partner.officeName)
-//  CLIENT  → SAYGO/ADM + Parceiro do seu escritório
+//  PARTNER → SAYGO/ADM
+//            + Clientes do mesmo escritório (cliente.escritorio == officeName)
+//            + Clientes em cujos cards do Kanban o parceiro está vinculado
+//              (via parceiroId OU responsibleUserId)
+//  CLIENT  → SAYGO/ADM
+//            + Parceiros do seu escritório (officeName == cliente.escritorio)
+//            + Parceiros vinculados a algum card do Kanban DO cliente
+//              (via parceiroId OU responsibleUserId)
 // =====================================================================
+
+const BASE_SELECT = {
+  id: true, name: true, email: true, role: true, officeName: true, clienteId: true,
+  cliente: { select: { id: true, nome: true, escritorio: true } },
+};
+
+// Helper: pega usuários vinculados via Kanban (responsibleUser + parceiro do step)
+// considerando todos os cards de um cliente OU um parceiro específico.
+async function kanbanLinkedUserIds({ clienteId = null, parceiroId = null, userId = null }) {
+  const where = {};
+  if (clienteId) where.card = { clienteId };
+  if (parceiroId || userId) {
+    where.OR = [];
+    if (parceiroId) where.OR.push({ parceiroId });
+    if (userId)     where.OR.push({ responsibleUserId: userId });
+    if (!where.OR.length) delete where.OR;
+  }
+  const stages = await prisma.kanbanStageProgress.findMany({
+    where,
+    select: {
+      parceiroId: true, responsibleUserId: true,
+      card: { select: { clienteId: true } },
+    },
+  });
+  return stages;
+}
 
 export async function listContacts(currentUser) {
   const me = currentUser;
   if (!me) return [];
 
-  const baseSelect = {
-    id: true, name: true, email: true, role: true, officeName: true, clienteId: true,
-    cliente: { select: { id: true, nome: true, escritorio: true } },
-  };
-
   if (me.role === 'ADM' || me.role === 'SAYGO') {
     return prisma.user.findMany({
       where: { active: true, NOT: { id: me.id } },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
-      select: baseSelect,
+      select: BASE_SELECT,
     });
   }
 
   if (me.role === 'PARTNER') {
     const office = me.officeName;
+    // Cards onde o parceiro está vinculado — direto (responsibleUserId=me.id)
+    // ou indireto (parceiroId == User.parceiroId).
+    const stages = await kanbanLinkedUserIds({ parceiroId: me.parceiroId || null, userId: me.id });
+    const clienteIds = [...new Set(stages.map(s => s.card?.clienteId).filter(Boolean))];
     return prisma.user.findMany({
       where: {
         active: true,
         NOT: { id: me.id },
         OR: [
           { role: { in: ['ADM', 'SAYGO'] } },
-          { role: 'CLIENT', cliente: { escritorio: office } },
+          ...(office ? [{ role: 'CLIENT', cliente: { escritorio: office } }] : []),
+          ...(clienteIds.length ? [{ role: 'CLIENT', clienteId: { in: clienteIds } }] : []),
         ],
       },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
-      select: baseSelect,
+      select: BASE_SELECT,
     });
   }
 
   if (me.role === 'CLIENT') {
-    // Pegar o escritório do cliente do user
     const myCli = me.clienteId ? await prisma.cliente.findUnique({
       where: { id: me.clienteId }, select: { escritorio: true },
     }) : null;
     const office = myCli?.escritorio || null;
+    // Parceiros vinculados aos cards desse cliente.
+    const stages = me.clienteId ? await kanbanLinkedUserIds({ clienteId: me.clienteId }) : [];
+    const parceiroIds   = [...new Set(stages.map(s => s.parceiroId).filter(Boolean))];
+    const responsibleIds = [...new Set(stages.map(s => s.responsibleUserId).filter(Boolean))];
     return prisma.user.findMany({
       where: {
         active: true,
@@ -55,10 +89,12 @@ export async function listContacts(currentUser) {
         OR: [
           { role: { in: ['ADM', 'SAYGO'] } },
           ...(office ? [{ role: 'PARTNER', officeName: office }] : []),
+          ...(parceiroIds.length    ? [{ role: 'PARTNER', parceiroId: { in: parceiroIds } }] : []),
+          ...(responsibleIds.length ? [{ id: { in: responsibleIds } }] : []),
         ],
       },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
-      select: baseSelect,
+      select: BASE_SELECT,
     });
   }
 
