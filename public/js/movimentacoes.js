@@ -235,7 +235,10 @@ window.VIEW_movimentacoes = (() => {
     if (!items.length) return UI.toast('Nada selecionado', 'err');
     try {
       const r = await API.post('/api/movimentacoes/import-extrato/apply', { items, cliente_id: Number(cliId) });
-      UI.toast(`${r.created} lançamentos criados`);
+      const msg = r.skipped
+        ? `${r.created} lançamento(s) criado(s) — ${r.skipped} ignorado(s) (já existiam)`
+        : `${r.created} lançamento(s) criado(s)`;
+      UI.toast(msg);
       UI.closeModal(); load();
     } catch (e) { UI.toast(e.message, 'err'); }
   }
