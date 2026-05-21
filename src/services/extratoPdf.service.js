@@ -145,19 +145,31 @@ function isSimilar(a, b) {
   const vd = valDiff(a.valor, b.valor);
   const na = normalizeDuimp(a.duimp);
   const nb = normalizeDuimp(b.duimp);
+  const isCredito = (a.tipo || '').includes('Crédito');
 
   // Regra A: DUIMP idêntica + mesma data exata. Aceita diferença
   // de até R$ 1,00 no valor — cobre rounding de centavos entre dados
   // legados (.34) e o valor real do PDF (.33).
   if (na && nb && na === nb && dd === 0 && vd <= 1.0) return true;
 
-  // Regra B: variações típicas de parser (DUIMP com 1-2 chars extras,
-  // data deslocada em 1 dia). Aqui exigimos valor praticamente igual
-  // (até 5 centavos), tipo igual e DUIMP "fuzzy".
+  // Em CRÉDITOS, parar aqui. Na seção de créditos do extrato o "número"
+  // é Nº Processo (não DUIMP), e o mesmo processo pode se repetir em
+  // datas e valores iguais — são parcelas legítimas (ex: 14/05 R$40k
+  // e 16/05 R$40k do processo 1204007495). Dedup mais agressivo apaga
+  // entradas reais.
+  if (isCredito) return false;
+
+  // Regra B (só débitos): variações típicas de parser — DUIMP com 1-2
+  // chars extras no fim (phantom rows) + data deslocada em 1 dia +
+  // valor praticamente igual.
   if (vd > 0.05) return false;
   if (dd > 3) return false;
   const ds = duimpSimilar(a.duimp, b.duimp);
   if (ds === null) return dd === 0; // sem DUIMP em ambos → exige mesmo dia
+  // DUIMP exatamente igual + datas diferentes: pode ser entrada legítima
+  // distinta (ex: ICMS parcelado). Só consideramos phantom quando a DUIMP
+  // tem variação no fim (sufixo extra).
+  if (na === nb) return false;
   return ds;
 }
 
@@ -203,7 +215,11 @@ export async function previewExtrato(buffer) {
     if (valor == null) continue;
     if (Math.abs(valor) < 0.005) continue;
 
-    const duimpMatch = line.match(/\b(\d{2}BR\d{8,12}|\d{10,15})\b/);
+    // Formatos aceitos de DUIMP/DI/Processo:
+    //   25BR0000171329  — DUIMP nova (NNBR + 8-15 dígitos)
+    //   24/2537957-5    — DI antiga formato AA/NNNNNNN-N
+    //   1204007495      — Processo (10-15 dígitos, sem prefixo)
+    const duimpMatch = line.match(/(\d{2}BR\d{8,15}|\d{2}\/\d{6,10}-\d|\b\d{10,15}\b)/);
     const duimp = duimpMatch ? duimpMatch[1] : null;
 
     // Percentual: "4%", "4,00%", "0,00%", etc.
