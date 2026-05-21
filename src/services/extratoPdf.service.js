@@ -133,17 +133,28 @@ function daysBetween(a, b) {
   return Math.abs(t(sa) - t(sb)) / 86400000;
 }
 
-function valoresIguais(a, b) {
-  const va = Math.abs(Number(a) || 0);
-  const vb = Math.abs(Number(b) || 0);
-  return Math.abs(va - vb) <= 0.005;
+function valDiff(a, b) {
+  return Math.abs(Math.abs(Number(a) || 0) - Math.abs(Number(b) || 0));
 }
 
 // a e b: { tipo, valor, data (yyyy-mm-dd), duimp }
 function isSimilar(a, b) {
   if ((a.tipo || '') !== (b.tipo || '')) return false;
-  if (!valoresIguais(a.valor, b.valor)) return false;
+
   const dd = daysBetween(a.data, b.data);
+  const vd = valDiff(a.valor, b.valor);
+  const na = normalizeDuimp(a.duimp);
+  const nb = normalizeDuimp(b.duimp);
+
+  // Regra A: DUIMP idêntica + mesma data exata. Aceita diferença
+  // de até R$ 1,00 no valor — cobre rounding de centavos entre dados
+  // legados (.34) e o valor real do PDF (.33).
+  if (na && nb && na === nb && dd === 0 && vd <= 1.0) return true;
+
+  // Regra B: variações típicas de parser (DUIMP com 1-2 chars extras,
+  // data deslocada em 1 dia). Aqui exigimos valor praticamente igual
+  // (até 5 centavos), tipo igual e DUIMP "fuzzy".
+  if (vd > 0.05) return false;
   if (dd > 3) return false;
   const ds = duimpSimilar(a.duimp, b.duimp);
   if (ds === null) return dd === 0; // sem DUIMP em ambos → exige mesmo dia
@@ -231,11 +242,21 @@ export async function previewExtrato(buffer) {
 }
 
 // ───────── Apply ─────────
+//
+// Modos de import (opts.mode):
+//   'append'  (padrão) → mantém existentes; cria só o que não casa pelo dedup fuzzy
+//   'replace'          → apaga TODOS os lançamentos do(s) cliente(s) e recria do PDF.
+//                        Use quando o PDF é a fonte de verdade (extrato completo).
+//
+// Retorna { created, skipped, replaced } — replaced é a contagem de linhas
+// apagadas no modo replace.
 
-export async function applyExtrato(items, defaultClienteId) {
-  if (!Array.isArray(items)) return { created: 0, skipped: 0 };
+export async function applyExtrato(items, defaultClienteId, opts = {}) {
+  const mode = opts.mode === 'replace' ? 'replace' : 'append';
+  if (!Array.isArray(items)) return { created: 0, skipped: 0, replaced: 0 };
   let created = 0;
   let skipped = 0;
+  let replaced = 0;
 
   // Agrupa por cliente
   const groups = new Map();
@@ -250,7 +271,43 @@ export async function applyExtrato(items, defaultClienteId) {
     const cli = await prisma.cliente.findUnique({ where: { id: cid } });
     if (!cli) continue;
 
-    // Carrega lançamentos ja existentes do cliente (qualquer tipo)
+    // Modo replace: limpa antes de recriar (transação garante atomicidade —
+    // se a recriação falhar, o delete também é desfeito).
+    if (mode === 'replace') {
+      await prisma.$transaction(async (tx) => {
+        const del = await tx.movimentacao.deleteMany({ where: { clienteId: cid } });
+        replaced += del.count;
+
+        // Dentro do replace, dedup só dentro do batch (DB esta vazio para o cliente).
+        const createdNow = [];
+        for (const it of list) {
+          const norm = {
+            tipo: it.tipo_movimento || 'Créditos Reconhecidos e Cedidos',
+            valor: Math.abs(Number(it.valor) || 0),
+            data: it.data_nf || '',
+            duimp: it.duimp_di_processo || '',
+          };
+          if (createdNow.some(c => isSimilar(c, norm))) { skipped++; continue; }
+          const ajustado = norm.tipo.includes('Débito') ? -norm.valor : norm.valor;
+          await tx.movimentacao.create({
+            data: {
+              clienteId: cid,
+              tipoMovimento: norm.tipo,
+              dataNf: isoToDateBr(it.data_nf),
+              duimpDiProcesso: it.duimp_di_processo || null,
+              parceiro: cli.escritorio || null,
+              percentual: Number(it.percentual) || 0,
+              valor: norm.valor, valorAjustado: ajustado,
+            },
+          });
+          createdNow.push(norm);
+          created++;
+        }
+      });
+      continue;
+    }
+
+    // Modo append: dedup contra existentes + dentro do batch.
     const existing = await prisma.movimentacao.findMany({
       where: { clienteId: cid },
       select: {
@@ -266,7 +323,6 @@ export async function applyExtrato(items, defaultClienteId) {
     }));
 
     const createdNow = [];
-
     for (const it of list) {
       const norm = {
         tipo: it.tipo_movimento || 'Créditos Reconhecidos e Cedidos',
@@ -274,26 +330,19 @@ export async function applyExtrato(items, defaultClienteId) {
         data: it.data_nf || '',
         duimp: it.duimp_di_processo || '',
       };
+      if (existingNorm.some(e => isSimilar(e, norm))) { skipped++; continue; }
+      if (createdNow.some(c => isSimilar(c, norm))) { skipped++; continue; }
 
-      const dupDb = existingNorm.some(e => isSimilar(e, norm));
-      if (dupDb) { skipped++; continue; }
-
-      const dupBatch = createdNow.some(c => isSimilar(c, norm));
-      if (dupBatch) { skipped++; continue; }
-
-      const tipo  = norm.tipo;
-      const valor = norm.valor;
-      const ajustado = tipo.includes('Débito') ? -valor : valor;
-
+      const ajustado = norm.tipo.includes('Débito') ? -norm.valor : norm.valor;
       await prisma.movimentacao.create({
         data: {
           clienteId: cid,
-          tipoMovimento: tipo,
+          tipoMovimento: norm.tipo,
           dataNf: isoToDateBr(it.data_nf),
           duimpDiProcesso: it.duimp_di_processo || null,
           parceiro: cli.escritorio || null,
           percentual: Number(it.percentual) || 0,
-          valor, valorAjustado: ajustado,
+          valor: norm.valor, valorAjustado: ajustado,
         },
       });
       createdNow.push(norm);
@@ -301,5 +350,5 @@ export async function applyExtrato(items, defaultClienteId) {
     }
   }
 
-  return { created, skipped };
+  return { created, skipped, replaced };
 }

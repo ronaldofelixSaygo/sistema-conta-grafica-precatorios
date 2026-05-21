@@ -183,6 +183,23 @@ window.VIEW_movimentacoes = (() => {
           <input type="file" id="imp-file" accept="application/pdf">
         </div>
         <div class="full">
+          <label>Modo de importação</label>
+          <div style="display:flex;flex-direction:column;gap:.4rem;padding:.4rem .6rem;border:1px solid var(--border,#ddd);border-radius:.4rem">
+            <label style="display:flex;gap:.5rem;align-items:flex-start;cursor:pointer">
+              <input type="radio" name="imp-mode" value="replace" checked style="margin-top:.25rem">
+              <span><strong>Substituir tudo do cliente</strong>
+                <div class="muted small">Apaga todos os lançamentos existentes do cliente e recria a partir do PDF. Use quando o PDF for o extrato completo (fonte da verdade).</div>
+              </span>
+            </label>
+            <label style="display:flex;gap:.5rem;align-items:flex-start;cursor:pointer">
+              <input type="radio" name="imp-mode" value="append" style="margin-top:.25rem">
+              <span><strong>Apenas adicionar novos</strong>
+                <div class="muted small">Mantém os existentes; cria apenas os que não casam pela dedup tolerante (DUIMP+data ±3 dias, |valor| ±1 cent quando DUIMP idêntica). Use para extratos parciais.</div>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="full">
           <button class="btn primary" id="imp-prev">Pré-visualizar lançamentos</button>
         </div>
         <div class="full" id="imp-out"></div>
@@ -227,18 +244,29 @@ window.VIEW_movimentacoes = (() => {
   }
   async function applyImport() {
     const cliId = document.getElementById('imp-cli').value;
+    const mode  = (document.querySelector('input[name="imp-mode"]:checked') || {}).value || 'replace';
+    const cliNome = (document.getElementById('imp-cli').selectedOptions[0] || {}).textContent || '';
     const checks = document.querySelectorAll('[data-imp-i]');
     const items = [];
     checks.forEach(c => {
       if (c.checked) items.push({ ...lastPreview.items[Number(c.dataset.impI)], cliente_id: Number(cliId) });
     });
     if (!items.length) return UI.toast('Nada selecionado', 'err');
+
+    if (mode === 'replace') {
+      const ok = confirm(
+        `Modo SUBSTITUIR: todos os lançamentos existentes de "${cliNome.trim()}" serão APAGADOS e recriados a partir do PDF (${items.length} item(ns)).\n\nDeseja continuar?`
+      );
+      if (!ok) return;
+    }
+
     try {
-      const r = await API.post('/api/movimentacoes/import-extrato/apply', { items, cliente_id: Number(cliId) });
-      const msg = r.skipped
-        ? `${r.created} lançamento(s) criado(s) — ${r.skipped} ignorado(s) (já existiam)`
-        : `${r.created} lançamento(s) criado(s)`;
-      UI.toast(msg);
+      const r = await API.post('/api/movimentacoes/import-extrato/apply',
+        { items, cliente_id: Number(cliId), mode });
+      const parts = [`${r.created} lançamento(s) criado(s)`];
+      if (r.replaced) parts.push(`${r.replaced} substituído(s)`);
+      if (r.skipped)  parts.push(`${r.skipped} ignorado(s)`);
+      UI.toast(parts.join(' — '));
       UI.closeModal(); load();
     } catch (e) { UI.toast(e.message, 'err'); }
   }

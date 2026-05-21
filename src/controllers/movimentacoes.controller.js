@@ -40,9 +40,12 @@ export async function importExtratoPreview(req, res, next) {
 
 export async function importExtratoApply(req, res, next) {
   try {
-    const { items, cliente_id } = req.body || {};
-    const r = await extrato.applyExtrato(items, cliente_id);
-    await logAction({ user: req.user, action: 'IMPORT_EXTRATO', entity: 'movimentacao', details: `${r.created} criados`, ip: req.ip });
+    const { items, cliente_id, mode } = req.body || {};
+    const r = await extrato.applyExtrato(items, cliente_id, { mode });
+    const details = r.replaced
+      ? `${r.created} criados, ${r.replaced} substituidos`
+      : `${r.created} criados${r.skipped ? `, ${r.skipped} ignorados` : ''}`;
+    await logAction({ user: req.user, action: 'IMPORT_EXTRATO', entity: 'movimentacao', details, ip: req.ip });
     res.json(r);
   } catch (e) { next(e); }
 }
