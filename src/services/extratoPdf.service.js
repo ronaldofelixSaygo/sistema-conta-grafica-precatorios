@@ -272,38 +272,46 @@ export async function applyExtrato(items, defaultClienteId, opts = {}) {
     if (!cli) continue;
 
     // Modo replace: limpa antes de recriar (transação garante atomicidade —
-    // se a recriação falhar, o delete também é desfeito).
+    // se a recriação falhar, o delete também é desfeito). Usamos createMany
+    // em lote pra evitar timeout quando o PDF tem 100+ lançamentos.
     if (mode === 'replace') {
+      // 1) Dedup dentro do batch (DB estara vazio depois do delete).
+      const filtered = [];
+      for (const it of list) {
+        const norm = {
+          tipo: it.tipo_movimento || 'Créditos Reconhecidos e Cedidos',
+          valor: Math.abs(Number(it.valor) || 0),
+          data: it.data_nf || '',
+          duimp: it.duimp_di_processo || '',
+        };
+        if (filtered.some(f => isSimilar(f._n, norm))) { skipped++; continue; }
+        filtered.push({ it, _n: norm });
+      }
+
+      // 2) Monta os rows para createMany de uma vez.
+      const rows = filtered.map(({ it, _n }) => {
+        const ajustado = _n.tipo.includes('Débito') ? -_n.valor : _n.valor;
+        return {
+          clienteId: cid,
+          tipoMovimento: _n.tipo,
+          dataNf: isoToDateBr(it.data_nf),
+          duimpDiProcesso: it.duimp_di_processo || null,
+          parceiro: cli.escritorio || null,
+          percentual: Number(it.percentual) || 0,
+          valor: _n.valor,
+          valorAjustado: ajustado,
+        };
+      });
+
+      // 3) Delete + createMany em transação, com timeout estendido por segurança.
       await prisma.$transaction(async (tx) => {
         const del = await tx.movimentacao.deleteMany({ where: { clienteId: cid } });
         replaced += del.count;
-
-        // Dentro do replace, dedup só dentro do batch (DB esta vazio para o cliente).
-        const createdNow = [];
-        for (const it of list) {
-          const norm = {
-            tipo: it.tipo_movimento || 'Créditos Reconhecidos e Cedidos',
-            valor: Math.abs(Number(it.valor) || 0),
-            data: it.data_nf || '',
-            duimp: it.duimp_di_processo || '',
-          };
-          if (createdNow.some(c => isSimilar(c, norm))) { skipped++; continue; }
-          const ajustado = norm.tipo.includes('Débito') ? -norm.valor : norm.valor;
-          await tx.movimentacao.create({
-            data: {
-              clienteId: cid,
-              tipoMovimento: norm.tipo,
-              dataNf: isoToDateBr(it.data_nf),
-              duimpDiProcesso: it.duimp_di_processo || null,
-              parceiro: cli.escritorio || null,
-              percentual: Number(it.percentual) || 0,
-              valor: norm.valor, valorAjustado: ajustado,
-            },
-          });
-          createdNow.push(norm);
-          created++;
+        if (rows.length) {
+          const r = await tx.movimentacao.createMany({ data: rows });
+          created += r.count;
         }
-      });
+      }, { timeout: 60000, maxWait: 10000 });
       continue;
     }
 
