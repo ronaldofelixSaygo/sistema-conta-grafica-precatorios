@@ -226,10 +226,22 @@ export async function previewExtrato(buffer) {
     const pctMatch = line.match(/\b(\d{1,2}(?:[,.]\d{1,2})?)\s*%/);
     const percentual = pctMatch ? (parseValor(pctMatch[1]) || 0) : 0;
 
+    // Natureza T (transferência) na seção de Créditos: o PDF lista no
+    // mesmo bloco "Créditos Reconhecidos e Cedidos" tanto entradas com
+    // Natureza "A" (aproveitamento, crédito de fato) quanto Natureza "T"
+    // (transferência — credito sendo cedido pra outra CG, ou seja, saída).
+    // Formato da linha T: "DATA PROCESSO T CG-DEBITADA R$ VALOR".
+    // Reclassificamos as T como "Débitos de Transferências".
+    let tipoItem = currentTipo;
+    if (currentTipo === 'Créditos Reconhecidos e Cedidos'
+        && /\s+T\s+\d+\s+R\$/i.test(line)) {
+      tipoItem = 'Débitos de Transferências';
+    }
+
     raw.push({
       data: date,
       duimp,
-      tipo: currentTipo,
+      tipo: tipoItem,
       valor: Math.abs(valor),
       percentual,
       _raw: line.slice(0, 200),
