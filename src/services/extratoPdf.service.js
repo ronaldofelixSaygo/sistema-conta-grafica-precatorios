@@ -198,6 +198,14 @@ export async function previewExtrato(buffer) {
   const text = await extractText(buffer);
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
+  // Extrai a CG do cliente desse PDF (linha "Conta Gráfica: Nº 1195").
+  // Precisamos disso pra distinguir Natureza T que é credito recebido
+  // (CG Debitada != propria CG) de Natureza T que é transferencia de
+  // saida (CG Debitada == propria CG).
+  let ownCG = null;
+  const cgMatch = text.match(/Conta\s+Gr[áa]fica\s*:?\s*N[º°o]?\s*(\d{2,8})/i);
+  if (cgMatch) ownCG = cgMatch[1];
+
   const raw = [];
   let currentTipo = 'Créditos Reconhecidos e Cedidos';
 
@@ -226,16 +234,21 @@ export async function previewExtrato(buffer) {
     const pctMatch = line.match(/\b(\d{1,2}(?:[,.]\d{1,2})?)\s*%/);
     const percentual = pctMatch ? (parseValor(pctMatch[1]) || 0) : 0;
 
-    // Natureza T (transferência) na seção de Créditos: o PDF lista no
-    // mesmo bloco "Créditos Reconhecidos e Cedidos" tanto entradas com
-    // Natureza "A" (aproveitamento, crédito de fato) quanto Natureza "T"
-    // (transferência — credito sendo cedido pra outra CG, ou seja, saída).
-    // Formato da linha T: "DATA PROCESSO T CG-DEBITADA R$ VALOR".
-    // Reclassificamos as T como "Débitos de Transferências".
+    // Natureza T (transferência) na seção de Créditos: o PDF mistura no
+    // bloco "Créditos Reconhecidos e Cedidos" entradas Natureza "A"
+    // (aproveitamento, crédito real) e Natureza "T" (transferência entre
+    // contas gráficas). Formato: "DATA PROCESSO T CG-DEBITADA R$ VALOR".
+    //
+    // Regra: se a "CG Debitada" da linha for a propria conta gráfica do
+    // cliente, é uma transferencia de SAÍDA (debitou a propria CG pra
+    // creditar outra) → vai pra "Débitos de Transferências". Senão, é
+    // credito recebido de outra CG (entrada) → fica como Crédito.
     let tipoItem = currentTipo;
-    if (currentTipo === 'Créditos Reconhecidos e Cedidos'
-        && /\s+T\s+\d+\s+R\$/i.test(line)) {
-      tipoItem = 'Débitos de Transferências';
+    if (currentTipo === 'Créditos Reconhecidos e Cedidos') {
+      const tMatch = line.match(/\s+T\s+(\d{2,8})\s+R\$/i);
+      if (tMatch && ownCG && tMatch[1] === ownCG) {
+        tipoItem = 'Débitos de Transferências';
+      }
     }
 
     raw.push({
