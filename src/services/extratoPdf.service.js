@@ -147,10 +147,15 @@ function isSimilar(a, b) {
   const nb = normalizeDuimp(b.duimp);
   const isCredito = (a.tipo || '').includes('Crédito');
 
-  // Regra A: DUIMP idêntica + mesma data exata. Aceita diferença
-  // de até R$ 1,00 no valor — cobre rounding de centavos entre dados
-  // legados (.34) e o valor real do PDF (.33).
-  if (na && nb && na === nb && dd === 0 && vd <= 1.0) return true;
+  // Regra A: DUIMP idêntica + mesma data exata + diferença de centavos
+  // (entre 0,5c e R$ 1,00). Cobre rounding entre dados legados (.34)
+  // e o valor real do PDF (.33).
+  //
+  // IMPORTANTE: quando o valor é EXATAMENTE igual (vd ≤ 0,5c), NÃO
+  // tratamos como duplicata — são entradas legítimas duplicadas dentro
+  // do proprio PDF (operador lançou 2x no sistema antigo) e o total do
+  // extrato CONTA ambas. Remover faria o sistema divergir do PDF.
+  if (na && nb && na === nb && dd === 0 && vd > 0.005 && vd <= 1.0) return true;
 
   // Em CRÉDITOS, parar aqui. Na seção de créditos do extrato o "número"
   // é Nº Processo (não DUIMP), e o mesmo processo pode se repetir em
