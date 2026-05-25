@@ -117,12 +117,14 @@ export async function uploadAttachment(req, res, next) {
 }
 export async function downloadAttachment(req, res, next) {
   try {
-    const att = await svc.downloadAttachment(req.user, req.params.attId);
+    const download = req.query.download === '1' || req.query.download === 'true';
+    const att = await svc.downloadAttachment(req.user, req.params.attId, { download });
     // S3: redirect 302 pra URL assinada (zero peso no servidor)
     if (att.redirectUrl) return res.redirect(att.redirectUrl);
     // Legado: bytes inline
+    const disposition = att._inline === false ? 'attachment' : 'inline';
     res.setHeader('Content-Type', att.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(att.filename)}"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(att.filename)}"`);
     res.setHeader('Content-Length', att.size);
     res.end(Buffer.from(att.content));
   } catch (e) { next(e); }

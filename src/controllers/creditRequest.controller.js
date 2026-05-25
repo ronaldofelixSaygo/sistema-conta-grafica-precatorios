@@ -168,12 +168,14 @@ export async function resolve(req, res, next) {
 }
 export async function downloadEvidence(req, res, next) {
   try {
-    const r = await svc.getResolutionAttachment(req.user, req.params.id);
+    const download = req.query.download === '1' || req.query.download === 'true';
+    const r = await svc.getResolutionAttachment(req.user, req.params.id, { download });
     // S3: redirect 302 pra URL assinada (zero peso no servidor)
     if (r.redirectUrl) return res.redirect(r.redirectUrl);
-    // Legado: bytes inline
+    // Legado: bytes
+    const disposition = r._inline === false ? 'attachment' : 'inline';
     res.setHeader('Content-Type', r.mime);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(r.filename)}"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(r.filename)}"`);
     res.end(Buffer.from(r.bytes));
   } catch (e) { next(e); }
 }
@@ -186,12 +188,14 @@ export async function cancel(req, res, next) {
 }
 export async function downloadPdf(req, res, next) {
   try {
-    const r = await svc.getInputPdf(req.user, req.params.id);
+    const download = req.query.download === '1' || req.query.download === 'true';
+    const r = await svc.getInputPdf(req.user, req.params.id, { download });
     // S3: redirect 302 pra URL assinada
     if (r.redirectUrl) return res.redirect(r.redirectUrl);
-    // Legado: bytes inline
+    // Legado: bytes
+    const disposition = r._inline === false ? 'attachment' : 'inline';
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(r.filename)}"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(r.filename)}"`);
     res.end(Buffer.from(r.bytes));
   } catch (e) { next(e); }
 }

@@ -285,21 +285,22 @@ export async function cancelRequest(user, id) {
 }
 
 // Download do PDF original (input). S3 quando disponível, bytes inline legado.
-export async function getInputPdf(user, id) {
+export async function getInputPdf(user, id, opts = {}) {
   await getRequest(user, id); // valida permissão
   const r = await prisma.creditRequest.findUnique({
     where: { id }, select: { inputPdfBytes: true, inputPdfName: true, inputPdfS3Key: true },
   });
+  const inline = !opts.download;
   if (r?.inputPdfS3Key) {
-    const url = await storage.getDownloadUrl(r.inputPdfS3Key, { filename: r.inputPdfName || 'invoice.pdf', inline: true });
+    const url = await storage.getDownloadUrl(r.inputPdfS3Key, { filename: r.inputPdfName || 'invoice.pdf', inline });
     return { redirectUrl: url };
   }
   if (!r?.inputPdfBytes) { const e = new Error('Sem PDF anexado'); e.status = 404; throw e; }
-  return { filename: r.inputPdfName || 'invoice.pdf', bytes: r.inputPdfBytes };
+  return { filename: r.inputPdfName || 'invoice.pdf', bytes: r.inputPdfBytes, _inline: inline };
 }
 
 // Download do anexo de resolução
-export async function getResolutionAttachment(user, id) {
+export async function getResolutionAttachment(user, id, opts = {}) {
   await getRequest(user, id);
   const r = await prisma.creditRequest.findUnique({
     where: { id }, select: {
@@ -307,9 +308,10 @@ export async function getResolutionAttachment(user, id) {
       resolutionAttachmentName: true, resolutionAttachmentMime: true,
     },
   });
+  const inline = !opts.download;
   if (r?.resolutionAttachmentS3Key) {
     const url = await storage.getDownloadUrl(r.resolutionAttachmentS3Key, {
-      filename: r.resolutionAttachmentName || 'evidencia', inline: true,
+      filename: r.resolutionAttachmentName || 'evidencia', inline,
     });
     return { redirectUrl: url };
   }
@@ -318,5 +320,6 @@ export async function getResolutionAttachment(user, id) {
     filename: r.resolutionAttachmentName || 'evidencia',
     mime: r.resolutionAttachmentMime || 'application/octet-stream',
     bytes: r.resolutionAttachmentBytes,
+    _inline: inline,
   };
 }

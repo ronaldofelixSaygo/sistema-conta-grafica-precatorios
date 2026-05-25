@@ -382,7 +382,7 @@ window.VIEW_desoneracoes = (() => {
         <div class="doc-file">
           <div class="doc-file-item">
             <span class="doc-name" title="${UI.escapeHtml(n.oficialNome || n.numero)}">📄 ${UI.escapeHtml(n.oficialNome || n.numero)}</span>
-            ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
+            ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial?download=1" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
           </div>
           ${n.validada ? '<span class="pill green small" style="margin-top:.2rem">Validada</span>' : ''}
         </div>
@@ -454,7 +454,7 @@ window.VIEW_desoneracoes = (() => {
         ? arquivos.map(a => `
             <div class="doc-file-item">
               <span class="doc-name" title="${UI.escapeHtml(a.nome)}">📄 ${UI.escapeHtml(a.nome)}</span>
-              <a class="doc-download" href="/api/desoneracoes/documentos/${a.id}" download="${UI.escapeHtml(a.nome)}" title="Baixar">⬇</a>
+              <a class="doc-download" href="/api/desoneracoes/documentos/${a.id}?download=1" download="${UI.escapeHtml(a.nome)}" title="Baixar">⬇</a>
             </div>`).join('')
         : `<span class="muted small">${statusText || '—'}</span>`;
 
@@ -559,7 +559,7 @@ window.VIEW_desoneracoes = (() => {
         <div class="doc-file">
           <div class="doc-file-item">
             <span class="doc-name" title="${UI.escapeHtml(n.oficialNome || n.numero)}">📄 ${UI.escapeHtml(n.oficialNome || n.numero)}</span>
-            ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
+            ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial?download=1" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
           </div>
           ${statusBlock}
         </div>

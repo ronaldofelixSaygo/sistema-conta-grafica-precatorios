@@ -690,7 +690,7 @@ window['VIEW_credit-requests'] = (() => {
           <span>📎 <strong>${UI.escapeHtml(r.resolutionAttachmentName)}</strong></span>
           <span style="flex:1"></span>
           <button class="btn small" data-act="view-evidence" data-name="${UI.escapeHtml(r.resolutionAttachmentName)}">👁 Visualizar</button>
-          <a class="btn small primary" href="/api/credit-requests/${r.id}/evidence" download="${UI.escapeHtml(r.resolutionAttachmentName)}">⬇ Baixar</a>
+          <a class="btn small primary" href="/api/credit-requests/${r.id}/evidence?download=1" download="${UI.escapeHtml(r.resolutionAttachmentName)}">⬇ Baixar</a>
         </div>` : ''}
       </div>` : ''}
       <div id="cr-actions"></div>

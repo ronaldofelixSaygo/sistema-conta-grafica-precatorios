@@ -360,16 +360,19 @@ export async function uploadAttachment(user, cardId, file, { stageProgressId = n
   });
 }
 
-export async function downloadAttachment(user, attachmentId) {
+export async function downloadAttachment(user, attachmentId, opts = {}) {
   const att = await prisma.kanbanAttachment.findFirst({
     where: { id: attachmentId, card: cardScopeWhere(user) },
   });
   if (!att) { const e = new Error('Anexo nao encontrado'); e.status = 404; throw e; }
+  // opts.download: força disposition=attachment (forçar download em vez de
+  // preview inline). Mesmo endpoint serve preview e download por query.
+  const inline = !opts.download;
   if (att.s3Key) {
-    const url = await storage.getDownloadUrl(att.s3Key, { filename: att.filename, inline: true });
+    const url = await storage.getDownloadUrl(att.s3Key, { filename: att.filename, inline });
     return { redirectUrl: url };
   }
-  return att;
+  return { ...att, _inline: inline };
 }
 
 export async function deleteAttachment(user, attachmentId) {

@@ -96,12 +96,14 @@ export async function anexarOficial(req, res, next) {
 }
 export async function downloadOficial(req, res, next) {
   try {
-    const r = await svc.getOficialNota(req.params.notaId);
+    const download = req.query.download === '1' || req.query.download === 'true';
+    const r = await svc.getOficialNota(req.params.notaId, { download });
     // S3: redirect 302 pra URL assinada (zero peso no servidor)
     if (r.redirectUrl) return res.redirect(r.redirectUrl);
-    // Legado: serve os bytes inline
+    // Legado: serve os bytes
+    const disposition = r._inline === false ? 'attachment' : 'inline';
     res.setHeader('Content-Type', r.mime);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(r.name)}"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(r.name)}"`);
     res.end(Buffer.from(r.bytes));
   } catch (e) { next(e); }
 }
@@ -127,10 +129,12 @@ export async function addDocumento(req, res, next) {
 }
 export async function downloadDoc(req, res, next) {
   try {
-    const r = await svc.getDocumento(req.params.docId);
+    const download = req.query.download === '1' || req.query.download === 'true';
+    const r = await svc.getDocumento(req.params.docId, { download });
     if (r.redirectUrl) return res.redirect(r.redirectUrl);
+    const disposition = r._inline === false ? 'attachment' : 'inline';
     res.setHeader('Content-Type', r.mime);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(r.name)}"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(r.name)}"`);
     res.end(Buffer.from(r.bytes));
   } catch (e) { next(e); }
 }

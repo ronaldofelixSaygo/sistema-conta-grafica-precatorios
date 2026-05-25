@@ -885,18 +885,19 @@ export async function anexarOficialNota(user, notaId, { name, mime, bytes }) {
 
 // Retorna ou os bytes (legado) OU uma URL assinada do S3 (novos). O caller
 // (controller) decide: se vier `redirectUrl`, faz 302; senão, envia os bytes.
-export async function getOficialNota(notaId) {
+export async function getOficialNota(notaId, opts = {}) {
   const n = await prisma.desoneracaoNota.findUnique({
     where: { id: notaId },
     select: { oficialBytes: true, oficialS3Key: true, oficialNome: true, oficialMime: true, deletedAt: true },
   });
   if (!n || n.deletedAt) { const e = new Error('NF oficial não encontrada'); e.status = 404; throw e; }
+  const inline = !opts.download;
   if (n.oficialS3Key) {
-    const url = await storage.getDownloadUrl(n.oficialS3Key, { filename: n.oficialNome, inline: true });
+    const url = await storage.getDownloadUrl(n.oficialS3Key, { filename: n.oficialNome, inline });
     return { redirectUrl: url };
   }
   if (!n.oficialBytes) { const e = new Error('NF oficial não encontrada'); e.status = 404; throw e; }
-  return { name: n.oficialNome || 'nf.pdf', mime: n.oficialMime || 'application/pdf', bytes: n.oficialBytes };
+  return { name: n.oficialNome || 'nf.pdf', mime: n.oficialMime || 'application/pdf', bytes: n.oficialBytes, _inline: inline };
 }
 
 export async function removeNota(user, notaId) {
@@ -1058,17 +1059,18 @@ export async function addDocumento(user, id, { tipo, name, mime, bytes }) {
   return { id: doc.id, tipo: doc.tipo, nome: doc.nome, mime: doc.mime, createdAt: doc.createdAt };
 }
 
-export async function getDocumento(docId) {
+export async function getDocumento(docId, opts = {}) {
   const d = await prisma.desoneracaoDocumento.findUnique({
     where: { id: docId },
     select: { nome: true, mime: true, bytes: true, s3Key: true },
   });
   if (!d) { const e = new Error('Documento não encontrado'); e.status = 404; throw e; }
+  const inline = !opts.download;
   if (d.s3Key) {
-    const url = await storage.getDownloadUrl(d.s3Key, { filename: d.nome, inline: true });
+    const url = await storage.getDownloadUrl(d.s3Key, { filename: d.nome, inline });
     return { redirectUrl: url };
   }
-  return { name: d.nome, mime: d.mime, bytes: d.bytes };
+  return { name: d.nome, mime: d.mime, bytes: d.bytes, _inline: inline };
 }
 
 export async function removeDocumento(user, docId) {

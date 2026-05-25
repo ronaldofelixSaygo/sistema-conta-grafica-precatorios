@@ -10,6 +10,13 @@ window.VIEWER = (() => {
     const isImage = (mimeType||'').startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg'].includes(ext);
     const isPdf   = (mimeType||'').includes('pdf') || ext === 'pdf';
 
+    // URL pra forçar download (attachment): mesma rota com ?download=1.
+    // Browsers ignoram o atributo "download" do <a> quando o href é
+    // cross-origin (caso S3 após o redirect 302). Anexando ?download=1,
+    // o backend gera a URL assinada do S3 com Content-Disposition=attachment
+    // e o navegador baixa em vez de abrir.
+    const dlUrl = url + (url.includes('?') ? '&' : '?') + 'download=1';
+
     const bg = document.createElement('div');
     bg.id = 'viewer-bg';
     bg.className = 'viewer-bg';
@@ -18,7 +25,7 @@ window.VIEWER = (() => {
         <header class="viewer-head">
           <strong>${safe}</strong>
           <div style="display:flex;gap:.4rem">
-            <a class="btn small primary" href="${url}" download="${safe}">Baixar</a>
+            <a class="btn small primary" href="${dlUrl}" download="${safe}">Baixar</a>
             <button class="btn small ghost" id="viewer-close">x</button>
           </div>
         </header>
