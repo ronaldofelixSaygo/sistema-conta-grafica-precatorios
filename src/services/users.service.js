@@ -45,6 +45,25 @@ export async function createUser(input) {
     e.status = 409; throw e;
   }
 
+  // Cliente só pode ter UM usuário vinculado (User.clienteId é @unique).
+  // Pré-checa pra mensagem amigável dizendo qual usuário já tem o vínculo —
+  // o erro P2002 do Prisma só diz "clienteId duplicado" sem identificar quem.
+  if (clienteId) {
+    const cidNum = Number(clienteId);
+    const already = await prisma.user.findFirst({
+      where: { clienteId: cidNum },
+      select: { id: true, name: true, email: true, active: true },
+    });
+    if (already) {
+      const status = already.active ? 'ativo' : 'inativo';
+      const e = new Error(
+        `Esse cliente já está vinculado ao usuário ${status} "${already.name}" (${already.email}). `
+        + `Cada cliente só pode ter um usuário — edite ou desative o existente antes de criar outro.`
+      );
+      e.status = 409; throw e;
+    }
+  }
+
   // Se PARTNER, deriva officeName do nome do parceiro (se nao fornecido)
   let finalOfficeName = officeName ? String(officeName).trim() : null;
   if (role === 'PARTNER' && parceiroId) {
@@ -95,6 +114,23 @@ export async function updateUser(id, input) {
   }
   if (finalRole && finalRole !== 'CLIENT') {
     data.clienteId = null;
+  }
+
+  // Mesma pré-checagem do create: se o user está sendo vinculado a um cliente,
+  // confere se já existe outro usuário ocupando esse vínculo.
+  if (data.clienteId) {
+    const already = await prisma.user.findFirst({
+      where: { clienteId: data.clienteId, NOT: { id } },
+      select: { id: true, name: true, email: true, active: true },
+    });
+    if (already) {
+      const status = already.active ? 'ativo' : 'inativo';
+      const e = new Error(
+        `Esse cliente já está vinculado ao usuário ${status} "${already.name}" (${already.email}). `
+        + `Cada cliente só pode ter um usuário — edite ou desative o existente antes.`
+      );
+      e.status = 409; throw e;
+    }
   }
 
   return prisma.user.update({ where: { id }, data, select: userPublicSelect });

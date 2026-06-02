@@ -12,6 +12,8 @@ const FIELD_LABELS = {
   code:      'código',
   monthRef:  'mês de referência',
   module:    'módulo',
+  clienteId: 'cliente vinculado',
+  parceiroId:'parceiro vinculado',
 };
 
 // Tenta extrair os campos da mensagem do Prisma. Ex.:
