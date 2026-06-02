@@ -209,7 +209,7 @@ export async function emailDebug(req, res, next) {
     if (req.query.cardId) {
       const card = await prisma.kanbanCard.findUnique({
         where: { id: String(req.query.cardId) },
-        include: { cliente: { include: { user: { select: { email: true, name: true } } } } },
+        include: { cliente: { include: { users: { where: { active: true }, select: { email: true, name: true } } } } },
       });
       if (card) {
         cardSnapshot = {
@@ -217,7 +217,7 @@ export async function emailDebug(req, res, next) {
           clienteId: card.clienteId,
           clienteNome: card.cliente?.nome,
           clienteEscritorio: card.cliente?.escritorio,
-          clienteUser: card.cliente?.user || null,
+          clienteUsers: card.cliente?.users || [],
           currentStage: card.currentStage,
         };
         const roles = settings.notifyKanbanStageChangeRoles || ['ADM','SAYGO','PARTNER','CLIENT'];
@@ -228,9 +228,13 @@ export async function emailDebug(req, res, next) {
           },
           select: { email: true, name: true, officeName: true },
         }) : [];
+        const clientEmails = (card.cliente?.users || []).map(u => u.email).filter(Boolean);
         recipients = {
           roles,
-          client:   roles.includes('CLIENT') && card.cliente?.user?.email ? card.cliente.user.email : null,
+          // Mantém `client` como string única (compat) com o primeiro,
+          // e adiciona `clients` com a lista completa.
+          client:   roles.includes('CLIENT') ? (clientEmails[0] || null) : null,
+          clients:  roles.includes('CLIENT') ? clientEmails : [],
           partners: roles.includes('PARTNER') ? partners.map(p => p.email) : [],
           staff:    (roles.includes('ADM') || roles.includes('SAYGO')) ? staff.map(s => s.email) : [],
         };

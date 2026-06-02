@@ -31,8 +31,9 @@ model User {
   // Para PARTNER: nome do escritório (deve bater com Cliente.escritorio)
   officeName   String?
 
-  // Para CLIENT: id do Cliente vinculado (1-1, vê só ele)
-  clienteId    Int?      @unique
+  // Para CLIENT: id do Cliente vinculado. Vários usuários CLIENT podem
+  // apontar pro mesmo Cliente (ex: equipe da empresa). Email continua único.
+  clienteId    Int?
   cliente      Cliente?  @relation("ClienteUser", fields: [clienteId], references: [id], onDelete: SetNull)
 
   active       Boolean   @default(true)
@@ -127,7 +128,7 @@ model Cliente {
   updatedAt           DateTime @updatedAt
 
   movimentacoes       Movimentacao[]
-  user                User?    @relation("ClienteUser")
+  users               User[]   @relation("ClienteUser")
   kanbanCard          KanbanCard?
   partnerRequests     PartnerRequest[]
   creditRequests      CreditRequest[]

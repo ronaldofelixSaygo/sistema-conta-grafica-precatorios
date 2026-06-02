@@ -219,11 +219,15 @@ export function templatePartnerRequest({ clienteName, type, message, byUserName 
 async function recipientsForCliente(clienteId, allowedRoles = ['ADM','SAYGO','PARTNER','CLIENT']) {
   const cli = await prisma.cliente.findUnique({
     where: { id: clienteId },
-    include: { user: { select: { email: true } } },
+    // Vários usuários CLIENT podem estar vinculados ao mesmo cliente — todos
+    // os ativos com e-mail entram na lista de destinatários.
+    include: { users: { where: { active: true }, select: { email: true } } },
   });
   if (!cli) return [];
   const emails = new Set();
-  if (allowedRoles.includes('CLIENT') && cli.user?.email) emails.add(cli.user.email);
+  if (allowedRoles.includes('CLIENT')) {
+    for (const u of (cli.users || [])) if (u.email) emails.add(u.email);
+  }
   if (allowedRoles.includes('PARTNER') && cli.escritorio) {
     // Match case-insensitive com trim no escritorio — mesmo padrão do scope.
     // Sem isso, NBSP/case quebra silenciosamente quem deveria receber.
