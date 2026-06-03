@@ -476,54 +476,42 @@ window['VIEW_credit-requests'] = (() => {
       out.innerHTML = `<div class="err">${r.warnings.join('<br>')}</div>`;
       return;
     }
-    const headers = ['NCM', 'Valor R$', 'II', 'PIS', 'COFINS', 'IPI', 'Subtotal', 'ICMS atual', 'ICMS NF 4%', 'ICMS Pagar 1.2%'];
-    const headRow = headers.map(h => `<th style="font-size:10px">${h}</th>`).join('');
+    // Mesmo formato da Solicitação aberta (modal de detalhe): 5 colunas
+    // (NCM | Subtotal | ICMS atual | ICMS NF 4% | ICMS Pagar 1.2%) + Resumo
+    // único baseado na Modalidade selecionada no form.
+    const t = r.total || {};
     const ncmRows = (r.porNcm || []).map(g => {
-      const b = g.breakdown, c = g.cenarios;
+      const b = g.breakdown || {}, c = g.cenarios || {};
       return `<tr>
         <td><strong>${UI.escapeHtml(g.ncm)}</strong></td>
-        <td class="num">${UI.fmtMoney(b.produtos_brl)}</td>
-        <td class="num">${UI.fmtMoney(b.ii)}</td>
-        <td class="num">${UI.fmtMoney(b.pis)}</td>
-        <td class="num">${UI.fmtMoney(b.cofins)}</td>
-        <td class="num">${UI.fmtMoney(b.ipi)}</td>
-        <td class="num"><strong>${UI.fmtMoney(b.subtotal)}</strong></td>
-        <td class="num val-neg">${UI.fmtMoney(c.atual.icms)}</td>
-        <td class="num val-pos">${UI.fmtMoney(c.al_nf.icms)}</td>
-        <td class="num val-pos">${UI.fmtMoney(c.al_dif.icms)}</td>
+        <td class="num">${UI.fmtMoney(b.subtotal)}</td>
+        <td class="num val-neg">${UI.fmtMoney(c.atual?.icms || 0)}</td>
+        <td class="num val-pos">${UI.fmtMoney(c.al_nf?.icms || 0)}</td>
+        <td class="num val-pos">${UI.fmtMoney(c.al_dif?.icms || 0)}</td>
       </tr>`;
     }).join('');
-    const t = r.total;
-    const totalRow = `<tr style="background:var(--s2);font-weight:700">
-      <td>TOTAL</td>
-      <td class="num">${UI.fmtMoney(t.produtos_brl)}</td>
-      <td class="num">${UI.fmtMoney(t.ii)}</td>
-      <td class="num">${UI.fmtMoney(t.pis)}</td>
-      <td class="num">${UI.fmtMoney(t.cofins)}</td>
-      <td class="num">${UI.fmtMoney(t.ipi)}</td>
-      <td class="num">${UI.fmtMoney(t.subtotal)}</td>
-      <td class="num val-neg">${UI.fmtMoney(t.icms_atual)}</td>
-      <td class="num val-pos">${UI.fmtMoney(t.icms_al_nf)}</td>
-      <td class="num val-pos">${UI.fmtMoney(t.icms_al_dif)}</td>
-    </tr>`;
+
+    const modalidade = document.querySelector('select[name="modalidade"]')?.value || 'AL_NF';
+    const modalidadeLabel = modalidade === 'AL_NF' ? 'Alagoas NF (4%)' : 'Alagoas Dif (1.2%)';
+
     out.innerHTML = `
-      <div class="panel" style="margin-top:1rem;overflow-x:auto">
-        <h3>📊 Resultado por NCM</h3>
+      <div class="panel" style="margin-top:1rem">
+        <h3>Resultado por NCM</h3>
         <table class="table" style="font-size:12px">
-          <thead><tr>${headRow}</tr></thead>
-          <tbody>${ncmRows}${totalRow}</tbody>
+          <thead><tr><th>NCM</th><th>Subtotal</th><th>ICMS atual</th><th>ICMS NF 4%</th><th>ICMS Pagar 1.2%</th></tr></thead>
+          <tbody>${ncmRows || '<tr><td colspan="5" class="muted">Sem dados</td></tr>'}</tbody>
         </table>
       </div>
       <div class="panel">
         <h3>Resumo</h3>
         <table class="table"><tbody>
-          <tr><td>Custo total atual (ICMS ${(r.cabecalho.icms_aliq_estado||0)}%)</td><td class="num">${UI.fmtMoney(t.custo_atual)}</td></tr>
-          <tr><td>Custo Alagoas NF (4%)</td><td class="num">${UI.fmtMoney(t.custo_al_nf)}</td></tr>
-          <tr><td>Custo Alagoas Dif (1.2%)</td><td class="num">${UI.fmtMoney(t.custo_al_dif)}</td></tr>
-          <tr><td><strong>Créditos a comprar (NF 4%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(r.creditos.al_nf)}</strong></td></tr>
-          <tr><td><strong>Créditos a comprar (Dif 1.2%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(r.creditos.al_dif)}</strong></td></tr>
-          <tr><td>Economia vs cenário atual (NF)</td><td class="num val-pos">${UI.fmtMoney(t.economia_al_nf)}</td></tr>
-          <tr><td>Economia vs cenário atual (Dif)</td><td class="num val-pos">${UI.fmtMoney(t.economia_al_dif)}</td></tr>
+          <tr><td>Modalidade</td><td>${modalidadeLabel}</td></tr>
+          <tr><td>Subtotal federal</td><td class="num">${UI.fmtMoney(t.subtotal || 0)}</td></tr>
+          <tr><td>Custo atual</td><td class="num">${UI.fmtMoney(t.icms_atual || 0)}</td></tr>
+          <tr><td><strong>Crédito a comprar — 4%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(t.icms_al_nf || 0)}</strong></td></tr>
+          <tr><td class="muted small">ICMS efetivo (diferimento 1,2%)</td><td class="num muted">${UI.fmtMoney(t.icms_al_dif || 0)}</td></tr>
+          <tr><td>Economia vs cenário atual</td><td class="num val-pos">${UI.fmtMoney(((t.icms_atual || 0) - (t.icms_al_nf || 0)))}</td></tr>
+          <tr><td><strong>Sugestão de compra (+10%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney((t.icms_al_nf || 0) * 1.10)}</strong></td></tr>
         </tbody></table>
       </div>`;
   }
