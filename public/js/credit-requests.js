@@ -271,25 +271,61 @@ window['VIEW_credit-requests'] = (() => {
 
     form.onsubmit = async ev => {
       ev.preventDefault();
-      const submitBtn = form.querySelector('button[type="submit"]');
+      if (!form.clienteId.value) return UI.toast('Selecione o cliente', 'err');
       readGruposFromTable();
-      const fd = new FormData(form);
-      const payload = {
-        clienteId: fd.get('clienteId'),
-        modalidade: fd.get('modalidade'),
-        message: fd.get('message'),
-        inputs: JSON.stringify(buildInputs()),
-        autoSend: 'true',
-      };
+      // Passo de confirmação: exige o comprovante de depósito antes de enviar.
+      showSendConfirm();
+    };
+
+    // Mostra o passo de upload do comprovante de depósito (obrigatório p/ enviar).
+    function showSendConfirm() {
+      const box = document.getElementById('cr-result');
+      box.innerHTML = `
+        <div class="panel" style="margin-top:.6rem;border:1px solid var(--accent,#e8821e)">
+          <h3>Comprovante de depósito</h3>
+          <p class="muted small" style="margin:.2rem 0 .6rem">
+            Para avançar para o interveniente, anexe o comprovante do depósito do valor
+            que deseja incluir como crédito na conta gráfica.
+          </p>
+          <div class="full">
+            <label>Comprovante (PDF ou imagem) *</label>
+            <input type="file" id="cr-comprovante" accept="application/pdf,image/*">
+          </div>
+          <div class="form-actions" style="margin-top:.6rem">
+            <button type="button" class="btn" id="cr-send-cancel">Voltar</button>
+            <button type="button" class="btn primary" id="cr-send-confirm">Confirmar e enviar</button>
+          </div>
+        </div>`;
+      box.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      document.getElementById('cr-send-cancel').onclick = () => { box.innerHTML = ''; };
+      document.getElementById('cr-send-confirm').onclick = doSend;
+    }
+
+    async function doSend() {
+      const file = document.getElementById('cr-comprovante')?.files?.[0];
+      if (!file) return UI.toast('Anexe o comprovante de depósito', 'err');
+      const btn = document.getElementById('cr-send-confirm');
+      readGruposFromTable();
+      const fd = new FormData();
+      fd.append('clienteId', form.clienteId.value);
+      fd.append('modalidade', form.modalidade.value);
+      fd.append('message', form.message.value || '');
+      fd.append('inputs', JSON.stringify(buildInputs()));
+      fd.append('autoSend', 'true');
+      fd.append('comprovante', file);
       try {
-        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Enviando...'; }
-        await API.post('/api/credit-requests', payload);
+        if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+        const resp = await fetch('/api/credit-requests', { method: 'POST', credentials: 'include', body: fd });
+        if (!resp.ok) {
+          const j = await resp.json().catch(() => null);
+          throw new Error(j?.error || j?.message || `HTTP ${resp.status}`);
+        }
         UI.toast('Solicitação enviada para o interveniente'); UI.closeModal(); render();
       } catch (e) {
         UI.toast(e.message, 'err');
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Enviar para o interveniente'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirmar e enviar'; }
       }
-    };
+    }
   }
 
   function buildInputs() {
@@ -670,6 +706,12 @@ window['VIEW_credit-requests'] = (() => {
           <tr><td><strong>Sugestão de compra (+10%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney((total.icms_al_nf||0) * 1.10)}</strong></td></tr>
         </tbody></table>
         ${r.inputPdfName ? `<div class="muted small" style="margin-top:.4rem">📎 PDF original: <a href="/api/credit-requests/${r.id}/pdf" target="_blank">${UI.escapeHtml(r.inputPdfName)}</a></div>` : ''}
+        ${r.paymentReceiptName ? `<div class="small" style="margin-top:.4rem;padding:.5rem;background:var(--s2);border-radius:6px;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <span>🧾 <strong>Comprovante de depósito:</strong> ${UI.escapeHtml(r.paymentReceiptName)}</span>
+          <span style="flex:1"></span>
+          <button class="btn small" data-act="view-receipt" data-name="${UI.escapeHtml(r.paymentReceiptName)}">👁 Visualizar</button>
+          <a class="btn small primary" href="/api/credit-requests/${r.id}/payment-receipt?download=1" download="${UI.escapeHtml(r.paymentReceiptName)}">⬇ Baixar</a>
+        </div>` : ''}
       </div>
       ${r.message ? `<div class="panel"><h3>Mensagem do solicitante</h3><p>${UI.escapeHtml(r.message)}</p></div>` : ''}
       ${(r.resolutionNote || r.resolutionAttachmentName) ? `<div class="panel"><h3>Resposta do interveniente</h3>
@@ -697,7 +739,7 @@ window['VIEW_credit-requests'] = (() => {
       const act = btn?.getAttribute('data-act');
       if (!act) return;
       try {
-        if (act === 'send')    { await API.post(`/api/credit-requests/${r.id}/send`); UI.toast('Enviada'); UI.closeModal(); render(); }
+        if (act === 'send')    { openSendForm(r); }
         if (act === 'cancel')  { await API.post(`/api/credit-requests/${r.id}/cancel`); UI.toast('Cancelada'); UI.closeModal(); render(); }
         if (act === 'start')   { await API.post(`/api/credit-requests/${r.id}/start`); UI.toast('Em andamento'); UI.closeModal(); render(); }
         if (act === 'resolve') { openResolveForm(r); }
@@ -707,7 +749,53 @@ window['VIEW_credit-requests'] = (() => {
             filename: btn.dataset.name || r.resolutionAttachmentName || 'evidencia',
           });
         }
+        if (act === 'view-receipt') {
+          VIEWER.open({
+            url: `/api/credit-requests/${r.id}/payment-receipt`,
+            filename: btn.dataset.name || r.paymentReceiptName || 'comprovante',
+          });
+        }
       } catch (er) { UI.toast(er.message, 'err'); }
+    };
+  }
+
+  // Enviar um rascunho existente ao interveniente — exige o comprovante de depósito.
+  function openSendForm(r) {
+    const div = document.getElementById('cr-actions');
+    const has = !!r.paymentReceiptName;
+    div.innerHTML = `
+      <div class="panel" style="margin-top:.5rem;border:1px solid var(--accent,#e8821e)">
+        <h3>Enviar para o interveniente</h3>
+        <form id="cr-send-form" class="form-grid">
+          <div class="full">
+            <label>Comprovante de depósito (PDF ou imagem)${has ? '' : ' *'}</label>
+            <input type="file" name="comprovante" accept="application/pdf,image/*">
+            <small class="muted">${has
+              ? 'Já existe um comprovante anexado. Envie outro arquivo apenas se quiser substituí-lo.'
+              : 'Obrigatório: anexe o comprovante do depósito do valor a creditar para avançar.'}</small>
+          </div>
+          <div class="full form-actions">
+            <button type="button" class="btn" id="cr-send-back">Voltar</button>
+            <button type="submit" class="btn primary">Enviar</button>
+          </div>
+        </form>
+      </div>`;
+    document.getElementById('cr-send-back').onclick = () => openDetail(r);
+    document.getElementById('cr-send-form').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const f = fd.get('comprovante');
+      if (!has && (!f || !f.name)) return UI.toast('Anexe o comprovante de depósito', 'err');
+      try {
+        const resp = await fetch(`/api/credit-requests/${r.id}/send`, {
+          method: 'POST', credentials: 'include', body: fd,
+        });
+        if (!resp.ok) {
+          const j = await resp.json().catch(() => null);
+          throw new Error(j?.error || j?.message || `HTTP ${resp.status}`);
+        }
+        UI.toast('Enviada'); UI.closeModal(); render();
+      } catch (e) { UI.toast(e.message, 'err'); }
     };
   }
 

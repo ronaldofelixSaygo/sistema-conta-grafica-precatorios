@@ -625,6 +625,14 @@ model CreditRequest {
   inputPdfBytes   Bytes?
   inputPdfS3Key   String?
 
+  // comprovante de depósito do cliente (OBRIGATÓRIO para enviar ao interveniente).
+  // bytes inline (legado/sem S3) ou s3Key (novo). Name/Mime sempre setados quando há comprovante.
+  paymentReceiptName        String?
+  paymentReceiptMime        String?
+  paymentReceiptBytes       Bytes?
+  paymentReceiptS3Key       String?
+  paymentReceiptUploadedAt  DateTime?
+
   // anexo de evidência da resolução (opcional — não bloqueia conclusão)
   resolutionAttachmentName  String?
   resolutionAttachmentMime  String?

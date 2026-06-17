@@ -27,13 +27,16 @@ router.post('/simulate',                                 ctrl.simulate);
 
 // Credit requests
 router.get('/',                                          ctrl.list);
-router.post('/', upload.single('file'),                  ctrl.create);
+// create aceita 'file' (PDF da invoice) e/ou 'comprovante' (depósito) no mesmo multipart
+router.post('/', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'comprovante', maxCount: 1 }]), ctrl.create);
 router.get('/:id',                                       ctrl.get);
-router.post('/:id/send',                                 ctrl.send);
+// send aceita 'comprovante' opcional (anexa antes de enviar, se ainda não houver)
+router.post('/:id/send', upload.single('comprovante'),   ctrl.send);
 router.post('/:id/start',                                ctrl.start);
 router.post('/:id/resolve', upload.single('file'),       ctrl.resolve);
 router.post('/:id/cancel',                               ctrl.cancel);
 router.get('/:id/pdf',                                   ctrl.downloadPdf);
+router.get('/:id/payment-receipt',                       ctrl.downloadPaymentReceipt);
 router.get('/:id/evidence',                              ctrl.downloadEvidence);
 
 export default router;

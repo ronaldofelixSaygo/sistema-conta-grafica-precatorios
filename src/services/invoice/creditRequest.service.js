@@ -54,6 +54,7 @@ export async function listRequests(user) {
       id: true, clienteId: true, partnerOfficeName: true,
       creditosACompar: true, modalidade: true, status: true,
       message: true, inputPdfName: true,
+      paymentReceiptName: true,
       requestedById: true, resolvedById: true,
       createdAt: true, sentAt: true, resolvedAt: true,
       cliente:     { select: { id: true, nome: true, escritorio: true } },
@@ -71,6 +72,9 @@ const REQUEST_SELECT_NO_BYTES = {
   inputs: true, result: true, creditosACompar: true, modalidade: true,
   message: true, status: true,
   inputPdfName: true, // não inclui inputPdfBytes
+  paymentReceiptName: true, // não inclui paymentReceiptBytes
+  paymentReceiptMime: true,
+  paymentReceiptUploadedAt: true,
   resolutionNote: true,
   resolutionAttachmentName: true, // não inclui resolutionAttachmentBytes
   resolutionAttachmentMime: true,
@@ -114,7 +118,7 @@ export function simulate(input) {
 
 // Cria DRAFT (cálculo + dados). Se autoSend=true, já envia (status SENT) na mesma operação.
 // Solicitante: CLIENT (sempre) ou SAYGO/ADM (em nome de um cliente)
-export async function createDraft(user, payload, pdfBuffer = null, pdfName = null, aiPromptVersion = null) {
+export async function createDraft(user, payload, pdfBuffer = null, pdfName = null, aiPromptVersion = null, receipt = null) {
   ensureRequester(user);
   const cli = await resolveCliente(user, payload.clienteId);
 
@@ -125,6 +129,18 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
   // gráfica com os 4%, e a sugestão de compra acrescenta +10% de margem.
   const creditosACompar = result.creditos.al_nf;
   const autoSend = !!payload.autoSend;
+
+  // REGRA DE NEGÓCIO: para avançar ao interveniente (autoSend), o cliente
+  // precisa anexar o comprovante de depósito do valor a creditar.
+  const hasReceipt = !!(receipt && receipt.buffer);
+  if (autoSend && !hasReceipt) {
+    const e = new Error('Comprovante de depósito é obrigatório para enviar ao interveniente');
+    e.status = 400; throw e;
+  }
+  const receiptName = hasReceipt ? (receipt.name || 'comprovante') : null;
+  const receiptMime = hasReceipt ? (receipt.mime || 'application/octet-stream') : null;
+  // Quando S3 está ligado, sobe depois do create (precisa do id real). Sem S3, grava bytes inline.
+  const receiptBytesData = (hasReceipt && !storage.isEnabled()) ? receipt.buffer : null;
 
   // Sobe PDF de entrada pro S3 (se configurado). Senão, bytes inline.
   let inputPdfS3Key = null;
@@ -157,6 +173,10 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
       inputPdfName: pdfName || null,
       inputPdfBytes: inputPdfBytesData,
       inputPdfS3Key,
+      paymentReceiptName: receiptName,
+      paymentReceiptMime: receiptMime,
+      paymentReceiptBytes: receiptBytesData,
+      paymentReceiptUploadedAt: hasReceipt ? new Date() : null,
       aiPromptVersion: aiPromptVersion ?? null,
     },
     select: {
@@ -166,6 +186,16 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
       cliente: { select: { id: true, nome: true, escritorio: true } },
     },
   });
+
+  // Comprovante no S3 (precisa do id real). Sobe e grava a key.
+  if (hasReceipt && storage.isEnabled()) {
+    const key = storage.buildKey('credit-requests', [created.id, 'payment-receipt'], receiptName);
+    await storage.uploadBuffer({
+      key, buffer: receipt.buffer, contentType: receiptMime,
+      contentDisposition: `inline; filename="${encodeURIComponent(receiptName)}"`,
+    });
+    await prisma.creditRequest.update({ where: { id: created.id }, data: { paymentReceiptS3Key: key } });
+  }
 
   // Notificação em background (não bloqueia a resposta)
   if (autoSend) {
@@ -179,7 +209,7 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
 }
 
 // Envia: DRAFT → SENT — apenas o solicitante (ou STAFF)
-export async function sendRequest(user, id) {
+export async function sendRequest(user, id, receipt = null) {
   const r = await getRequest(user, id);
   const isOwner = r.requestedById === user.id;
   const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
@@ -187,9 +217,37 @@ export async function sendRequest(user, id) {
   if (r.status !== 'DRAFT') {
     const e = new Error('Solicitação não está em rascunho'); e.status = 400; throw e;
   }
+
+  const data = { status: 'SENT', sentAt: new Date() };
+
+  // REGRA DE NEGÓCIO: não avança ao interveniente sem comprovante de depósito.
+  // Aceita o comprovante anexado agora (receipt) ou um já existente na solicitação.
+  const hasReceipt = !!(receipt && receipt.buffer);
+  if (!r.paymentReceiptName && !hasReceipt) {
+    const e = new Error('Comprovante de depósito é obrigatório para enviar ao interveniente');
+    e.status = 400; throw e;
+  }
+  if (hasReceipt) {
+    const name = receipt.name || 'comprovante';
+    const mime = receipt.mime || 'application/octet-stream';
+    data.paymentReceiptName = name;
+    data.paymentReceiptMime = mime;
+    data.paymentReceiptUploadedAt = new Date();
+    if (storage.isEnabled()) {
+      const key = storage.buildKey('credit-requests', [id, 'payment-receipt'], name);
+      await storage.uploadBuffer({
+        key, buffer: receipt.buffer, contentType: mime,
+        contentDisposition: `inline; filename="${encodeURIComponent(name)}"`,
+      });
+      data.paymentReceiptS3Key = key;
+    } else {
+      data.paymentReceiptBytes = receipt.buffer;
+    }
+  }
+
   const updated = await prisma.creditRequest.update({
     where: { id },
-    data: { status: 'SENT', sentAt: new Date() },
+    data,
   });
   setImmediate(() => {
     email.notifyCreditRequest({ requestId: id, event: 'sent', byUser: user })
@@ -297,6 +355,31 @@ export async function getInputPdf(user, id, opts = {}) {
   }
   if (!r?.inputPdfBytes) { const e = new Error('Sem PDF anexado'); e.status = 404; throw e; }
   return { filename: r.inputPdfName || 'invoice.pdf', bytes: r.inputPdfBytes, _inline: inline };
+}
+
+// Download do comprovante de depósito. S3 quando disponível, bytes inline legado.
+export async function getPaymentReceipt(user, id, opts = {}) {
+  await getRequest(user, id); // valida permissão
+  const r = await prisma.creditRequest.findUnique({
+    where: { id }, select: {
+      paymentReceiptBytes: true, paymentReceiptS3Key: true,
+      paymentReceiptName: true, paymentReceiptMime: true,
+    },
+  });
+  const inline = !opts.download;
+  if (r?.paymentReceiptS3Key) {
+    const url = await storage.getDownloadUrl(r.paymentReceiptS3Key, {
+      filename: r.paymentReceiptName || 'comprovante', inline,
+    });
+    return { redirectUrl: url };
+  }
+  if (!r?.paymentReceiptBytes) { const e = new Error('Sem comprovante anexado'); e.status = 404; throw e; }
+  return {
+    filename: r.paymentReceiptName || 'comprovante',
+    mime: r.paymentReceiptMime || 'application/octet-stream',
+    bytes: r.paymentReceiptBytes,
+    _inline: inline,
+  };
 }
 
 // Download do anexo de resolução
