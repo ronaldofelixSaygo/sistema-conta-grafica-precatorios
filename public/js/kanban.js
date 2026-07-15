@@ -358,7 +358,7 @@ window.VIEW_kanban = (() => {
           ${card.completedAt ? `* Concluido: ${UI.fmtDateTime(card.completedAt)}` : ''}
         </div>
         <div id="kb-stages">${orderedStages.map(s => stageHtml(card, s)).join('')}</div>
-      </div>`);
+      </div>`, { large: true });
 
     document.getElementById('kb-stages').addEventListener('click', handleStageClick);
   }
