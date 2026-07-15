@@ -36,7 +36,7 @@ async function ensureStages(cardId, stageParceiros = {}) {
     });
     if (exists) continue;
     const checklist = (s.activities || []).map(a => ({
-      id: a.id, label: a.label, done: false,
+      id: a.id, label: a.label, done: false, doneAt: null,
     }));
     await prisma.kanbanStageProgress.create({
       data: {
@@ -202,11 +202,26 @@ export async function updateStage(user, cardId, stage, payload) {
     if (!Array.isArray(payload.checklist)) {
       const e = new Error('checklist deve ser um array'); e.status = 400; throw e;
     }
-    data.checklist = payload.checklist.map(it => ({
-      id: it.id || null,
-      label: String(it.label || ''),
-      done:  !!it.done,
-    }));
+    // Carimba doneAt no servidor (fonte de verdade): quando um item passa a
+    // concluído, registra o instante; se já estava concluído, preserva o
+    // timestamp original; se desmarcado, limpa. Casa o item anterior por id
+    // (fallback: índice) pra não perder o doneAt já gravado.
+    const prev = Array.isArray(sp.checklist) ? sp.checklist : [];
+    const nowIso = new Date().toISOString();
+    data.checklist = payload.checklist.map((it, idx) => {
+      const done = !!it.done;
+      const prevItem = (it.id != null && prev.find(p => p && p.id === it.id)) || prev[idx] || {};
+      let doneAt = null;
+      if (done) {
+        doneAt = (prevItem.done && prevItem.doneAt) ? prevItem.doneAt : (it.doneAt || nowIso);
+      }
+      return {
+        id: it.id || null,
+        label: String(it.label || ''),
+        done,
+        doneAt,
+      };
+    });
   }
   if (Object.keys(data).length === 0) {
     const e = new Error('Nada a atualizar (sem permissao ou payload vazio)'); e.status = 400; throw e;

@@ -440,12 +440,17 @@ window.VIEW_kanban = (() => {
     if (!sp) return;
     const cl = Array.isArray(sp.checklist) ? sp.checklist : [];
     cl[idx].done = !cl[idx].done;
+    // doneAt otimista: carimba/limpa localmente (servidor é a fonte de verdade)
+    cl[idx].doneAt = cl[idx].done ? new Date().toISOString() : null;
     // re-render parcial: atualiza apenas o item visualmente
     btn.classList.toggle('done', cl[idx].done);
     btn.textContent = cl[idx].done ? 'OK' : 'O';
     btn.classList.add('saving');
     const span = btn.nextElementSibling;
     if (span) span.classList.toggle('done', cl[idx].done);
+    const timeSpan = span ? span.nextElementSibling : null;
+    if (timeSpan) timeSpan.textContent = (cl[idx].done && cl[idx].doneAt)
+      ? '— concluído em ' + UI.fmtDateTime(cl[idx].doneAt) : '';
 
     // atualiza estado do botão "Concluir etapa" e flag visual da etapa
     const stageEl = btn.closest('.kb-stage');
@@ -457,9 +462,12 @@ window.VIEW_kanban = (() => {
     } catch (e) {
       // reverte em caso de falha
       cl[idx].done = !cl[idx].done;
+      cl[idx].doneAt = cl[idx].done ? new Date().toISOString() : null;
       btn.classList.toggle('done', cl[idx].done);
       btn.textContent = cl[idx].done ? 'OK' : 'O';
       if (span) span.classList.toggle('done', cl[idx].done);
+      if (timeSpan) timeSpan.textContent = (cl[idx].done && cl[idx].doneAt)
+        ? '— concluído em ' + UI.fmtDateTime(cl[idx].doneAt) : '';
       UI.toast(e.message, 'err');
     } finally {
       btn.classList.remove('saving');
@@ -606,6 +614,7 @@ window.VIEW_kanban = (() => {
             <li>
               <button class="kb-check ${it.done?'done':''}" data-action="toggle-checklist" data-stage="${sp.stage}" data-idx="${idx}">${it.done?'OK':'O'}</button>
               <span class="${it.done?'done':''}">${UI.escapeHtml(it.label)}</span>
+              <span class="kb-check-time muted small">${it.done && it.doneAt ? '— concluído em ' + UI.fmtDateTime(it.doneAt) : ''}</span>
             </li>`).join('') || '<li class="muted small">Sem itens no checklist.</li>'}
         </ul>
         ${sp.attachments?.length ? `
