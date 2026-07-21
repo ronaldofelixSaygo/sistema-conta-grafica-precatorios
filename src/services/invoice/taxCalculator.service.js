@@ -6,9 +6,9 @@
 //   ProdutosBRL  = (FOB_USD + Acrescimo + Frete USD + Outros USD) * câmbio
 //                  (frete entra em R$ se já vier em R$; aqui mantemos compatível com USD * câmbio)
 //   SubTotal     = ProdutosBRL + II + PIS + COFINS + IPI + Siscomex/AFRMM
-//   ICMS Normal  = SubTotal/(1-0.18) - SubTotal
-//   ICMS NF AL   = SubTotal/(1-0.04) - SubTotal
-//   ICMS Pagar   = SubTotal/(1-0.012) - SubTotal
+//   ICMS Normal  = SubTotal * aliq_estado   (percentual direto)
+//   ICMS NF AL   = SubTotal * 0.04
+//   ICMS Pagar   = SubTotal * 0.012
 // O TOTAL geral é a SOMA horizontal dos NCMs.
 // =====================================================================
 
@@ -50,10 +50,11 @@ function calcularGrupoNcm(grp, cabecalho) {
 
   const subtotal = produtosBRL + ii + pis + cofins + ipi + siscomex_afrmm + antidumping;
 
+  // Percentual direto sobre o subtotal (não é "cálculo por dentro"/gross-up).
   const icmsAliqAtual = num(cabecalho.icms_aliq_estado, 18) / 100;  // 18% default
-  const icmsNormal = icmsAliqAtual > 0 && icmsAliqAtual < 1 ? subtotal / (1 - icmsAliqAtual) - subtotal : 0;
-  const icmsAlNf   = subtotal / (1 - ALIQ_AL_NF)  - subtotal;
-  const icmsAlDif  = subtotal / (1 - ALIQ_AL_DIF) - subtotal;
+  const icmsNormal = subtotal * icmsAliqAtual;
+  const icmsAlNf   = subtotal * ALIQ_AL_NF;
+  const icmsAlDif  = subtotal * ALIQ_AL_DIF;
 
   return {
     ncm: grp.ncm,
