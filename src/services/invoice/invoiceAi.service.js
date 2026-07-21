@@ -213,6 +213,17 @@ export async function analyzeInvoicePdf(buffer) {
 // --- Extração por regex (offline) — cobre a maioria dos comprovantes com texto.
 function _parseBrNumber(s) { return Number(String(s).replace(/\./g, '').replace(',', '.')); }
 function _dmyToIso(dmy) { const m = String(dmy).match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; }
+function _cleanNome(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+function _extractPagador(text) {
+  const s = String(text || '').replace(/\s+/g, ' ');
+  let m = s.match(/nome do pagador[:\s]+(.+?)\s+(?:cpf|cnpj|institui|ag[êe]ncia)/i);
+  if (m) return _cleanNome(m[1]);
+  m = s.match(/(?:quem est[áa] pagando|debitado)\b[:\s]*(?:nome\s+)?(.+?)\s+(?:cpf|cnpj|ag[êe]ncia|conta|tipo de conta)/i);
+  if (m) return _cleanNome(m[1]);
+  m = s.match(/\bcliente[:\s]+(.+?)\s+(?:ag[êe]ncia|agncia|conta|cpf|cnpj)/i);
+  if (m) return _cleanNome(m[1]);
+  return null;
+}
 export function extractReceiptFields(text) {
   const t = String(text || '').replace(/ /g, ' ');
   let valor = null;
@@ -224,7 +235,7 @@ export function extractReceiptFields(text) {
   const dm = t.match(/(?:data da transfer[êe]ncia|realizado em|efetuada em|emitido em|data\b)\D{0,20}?(\d{2}\/\d{2}\/\d{4})/i)
           || t.match(/(\d{2}\/\d{2}\/\d{4})/);
   if (dm) data = _dmyToIso(dm[1]);
-  return { valor: valor > 0 ? Math.round(valor * 100) / 100 : null, data };
+  return { valor: valor > 0 ? Math.round(valor * 100) / 100 : null, data, pagador: _extractPagador(t) };
 }
 
 // Normaliza uma data vinda da IA (aceita YYYY-MM-DD ou DD/MM/YYYY) → ISO ou null
@@ -254,10 +265,10 @@ export async function analyzeReceiptValue(buffer, mime) {
   // 2) IA (texto ou visão)
   const settings = await getAiSettings();
   if (!settings || !settings.enabled || !settings.apiKey) {
-    // Sem IA e sem regex: devolve vazio pro cliente digitar
-    return { valor: null, data: null };
+    // Sem IA e sem regex: devolve o que o regex conseguiu (pode ter pagador/data)
+    return text ? extractReceiptFields(text) : { valor: null, data: null, pagador: null };
   }
-  const sys = 'Você lê comprovantes de depósito/transferência bancária brasileiros (vários bancos/layouts) e extrai o VALOR TOTAL e a DATA da transação. Responda APENAS um JSON puro: {"valor": number, "data": "YYYY-MM-DD"}. valor em reais com ponto decimal (ex.: 1234.56). Se não encontrar algum campo, use null.';
+  const sys = 'Você lê comprovantes de depósito/transferência bancária brasileiros (vários bancos/layouts) e extrai: o VALOR TOTAL, a DATA da transação e o NOME de quem está pagando (pagador/debitado, NÃO o favorecido/creditado). Responda APENAS um JSON puro: {"valor": number, "data": "YYYY-MM-DD", "pagador": string}. valor em reais com ponto decimal (ex.: 1234.56). Se não encontrar algum campo, use null.';
   const common = { provider: settings.provider, model: settings.model, apiKey: settings.apiKey, systemPrompt: sys };
 
   let out;
@@ -265,11 +276,11 @@ export async function analyzeReceiptValue(buffer, mime) {
     if (text && text.trim().length >= 20) {
       out = await callAi({ ...common, userMessage: `Comprovante (texto):\n${text}` });
     } else {
-      out = await callAiVision({ ...common, userMessage: 'Leia o comprovante em anexo e extraia valor e data.', files: [{ mime: mime || 'image/jpeg', b64: buffer.toString('base64') }] });
+      out = await callAiVision({ ...common, userMessage: 'Leia o comprovante em anexo e extraia valor, data e nome do pagador.', files: [{ mime: mime || 'image/jpeg', b64: buffer.toString('base64') }] });
     }
   } catch (e) {
-    // IA falhou (ex.: provedor sem visão) — devolve vazio pro cliente digitar
-    return { valor: null, data: null };
+    // IA falhou (ex.: provedor sem visão/modelo inválido) — cai no regex, se houver
+    return text ? extractReceiptFields(text) : { valor: null, data: null, pagador: null };
   }
 
   const parsed = extractJson(out.text) || {};
@@ -277,6 +288,7 @@ export async function analyzeReceiptValue(buffer, mime) {
   return {
     valor: Number.isFinite(valor) && valor > 0 ? Math.round(valor * 100) / 100 : null,
     data: _normalizeAiDate(parsed.data),
+    pagador: parsed.pagador ? _cleanNome(parsed.pagador) : (text ? _extractPagador(text) : null),
   };
 }
 

@@ -16,18 +16,34 @@ window['VIEW_credit-requests'] = (() => {
   const _isOldDate = iso => { if (!iso) return false; const d = new Date(iso); return !isNaN(d) && (Date.now() - d.getTime()) / 86400000 > OLD_DAYS; };
   const _brDate = iso => (iso ? iso.split('-').reverse().join('/') : '');
 
+  // Similaridade de razão social (pagador do comprovante x cliente selecionado).
+  const _normNome = s => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const _NOME_STOP = new Set(['LTDA', 'EIRELI', 'SA', 'ME', 'EPP', 'CIA', 'E', 'DE', 'DA', 'DO', 'DOS', 'DAS', 'S', 'A']);
+  const _nomeToks = s => _normNome(s).split(' ').filter(t => t.length >= 2 && !_NOME_STOP.has(t));
+  const _tokMatch = (x, y) => { if (x === y) return true; const a = x.length <= y.length ? x : y, b = x.length <= y.length ? y : x; return a.length >= 3 && b.startsWith(a); };
+  function nomesBatem(a, b) {
+    const A = _nomeToks(a), B = _nomeToks(b);
+    if (!A.length || !B.length) return true; // sem dados suficientes → não alerta
+    let inter = 0; for (const t of A) if (B.some(u => _tokMatch(t, u))) inter++;
+    const cont = inter / Math.min(A.length, B.length);
+    const jac = inter / (A.length + B.length - inter);
+    return jac >= 0.5 || cont >= 0.6;
+  }
+
   // Editor de múltiplos comprovantes: arquivo + valor + data, com "Ler com IA"
   // (pré-preenche valor/data; o cliente confirma). Valida a soma >= depósito e
   // exige confirmação se alguma data for muito antiga. onChange(valid) avisa fora.
   function makeReceiptsEditor(mountEl, opts = {}) {
     let deposito = Number(opts.deposito || 0);
+    let clienteNome = opts.clienteNome || '';
     const onChange = opts.onChange || (() => {});
-    let rows = [];        // { file, valor, data }
+    let rows = [];        // { file, valor, data, pagador }
     let confirmed = false;
 
     const sum = () => rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
-    const anyOld = () => rows.some(r => _isOldDate(r.data));
-    const valid = () => rows.length > 0 && (deposito <= 0 || sum() >= deposito) && (!anyOld() || confirmed);
+    const mismatch = r => !!(r.pagador && clienteNome && !nomesBatem(clienteNome, r.pagador));
+    const anyWarn = () => rows.some(r => _isOldDate(r.data) || mismatch(r));
+    const valid = () => rows.length > 0 && (deposito <= 0 || sum() >= deposito) && (!anyWarn() || confirmed);
 
     function refreshSummary() {
       const box = mountEl.querySelector('#re-sum');
@@ -55,9 +71,10 @@ window['VIEW_credit-requests'] = (() => {
               <div style="display:flex;align-items:flex-end"><button type="button" class="btn small" data-ai="${i}">✨ Ler com IA</button></div>
             </div>
             ${_isOldDate(r.data) ? `<div style="color:var(--amber);font-size:12.5px;margin-top:.3rem;font-weight:600">⚠ Data ${_brDate(r.data)} é bem anterior a hoje. Confirme se anexou o comprovante correto.</div>` : ''}
+            ${mismatch(r) ? `<div style="color:var(--amber);font-size:12.5px;margin-top:.3rem;font-weight:600">⚠ Pagador do comprovante ("${UI.escapeHtml(r.pagador)}") parece diferente do cliente selecionado. Confirme se é o comprovante certo.</div>` : ''}
           </div>`).join('')}</div>
         ${deposito > 0 ? '<div class="full" id="re-sum" style="margin-top:.5rem;padding:.55rem .7rem;border-radius:8px;background:var(--s2);font-weight:700;font-size:14px"></div>' : ''}
-        ${anyOld() ? `<label class="full" style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;color:var(--amber);font-weight:600"><input type="checkbox" id="re-confirm" ${confirmed ? 'checked' : ''}> Confirmo que os comprovantes anexados estão corretos, mesmo com data antiga.</label>` : ''}`;
+        ${anyWarn() ? `<label class="full" style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;color:var(--amber);font-weight:600"><input type="checkbox" id="re-confirm" ${confirmed ? 'checked' : ''}> Confirmo que os comprovantes anexados estão corretos (conferi data e pagador).</label>` : ''}`;
       refreshSummary();
       bind();
       onChange(valid());
@@ -92,6 +109,7 @@ window['VIEW_credit-requests'] = (() => {
         let got = false;
         if (j && j.valor != null) { r.valor = j.valor; got = true; }
         if (j && j.data) { r.data = j.data; got = true; }
+        if (j && j.pagador) { r.pagador = j.pagador; }
         render();
         if (manual) UI.toast(got ? 'IA leu o comprovante — confira os valores' : 'IA não encontrou o valor — digite manualmente', got ? 'ok' : 'err');
       } catch (e) { if (manual) UI.toast(e.message, 'err'); }
@@ -100,6 +118,7 @@ window['VIEW_credit-requests'] = (() => {
     return {
       isValid: valid,
       setDeposito: (v) => { deposito = Number(v || 0); render(); },
+      setClienteNome: (v) => { clienteNome = v || ''; render(); },
       collect: () => ({
         files: rows.map(r => r.file), valores: rows.map(r => Number(r.valor) || 0),
         datas: rows.map(r => r.data || ''), sum: sum(), count: rows.length, valid: valid(),
@@ -183,8 +202,20 @@ window['VIEW_credit-requests'] = (() => {
       </div>
       <div id="cr-wiz-content"></div>`);
     const root = document.getElementById('modal-body');
+    // Detecta se há algo preenchido na tela atual (arquivos, comprovantes,
+    // inputs de texto/número). Selects (ex.: cliente) não contam.
+    function wizardDirty() {
+      const c = document.getElementById('cr-wiz-content');
+      if (!c) return false;
+      for (const inp of c.querySelectorAll('input[type=file]')) if (inp.files?.length) return true;
+      if (c.querySelectorAll('#re-rows [data-rm]').length) return true;
+      for (const inp of c.querySelectorAll('input:not([type=file]):not([type=checkbox]), textarea')) if ((inp.value || '').trim()) return true;
+      return false;
+    }
     root.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
-      root.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('primary', x===b));
+      if (b.classList.contains('primary')) return; // já está nesta aba
+      if (wizardDirty() && !confirm('Trocar de aba vai limpar o que você já preencheu nesta tela. Deseja continuar?')) return;
+      root.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('primary', x === b));
       if (b.dataset.tab === 'pdf') drawPdfTab(cliOpts);
       else drawManualTab(cliOpts);
     });
@@ -308,14 +339,16 @@ window['VIEW_credit-requests'] = (() => {
         </div>
       </div>`;
 
-    const getPct = () => {
+    const clienteById = () => {
       const id = Number(document.getElementById('cm-cliente')?.value || fixedCliId || 0);
-      const cli = clientesCache.find(c => c.id === id);
-      return Number(cli?.percentualDeposito ?? 30);
+      return clientesCache.find(c => c.id === id) || null;
     };
+    const getPct = () => Number(clienteById()?.percentualDeposito ?? 30);
+    const getClienteNome = () => clienteById()?.nome || '';
     const deposito = () => Math.round((Number(document.getElementById('cm-valor').value) || 0) * getPct() / 100);
     const editor = makeReceiptsEditor(document.getElementById('cm-receipts'), {
       deposito: deposito(),
+      clienteNome: getClienteNome(),
       onChange: (ok) => { const b = document.getElementById('cm-send'); if (b) b.disabled = !ok; },
     });
     const refreshDep = () => {
@@ -324,7 +357,7 @@ window['VIEW_credit-requests'] = (() => {
       editor.setDeposito(deposito());
     };
     document.getElementById('cm-valor').addEventListener('input', refreshDep);
-    document.getElementById('cm-cliente')?.addEventListener('change', refreshDep);
+    document.getElementById('cm-cliente')?.addEventListener('change', () => { refreshDep(); editor.setClienteNome(getClienteNome()); });
     refreshDep();
 
     const showErr = (msg) => {
@@ -999,6 +1032,7 @@ window['VIEW_credit-requests'] = (() => {
       </div>`;
     const editor = makeReceiptsEditor(document.getElementById('cr-send-receipts'), {
       deposito: restante,
+      clienteNome: r.cliente?.nome || '',
       onChange: (ok) => { const b = document.getElementById('cr-send-go'); if (b) b.disabled = !ok; },
     });
     const showErr = (msg) => {
