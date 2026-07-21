@@ -783,8 +783,12 @@ window['VIEW_credit-requests'] = (() => {
       </tr>`;
     }).join('');
 
-    const modalidade = document.querySelector('select[name="modalidade"]')?.value || 'AL_NF';
-    const modalidadeLabel = modalidade === 'AL_NF' ? 'Alagoas NF (4%)' : 'Alagoas Dif (1.2%)';
+    const necessario = t.icms_al_nf || 0;
+    const adquirido = ceilTo1000(necessario * 1.10);
+    const margem = Math.max(0, adquirido - necessario);
+    const cliId = Number(document.querySelector('select[name="clienteId"]')?.value || 0);
+    const pct = Number(clientesCache.find(c => c.id === cliId)?.percentualDeposito ?? 30);
+    const deposito = ceilTo1000(adquirido * pct / 100);
 
     out.innerHTML = `
       <div class="panel" style="margin-top:1rem">
@@ -797,13 +801,10 @@ window['VIEW_credit-requests'] = (() => {
       <div class="panel">
         <h3>Resumo</h3>
         <table class="table"><tbody>
-          <tr><td>Modalidade</td><td>${modalidadeLabel}</td></tr>
-          <tr><td>Subtotal federal</td><td class="num">${UI.fmtMoney(t.subtotal || 0)}</td></tr>
-          <tr><td>Custo atual</td><td class="num">${UI.fmtMoney(t.icms_atual || 0)}</td></tr>
-          <tr><td><strong>Crédito a comprar — 4%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(t.icms_al_nf || 0)}</strong></td></tr>
-          <tr><td class="muted small">ICMS efetivo (diferimento 1,2%)</td><td class="num muted">${UI.fmtMoney(t.icms_al_dif || 0)}</td></tr>
-          <tr><td>Economia vs cenário atual</td><td class="num val-pos">${UI.fmtMoney(((t.icms_atual || 0) - (t.icms_al_nf || 0)))}</td></tr>
-          <tr><td><strong>Sugestão de compra (+10%, arredondada)</strong></td><td class="num"><strong class="val-pos">${fmtMoney0(ceilTo1000((t.icms_al_nf || 0) * 1.10))}</strong></td></tr>
+          <tr><td><strong>Crédito necessário — 4%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(necessario)}</strong></td></tr>
+          <tr><td>Margem de segurança (+10%, arredondada)</td><td class="num">${UI.fmtMoney(margem)}</td></tr>
+          <tr><td><strong>Crédito que será adquirido</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(adquirido)}</strong></td></tr>
+          <tr><td><strong>Valor do depósito — ${pct}%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(deposito)}</strong></td></tr>
         </tbody></table>
       </div>`;
   }
@@ -925,6 +926,12 @@ window['VIEW_credit-requests'] = (() => {
     const result = r.result || {};
     const total = result.total || {};
     const isManual = !!result.manual;
+    // Resumo do fluxo invoice/PDF (não-manual): necessário → adquirido (+10% arredondado) → depósito.
+    const _nec = total.icms_al_nf || 0;
+    const _adq = ceilTo1000(_nec * 1.10);
+    const _marg = Math.max(0, _adq - _nec);
+    const _pctDep = Number(clientesCache.find(c => c.id === r.clienteId)?.percentualDeposito ?? result.percentualDeposito ?? 30);
+    const _dep = ceilTo1000(_adq * _pctDep / 100);
 
     const ncmRows = (result.porNcm || []).map(g => {
       const b = g.breakdown||{}, c = g.cenarios||{};
@@ -960,13 +967,10 @@ window['VIEW_credit-requests'] = (() => {
             ? `<tr><td>Valor depositado (comprovantes)</td><td class="num">${fmtMoney0(r.receipts.reduce((s, x) => s + (Number(x.valor) || 0), 0))}</td></tr>`
             : (result.valorDepositado != null ? `<tr><td>Valor depositado (comprovante)</td><td class="num">${fmtMoney0(result.valorDepositado)}</td></tr>` : '')}
           ` : `
-          <tr><td>Modalidade</td><td>${r.modalidade === 'AL_NF' ? 'Alagoas NF (4%)' : 'Alagoas Dif (1.2%)'}</td></tr>
-          <tr><td>Subtotal federal</td><td class="num">${UI.fmtMoney(total.subtotal||0)}</td></tr>
-          <tr><td>Custo atual</td><td class="num">${UI.fmtMoney(total.icms_atual||0)}</td></tr>
-          <tr><td><strong>Crédito a comprar — 4%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(total.icms_al_nf||0)}</strong></td></tr>
-          <tr><td class="muted small">ICMS efetivo (diferimento 1,2%)</td><td class="num muted">${UI.fmtMoney(total.icms_al_dif||0)}</td></tr>
-          <tr><td>Economia vs cenário atual</td><td class="num val-pos">${UI.fmtMoney(((total.icms_atual||0) - (total.icms_al_nf||0)))}</td></tr>
-          <tr><td><strong>Sugestão de compra (+10%, arredondada)</strong></td><td class="num"><strong class="val-pos">${fmtMoney0(ceilTo1000((total.icms_al_nf||0) * 1.10))}</strong></td></tr>
+          <tr><td><strong>Crédito necessário — 4%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(_nec)}</strong></td></tr>
+          <tr><td>Margem de segurança (+10%, arredondada)</td><td class="num">${UI.fmtMoney(_marg)}</td></tr>
+          <tr><td><strong>Crédito que será adquirido</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(_adq)}</strong></td></tr>
+          <tr><td><strong>Valor do depósito — ${_pctDep}%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(_dep)}</strong></td></tr>
           `}
         </tbody></table>
         ${r.inputPdfName ? `<div class="muted small" style="margin-top:.4rem">📎 PDF original: <a href="/api/credit-requests/${r.id}/pdf" target="_blank">${UI.escapeHtml(r.inputPdfName)}</a></div>` : ''}
