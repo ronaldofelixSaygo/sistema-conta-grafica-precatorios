@@ -4,7 +4,7 @@ import { prisma } from '../config/prisma.js';
 const VALID_ROLES = ['ADM', 'SAYGO', 'PARTNER', 'CLIENT'];
 
 const userPublicSelect = {
-  id: true, email: true, name: true, role: true, active: true,
+  id: true, email: true, name: true, apelido: true, role: true, active: true,
   officeName: true, clienteId: true, parceiroId: true, lastLoginAt: true, createdAt: true,
   cliente: { select: { id: true, nome: true, escritorio: true } },
   parceiro: { select: { id: true, nome: true, type: true } },
@@ -18,7 +18,7 @@ export async function listUsers() {
 }
 
 export async function createUser(input) {
-  const { email, password, name, role, officeName, clienteId, parceiroId } = input;
+  const { email, password, name, apelido, role, officeName, clienteId, parceiroId } = input;
   if (!email || !password || !name || !role) {
     const e = new Error('Campos obrigatórios: email, password, name, role'); e.status = 400; throw e;
   }
@@ -59,6 +59,7 @@ export async function createUser(input) {
     data: {
       email: emailNorm,
       passwordHash, name, role,
+      apelido: apelido ? String(apelido).trim() : null,
       officeName: finalOfficeName,
       clienteId: clienteId ? Number(clienteId) : null,
       parceiroId: parceiroId || null,
@@ -70,6 +71,7 @@ export async function createUser(input) {
 export async function updateUser(id, input) {
   const data = {};
   if (input.name !== undefined)        data.name = input.name;
+  if (input.apelido !== undefined)     data.apelido = input.apelido ? String(input.apelido).trim() : null;
   if (input.role !== undefined) {
     if (!VALID_ROLES.includes(input.role)) { const e=new Error('role inválido'); e.status=400; throw e; }
     data.role = input.role;

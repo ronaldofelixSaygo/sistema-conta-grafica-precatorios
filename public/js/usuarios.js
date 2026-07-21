@@ -71,6 +71,7 @@ window.VIEW_usuarios = (() => {
     UI.openModal(isNew ? 'Novo usuário' : `Editar ${u.email}`, `
       <form id="form-us" class="form-grid">
         <div><label>Nome *</label><input name="name" required value="${UI.escapeHtml(u.name||'')}"></div>
+        <div><label>Apelido <span class="muted small">(exibido no chat como "Nome - Apelido")</span></label><input name="apelido" value="${UI.escapeHtml(u.apelido||'')}"></div>
         <div><label>E-mail *</label><input type="email" name="email" required value="${UI.escapeHtml(u.email||'')}" ${isNew?'':'disabled'}></div>
         <div><label>Perfil *</label><select name="role" required>${ROLES.map(r => `<option value="${r.v}" ${u.role===r.v?'selected':''}>${r.l}</option>`).join('')}</select></div>
         <div><label>Senha ${isNew?'*':'(deixe em branco p/ manter)'}</label><input type="password" name="password" ${isNew?'required':''} minlength="6"></div>

@@ -26,6 +26,8 @@ model User {
   email        String    @unique
   passwordHash String
   name         String
+  // Apelido/identificação curta exibida no chat como "NOME - APELIDO"
+  apelido      String?
   role         Role      @default(CLIENT)
 
   // Para PARTNER: nome do escritório (deve bater com Cliente.escritorio)

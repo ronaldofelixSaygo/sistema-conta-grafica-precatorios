@@ -107,7 +107,7 @@ window.CHAT = (() => {
     // Ordena: contatos com mensagem (conversations) primeiro pela data, depois resto alfabético
     const convMap = new Map(conversations.map(c => [c.otherId, c]));
     const items = contacts
-      .filter(c => !f || (c.name||'').toLowerCase().includes(f) || (c.email||'').toLowerCase().includes(f))
+      .filter(c => !f || (c.name||'').toLowerCase().includes(f) || (c.apelido||'').toLowerCase().includes(f) || (c.email||'').toLowerCase().includes(f))
       .map(c => ({ ...c, _conv: convMap.get(c.id) }))
       .sort((a, b) => {
         const aLast = a._conv?.lastAt ? new Date(a._conv.lastAt).getTime() : 0;
@@ -139,7 +139,7 @@ window.CHAT = (() => {
           </div>
           <div class="chat-item-body">
             <div class="chat-item-row">
-              <strong>${UI.escapeHtml(c.name)}</strong>
+              <strong>${UI.escapeHtml(dispName(c))}</strong>
               <span class="chat-item-time">${lastAt}</span>
             </div>
             <div class="chat-item-row">
@@ -172,7 +172,7 @@ window.CHAT = (() => {
           ${online ? '<span class="online-dot"></span>' : ''}
         </div>
         <div class="chat-thread-info">
-          <strong>${UI.escapeHtml(contact?.name || '')}</strong>
+          <strong>${UI.escapeHtml(dispName(contact))}</strong>
           <span class="muted small">${online ? 'online' : (contact?.role || '')}</span>
         </div>
       </div>
@@ -244,6 +244,7 @@ window.CHAT = (() => {
   function showTopToast(msg, { silent = false } = {}) {
     const c = contacts.find(x => x.id === msg.fromUserId);
     const name = c?.name || 'Alguém';
+    const display = c ? dispName(c) : name;
     const initials = avatarInitials(name);
     const color = avatarColor(msg.fromUserId);
     let stack = document.getElementById('chat-toast-stack');
@@ -258,7 +259,7 @@ window.CHAT = (() => {
     card.innerHTML = `
       <div class="chat-avatar small" style="background:${color}">${UI.escapeHtml(initials)}</div>
       <div class="chat-toast-body">
-        <strong>${UI.escapeHtml(name)}</strong>
+        <strong>${UI.escapeHtml(display)}</strong>
         <span>${UI.escapeHtml((msg.content || '').slice(0, 120))}</span>
       </div>
       <button type="button" class="chat-toast-close" aria-label="Fechar">&times;</button>`;
@@ -324,6 +325,13 @@ window.CHAT = (() => {
   }
 
   // ── helpers ───────────────────────────────────────────────────────
+  // Nome exibido no chat: "Nome - Apelido" quando houver apelido.
+  function dispName(x) {
+    if (!x) return '';
+    const n = x.name || '';
+    const a = (x.apelido || '').trim();
+    return a ? `${n} - ${a}` : n;
+  }
   function avatarInitials(name) {
     const parts = String(name || '?').trim().split(/\s+/);
     return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?';

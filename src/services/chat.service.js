@@ -15,7 +15,7 @@ import { prisma } from '../config/prisma.js';
 // =====================================================================
 
 const BASE_SELECT = {
-  id: true, name: true, email: true, role: true, officeName: true, clienteId: true,
+  id: true, name: true, apelido: true, email: true, role: true, officeName: true, clienteId: true,
   cliente: { select: { id: true, nome: true, escritorio: true } },
 };
 
@@ -74,25 +74,33 @@ export async function listContacts(currentUser) {
   }
 
   if (me.role === 'CLIENT') {
+    // Isolamento por empresa: o cliente só enxerga parceiros ESTRUTURALMENTE
+    // ligados à própria empresa — contabilidade, despachante, o escritório do
+    // próprio cliente e os parceiros que atuam nos cards do Kanban DELE.
+    // Nunca parceiros de outras operações.
     const myCli = me.clienteId ? await prisma.cliente.findUnique({
-      where: { id: me.clienteId }, select: { escritorio: true },
+      where: { id: me.clienteId },
+      select: { escritorio: true, contabilidadeId: true, despachanteId: true },
     }) : null;
-    const office = myCli?.escritorio || null;
+    const office = (myCli?.escritorio || '').trim() || null;
     // Parceiros vinculados aos cards desse cliente.
     const stages = me.clienteId ? await kanbanLinkedUserIds({ clienteId: me.clienteId }) : [];
-    const parceiroIds   = [...new Set(stages.map(s => s.parceiroId).filter(Boolean))];
-    const responsibleIds = [...new Set(stages.map(s => s.responsibleUserId).filter(Boolean))];
+    const kanbanParceiroIds = stages.map(s => s.parceiroId).filter(Boolean);
+    const responsibleIds    = [...new Set(stages.map(s => s.responsibleUserId).filter(Boolean))];
+    // FK de contabilidade/despachante + parceiros dos cards do próprio cliente.
+    const allowedParceiroIds = [...new Set([
+      myCli?.contabilidadeId, myCli?.despachanteId, ...kanbanParceiroIds,
+    ].filter(Boolean))];
+
+    const or = [{ role: { in: ['ADM', 'SAYGO'] } }];
+    if (allowedParceiroIds.length) or.push({ role: 'PARTNER', parceiroId: { in: allowedParceiroIds } });
+    // Time do escritório do próprio cliente (match textual, agora case-insensitive)
+    if (office) or.push({ role: 'PARTNER', officeName: { equals: office, mode: 'insensitive' } });
+    // Usuários responsáveis diretos nos cards do cliente
+    if (responsibleIds.length) or.push({ id: { in: responsibleIds } });
+
     return prisma.user.findMany({
-      where: {
-        active: true,
-        NOT: { id: me.id },
-        OR: [
-          { role: { in: ['ADM', 'SAYGO'] } },
-          ...(office ? [{ role: 'PARTNER', officeName: office }] : []),
-          ...(parceiroIds.length    ? [{ role: 'PARTNER', parceiroId: { in: parceiroIds } }] : []),
-          ...(responsibleIds.length ? [{ id: { in: responsibleIds } }] : []),
-        ],
-      },
+      where: { active: true, NOT: { id: me.id }, OR: or },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
       select: BASE_SELECT,
     });
