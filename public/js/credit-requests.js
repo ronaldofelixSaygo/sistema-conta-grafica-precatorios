@@ -7,6 +7,11 @@ window['VIEW_credit-requests'] = (() => {
   let grupos = [];   // [{ ncm, valor_usd, acrescimo_usd, frete_usd, outros_usd, ii, pis, cofins, ipi, siscomex, afrmm, antidumping }]
   let lastCalc = null;
 
+  // Sugestão de compra: arredonda SEMPRE para cima em múltiplo de R$ 1.000.
+  const ceilTo1000 = x => Math.ceil((Number(x) || 0) / 1000) * 1000;
+  // Formata em reais SEM centavos (valores "redondos" da sugestão/depósito).
+  const fmtMoney0 = x => 'R$ ' + Math.round(Number(x) || 0).toLocaleString('pt-BR');
+
   async function render() {
     const el = document.getElementById('view-credit-requests');
     el.innerHTML = '<div class="muted">Carregando...</div>';
@@ -171,7 +176,93 @@ window['VIEW_credit-requests'] = (() => {
     }
   }
 
+  // Aba "Preencher Manualmente" — fluxo simples de compra de crédito:
+  // cliente + valor de crédito desejado -> depósito (% do cliente).
+  // Pode salvar rascunho; para enviar ao interveniente exige comprovante e que
+  // o valor depositado seja >= ao depósito necessário.
   function drawManualTab(cliOpts) {
+    const role = AUTH.role();
+    let cliField, fixedCliId = null;
+    if (role === 'CLIENT') {
+      const myCli = clientesCache[0];
+      fixedCliId = myCli?.id ?? null;
+      cliField = myCli
+        ? `<input type="hidden" id="cm-cliente" value="${myCli.id}">
+           <div class="full muted small">Cliente: <strong>${UI.escapeHtml(myCli.nome)}</strong></div>`
+        : '<div class="err">Sem cliente vinculado.</div>';
+    } else {
+      cliField = `<div class="full"><label>Cliente *</label>
+        <select id="cm-cliente" required><option value="">— selecione —</option>${cliOpts}</select></div>`;
+    }
+
+    document.getElementById('cr-wiz-content').innerHTML = `
+      <div class="form-grid">
+        ${cliField}
+        <div class="full"><label>Valor de créditos desejado (R$) *</label>
+          <input type="number" min="0" step="1" id="cm-valor" placeholder="0"></div>
+        <div class="full" id="cm-dep-box" style="padding:.6rem;background:var(--s2);border-radius:8px">
+          <div class="muted small">Depósito necessário (<span id="cm-pct">30</span>%)</div>
+          <div style="font-size:1.3rem;font-weight:700" id="cm-dep">R$ 0</div>
+        </div>
+        <div class="full"><label>Valor depositado (R$) <span class="muted small">(obrigatório para enviar)</span></label>
+          <input type="number" min="0" step="1" id="cm-depositado" placeholder="0"></div>
+        <div class="full"><label>Comprovante de depósito <span class="muted small">(obrigatório para enviar)</span></label>
+          <input type="file" id="cm-comprovante" accept="application/pdf,image/*"></div>
+        <div class="full"><label>Mensagem (opcional)</label><textarea id="cm-msg" rows="2"></textarea></div>
+        <div class="full form-actions">
+          <button type="button" class="btn" id="cm-save">Salvar rascunho</button>
+          <button type="button" class="btn primary" id="cm-send">Enviar para o interveniente</button>
+        </div>
+      </div>`;
+
+    const getPct = () => {
+      const id = Number(document.getElementById('cm-cliente')?.value || fixedCliId || 0);
+      const cli = clientesCache.find(c => c.id === id);
+      return Number(cli?.percentualDeposito ?? 30);
+    };
+    const deposito = () => Math.round((Number(document.getElementById('cm-valor').value) || 0) * getPct() / 100);
+    const refreshDep = () => {
+      document.getElementById('cm-pct').textContent = String(getPct());
+      document.getElementById('cm-dep').textContent = fmtMoney0(deposito());
+    };
+    document.getElementById('cm-valor').addEventListener('input', refreshDep);
+    document.getElementById('cm-cliente')?.addEventListener('change', refreshDep);
+    refreshDep();
+
+    async function submit(send) {
+      const clienteId = document.getElementById('cm-cliente')?.value || fixedCliId;
+      const valor = Number(document.getElementById('cm-valor').value) || 0;
+      if (!clienteId) return UI.toast('Selecione o cliente', 'err');
+      if (!(valor > 0)) return UI.toast('Informe o valor de créditos desejado', 'err');
+      const fd = new FormData();
+      fd.append('clienteId', clienteId);
+      fd.append('manual', 'true');
+      fd.append('creditosManuais', String(valor));
+      fd.append('message', document.getElementById('cm-msg').value || '');
+      if (send) {
+        const file = document.getElementById('cm-comprovante')?.files?.[0];
+        const depositado = Number(document.getElementById('cm-depositado').value) || 0;
+        if (!file) return UI.toast('Anexe o comprovante de depósito', 'err');
+        if (depositado < deposito()) return UI.toast(`Valor depositado deve ser ≥ ${fmtMoney0(deposito())}`, 'err');
+        fd.append('autoSend', 'true');
+        fd.append('valorDepositado', String(depositado));
+        fd.append('comprovante', file);
+      }
+      const btn = document.getElementById(send ? 'cm-send' : 'cm-save');
+      try {
+        if (btn) btn.disabled = true;
+        const resp = await fetch('/api/credit-requests', { method: 'POST', credentials: 'include', body: fd });
+        if (!resp.ok) { const j = await resp.json().catch(() => null); throw new Error(j?.error || j?.message || `HTTP ${resp.status}`); }
+        UI.toast(send ? 'Solicitação enviada' : 'Rascunho salvo'); UI.closeModal(); render();
+      } catch (e) { UI.toast(e.message, 'err'); if (btn) btn.disabled = false; }
+    }
+    document.getElementById('cm-save').onclick = () => submit(false);
+    document.getElementById('cm-send').onclick = () => submit(true);
+  }
+
+  // Formulário completo por NCM (invoice). Usado pela aba "Importar PDF (IA)"
+  // depois da extração, para revisar impostos e enviar.
+  function drawInvoiceForm(cliOpts) {
     const me = AUTH.user();
     const preselectedCliId = cabecalho._clienteId ? String(cabecalho._clienteId) : '';
     const cliOptsPicked = preselectedCliId
@@ -547,7 +638,7 @@ window['VIEW_credit-requests'] = (() => {
           <tr><td><strong>Crédito a comprar — 4%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(t.icms_al_nf || 0)}</strong></td></tr>
           <tr><td class="muted small">ICMS efetivo (diferimento 1,2%)</td><td class="num muted">${UI.fmtMoney(t.icms_al_dif || 0)}</td></tr>
           <tr><td>Economia vs cenário atual</td><td class="num val-pos">${UI.fmtMoney(((t.icms_atual || 0) - (t.icms_al_nf || 0)))}</td></tr>
-          <tr><td><strong>Sugestão de compra (+10%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney((t.icms_al_nf || 0) * 1.10)}</strong></td></tr>
+          <tr><td><strong>Sugestão de compra (+10%, arredondada)</strong></td><td class="num"><strong class="val-pos">${fmtMoney0(ceilTo1000((t.icms_al_nf || 0) * 1.10))}</strong></td></tr>
         </tbody></table>
       </div>`;
   }
@@ -640,8 +731,7 @@ window['VIEW_credit-requests'] = (() => {
             <button class="btn primary" id="cr-pdf-use">Usar esses dados no formulário</button>
           </div>`;
         document.getElementById('cr-pdf-use').onclick = () => {
-          document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('primary', x.dataset.tab==='manual'));
-          drawManualTab(cliOpts);
+          drawInvoiceForm(cliOpts);
         };
       } catch (e) {
         out.innerHTML = `<div class="err">Erro: ${UI.escapeHtml(e.message)}</div>`;
@@ -669,6 +759,7 @@ window['VIEW_credit-requests'] = (() => {
     const isStaff    = role === 'ADM' || role === 'SAYGO';
     const result = r.result || {};
     const total = result.total || {};
+    const isManual = !!result.manual;
 
     const ncmRows = (result.porNcm || []).map(g => {
       const b = g.breakdown||{}, c = g.cenarios||{};
@@ -687,23 +778,29 @@ window['VIEW_credit-requests'] = (() => {
         <br>Solicitante: ${UI.escapeHtml(r.requestedBy?.name || '—')}
         ${r.resolvedBy ? `· Resolvido por: ${UI.escapeHtml(r.resolvedBy?.name)} em ${UI.fmtDateTime(r.resolvedAt)}` : ''}
       </div>
-      <div class="panel">
+      ${isManual ? '' : `<div class="panel">
         <h3>Resultado por NCM</h3>
         <table class="table" style="font-size:12px">
           <thead><tr><th>NCM</th><th>Subtotal</th><th>ICMS atual</th><th>ICMS NF 4%</th><th>ICMS Pagar 1.2%</th></tr></thead>
           <tbody>${ncmRows || '<tr><td colspan="5" class="muted">Sem dados</td></tr>'}</tbody>
         </table>
-      </div>
+      </div>`}
       <div class="panel">
         <h3>Resumo</h3>
         <table class="table"><tbody>
+          ${isManual ? `
+          <tr><td><strong>Créditos desejados</strong></td><td class="num"><strong class="val-pos">${fmtMoney0(r.creditosACompar||0)}</strong></td></tr>
+          <tr><td><strong>Depósito necessário (${result.percentualDeposito ?? 30}%)</strong></td><td class="num"><strong class="val-pos">${fmtMoney0(result.depositoNecessario ?? ((r.creditosACompar||0)*(result.percentualDeposito ?? 30)/100))}</strong></td></tr>
+          ${result.valorDepositado != null ? `<tr><td>Valor depositado (comprovante)</td><td class="num">${fmtMoney0(result.valorDepositado)}</td></tr>` : ''}
+          ` : `
           <tr><td>Modalidade</td><td>${r.modalidade === 'AL_NF' ? 'Alagoas NF (4%)' : 'Alagoas Dif (1.2%)'}</td></tr>
           <tr><td>Subtotal federal</td><td class="num">${UI.fmtMoney(total.subtotal||0)}</td></tr>
           <tr><td>Custo atual</td><td class="num">${UI.fmtMoney(total.icms_atual||0)}</td></tr>
           <tr><td><strong>Crédito a comprar — 4%</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney(total.icms_al_nf||0)}</strong></td></tr>
           <tr><td class="muted small">ICMS efetivo (diferimento 1,2%)</td><td class="num muted">${UI.fmtMoney(total.icms_al_dif||0)}</td></tr>
           <tr><td>Economia vs cenário atual</td><td class="num val-pos">${UI.fmtMoney(((total.icms_atual||0) - (total.icms_al_nf||0)))}</td></tr>
-          <tr><td><strong>Sugestão de compra (+10%)</strong></td><td class="num"><strong class="val-pos">${UI.fmtMoney((total.icms_al_nf||0) * 1.10)}</strong></td></tr>
+          <tr><td><strong>Sugestão de compra (+10%, arredondada)</strong></td><td class="num"><strong class="val-pos">${fmtMoney0(ceilTo1000((total.icms_al_nf||0) * 1.10))}</strong></td></tr>
+          `}
         </tbody></table>
         ${r.inputPdfName ? `<div class="muted small" style="margin-top:.4rem">📎 PDF original: <a href="/api/credit-requests/${r.id}/pdf" target="_blank">${UI.escapeHtml(r.inputPdfName)}</a></div>` : ''}
         ${r.paymentReceiptName ? `<div class="small" style="margin-top:.4rem;padding:.5rem;background:var(--s2);border-radius:6px;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">

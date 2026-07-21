@@ -122,19 +122,42 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
   ensureRequester(user);
   const cli = await resolveCliente(user, payload.clienteId);
 
-  const result = calcularInvoice(payload.inputs || {});
   const modalidade = payload.modalidade === 'AL_DIF' ? 'AL_DIF' : 'AL_NF';
-  // REGRA: o crédito a comprar SEMPRE é o ICMS reduzido de Alagoas (4% via NF).
-  // O cenário 1,2% (diferimento) é só informativo — o cliente alimenta a conta
-  // gráfica com os 4%, e a sugestão de compra acrescenta +10% de margem.
-  const creditosACompar = result.creditos.al_nf;
   const autoSend = !!payload.autoSend;
 
+  // Dois modos de criação:
+  //  (a) Invoice (NCM): calcula o crédito a partir dos inputs; sugestão = +10%.
+  //  (b) Manual: o cliente informa o valor de crédito desejado; o depósito é
+  //      percentualDeposito% do cliente sobre esse valor.
+  const isManual = !!payload.manual && Number(payload.creditosManuais) > 0;
+  let result, creditosACompar;
+  if (isManual) {
+    const pct = Number(cli.percentualDeposito ?? 30);
+    creditosACompar = Math.round(Number(payload.creditosManuais));
+    const depositoNecessario = Math.round(creditosACompar * pct / 100);
+    const valorDepositado = (payload.valorDepositado != null && payload.valorDepositado !== '')
+      ? Math.round(Number(payload.valorDepositado)) : null;
+    result = { manual: true, creditos: creditosACompar, percentualDeposito: pct,
+               depositoNecessario, valorDepositado };
+    payload.inputs = { manual: true, creditosManuais: creditosACompar, percentualDeposito: pct };
+  } else {
+    // REGRA: o crédito a comprar SEMPRE é o ICMS reduzido de Alagoas (4% via NF).
+    // O cenário 1,2% (diferimento) é só informativo — a sugestão acrescenta +10%.
+    result = calcularInvoice(payload.inputs || {});
+    creditosACompar = result.creditos.al_nf;
+  }
+
   // REGRA DE NEGÓCIO: para avançar ao interveniente (autoSend), o cliente
-  // precisa anexar o comprovante de depósito do valor a creditar.
+  // precisa anexar o comprovante de depósito.
   const hasReceipt = !!(receipt && receipt.buffer);
   if (autoSend && !hasReceipt) {
     const e = new Error('Comprovante de depósito é obrigatório para enviar ao interveniente');
+    e.status = 400; throw e;
+  }
+  // Manual: o valor depositado (comprovante) precisa cobrir o depósito exigido.
+  if (autoSend && isManual &&
+      (result.valorDepositado == null || result.valorDepositado < result.depositoNecessario)) {
+    const e = new Error(`O comprovante deve ter valor igual ou maior que o depósito necessário (R$ ${result.depositoNecessario}).`);
     e.status = 400; throw e;
   }
   const receiptName = hasReceipt ? (receipt.name || 'comprovante') : null;

@@ -129,6 +129,11 @@ export async function create(req, res, next) {
       message: body.message,
       inputs,
       autoSend: body.autoSend === 'true' || body.autoSend === true,
+      // Modo manual: cliente informa o valor de crédito desejado; depósito = %
+      // do cliente. valorDepositado = valor declarado no comprovante.
+      manual: body.manual === 'true' || body.manual === true,
+      creditosManuais: (body.creditosManuais != null && body.creditosManuais !== '') ? Number(body.creditosManuais) : null,
+      valorDepositado: (body.valorDepositado != null && body.valorDepositado !== '') ? Number(body.valorDepositado) : null,
     };
     // create aceita multipart com 2 campos opcionais: 'file' (PDF da invoice) e 'comprovante'.
     const pdfFile = req.files?.file?.[0] || req.file || null;

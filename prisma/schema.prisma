@@ -136,6 +136,9 @@ model Cliente {
   parceiroIe          String?
   observacoes         String?  @db.Text
   percentualComissao  Float    @default(0)
+  // % de depósito exigido para comprar créditos na entrada manual da
+  // Solicitação de Crédito (o depósito = percentualDeposito% do valor desejado).
+  percentualDeposito  Float    @default(30)
   diaFechamento       Int      @default(1)
   // Cliente com processo de execução DI/Duimp via Saygo: valor (R$) que o
   // escritório recebe por cada DI/Duimp processada (entra na apuração de

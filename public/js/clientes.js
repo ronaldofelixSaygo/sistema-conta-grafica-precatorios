@@ -239,6 +239,7 @@ window.VIEW_clientes = (() => {
 
         <div class="full" style="border-top:1px solid var(--bd);padding-top:.5rem;margin-top:.5rem"><strong style="font-size:11px;color:var(--t3);text-transform:uppercase">Comissão</strong></div>
         <div><label>% Comissão (sobre créditos)</label><input type="number" step="0.01" name="percentual_comissao" value="${cli.percentualComissao ?? 0}"></div>
+        <div><label>% Depósito (compra de crédito)</label><input type="number" step="0.01" min="0" name="percentual_deposito" value="${cli.percentualDeposito ?? 30}"></div>
         <div><label>Dia de fechamento</label><input type="number" min="1" max="31" name="dia_fechamento" value="${cli.diaFechamento ?? 1}"></div>
         <div class="full"><label>Valor por DI/Duimp (R$)</label>
           <input type="number" step="0.01" min="0" name="valor_por_di" value="${cli.valorPorDi ?? 0}" placeholder="0,00 — deixe em branco se o cliente não tem esse processo">
