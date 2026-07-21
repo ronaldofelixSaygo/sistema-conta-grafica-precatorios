@@ -43,43 +43,57 @@ window['VIEW_credit-requests'] = (() => {
     let confirmed = false;
 
     const sum = () => rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+    // Pagador divergente do cliente = BLOQUEIO (precisa remover). Data antiga =
+    // aviso que pode ser confirmado.
     const mismatch = r => !!(r.pagador && clienteNome && !nomesBatem(clienteNome, r.pagador));
-    const anyWarn = () => rows.some(r => _isOldDate(r.data) || mismatch(r));
-    const valid = () => rows.length > 0 && (deposito <= 0 || sum() >= deposito) && (!anyWarn() || confirmed);
+    const hasMismatch = () => rows.some(mismatch);
+    const anyOld = () => rows.some(r => _isOldDate(r.data));
+    const valid = () => rows.length > 0 && !hasMismatch() && (deposito <= 0 || sum() >= deposito) && (!anyOld() || confirmed);
 
     function refreshSummary() {
       const box = mountEl.querySelector('#re-sum');
       if (!box) return;
       const s = sum(), okSum = deposito <= 0 || s >= deposito;
+      box.style.background = okSum ? 'rgba(31,160,102,.12)' : 'rgba(220,50,50,.10)';
+      box.style.border = `1px solid ${okSum ? 'var(--green)' : 'var(--red)'}`;
       box.style.color = okSum ? 'var(--green)' : 'var(--red)';
-      box.textContent = `Soma dos comprovantes: ${fmtMoney0(s)} / necessário ${fmtMoney0(deposito)} ${okSum ? '✓' : '— falta ' + fmtMoney0(deposito - s)}`;
+      box.innerHTML = `<span>Soma dos comprovantes</span><span>${fmtMoney0(s)} / ${fmtMoney0(deposito)} ${okSum ? '✓' : '· falta ' + fmtMoney0(deposito - s)}</span>`;
     }
     function render() {
       mountEl.innerHTML = `
-        <div class="full">
-          <label>Comprovante(s) de depósito ${deposito > 0 ? '*' : ''}</label>
-          <input type="file" id="re-add" accept="application/pdf,image/*" multiple>
-          <small class="muted">Pode anexar mais de um. A IA tenta ler o valor e a data — confira antes de enviar.</small>
-        </div>
-        <div class="full" id="re-rows">${rows.map((r, i) => `
-          <div style="border:1px solid var(--bd);border-radius:8px;padding:.5rem;margin-top:.4rem">
-            <div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center">
-              <strong style="font-size:12px;word-break:break-all">📎 ${UI.escapeHtml(r.file ? r.file.name : (r.filename || 'comprovante'))}</strong>
-              <button type="button" class="btn small danger" data-rm="${i}">remover</button>
-            </div>
-            <div class="form-grid" style="margin-top:.4rem">
-              <div><label>Valor (R$)</label><input type="number" step="0.01" min="0" data-f="valor" data-i="${i}" value="${r.valor != null ? r.valor : ''}"></div>
-              <div><label>Data</label><input type="date" data-f="data" data-i="${i}" value="${r.data || ''}"></div>
-              <div style="display:flex;align-items:flex-end;gap:.3rem">
-                ${r.file ? `<button type="button" class="btn small" data-ai="${i}">✨ Ler com IA</button>` : ''}
-                ${(r.id && requestId) ? `<a class="btn small" href="/api/credit-requests/${requestId}/receipts/${r.id}?download=1">Baixar</a>` : ''}
+        <div class="cr-rc">
+          <div class="cr-rc-head">
+            <span class="cr-rc-title">Comprovantes de depósito ${deposito > 0 ? '<span style="color:var(--red)">*</span>' : ''}</span>
+            <label class="btn small primary cr-rc-add">+ Adicionar<input type="file" id="re-add" accept="application/pdf,image/*" multiple style="display:none"></label>
+          </div>
+          <div class="cr-rc-hint">A IA tenta ler valor, data e pagador — confira antes de enviar.</div>
+          <div id="re-rows">${rows.length ? rows.map((r, i) => {
+            const bad = mismatch(r), old = _isOldDate(r.data);
+            const brd = bad ? 'var(--red)' : (old ? 'var(--amber)' : 'var(--bd)');
+            return `
+            <div class="cr-rc-card" style="border-color:${brd}">
+              <div class="cr-rc-file">
+                <span class="cr-rc-name">${r.file ? '📎' : '🧾'} ${UI.escapeHtml(r.file ? r.file.name : (r.filename || 'comprovante'))}</span>
+                <button type="button" class="btn small danger" data-rm="${i}">Remover</button>
               </div>
-            </div>
-            ${_isOldDate(r.data) ? `<div style="color:var(--amber);font-size:12.5px;margin-top:.3rem;font-weight:600">⚠ Data ${_brDate(r.data)} é bem anterior a hoje. Confirme se anexou o comprovante correto.</div>` : ''}
-            ${mismatch(r) ? `<div style="color:var(--amber);font-size:12.5px;margin-top:.3rem;font-weight:600">⚠ Pagador do comprovante ("${UI.escapeHtml(r.pagador)}") parece diferente do cliente selecionado. Confirme se é o comprovante certo.</div>` : ''}
-          </div>`).join('')}</div>
-        ${deposito > 0 ? '<div class="full" id="re-sum" style="margin-top:.5rem;padding:.55rem .7rem;border-radius:8px;background:var(--s2);font-weight:700;font-size:14px"></div>' : ''}
-        ${anyWarn() ? `<label class="full" style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;color:var(--amber);font-weight:600"><input type="checkbox" id="re-confirm" ${confirmed ? 'checked' : ''}> Confirmo que os comprovantes anexados estão corretos (conferi data e pagador).</label>` : ''}`;
+              <div class="cr-rc-fields">
+                <div><label class="muted small">Valor (R$)</label><input type="number" step="0.01" min="0" data-f="valor" data-i="${i}" value="${r.valor != null ? r.valor : ''}"></div>
+                <div><label class="muted small">Data</label><input type="date" data-f="data" data-i="${i}" value="${r.data || ''}"></div>
+                <div class="cr-rc-acts">
+                  ${r.file ? `<button type="button" class="btn small" data-ai="${i}">✨ Ler com IA</button>` : ''}
+                  ${(r.id && requestId) ? `<a class="btn small" href="/api/credit-requests/${requestId}/receipts/${r.id}?download=1">⬇ Baixar</a>` : ''}
+                </div>
+              </div>
+              ${bad ? `<div class="cr-rc-msg err">⛔ Pagador ("${UI.escapeHtml(r.pagador)}") não corresponde ao cliente selecionado. Remova este comprovante.</div>` : ''}
+              ${(!bad && old) ? `<div class="cr-rc-msg warn">⚠ Data ${_brDate(r.data)} é bem anterior a hoje. Confirme se é o comprovante correto.</div>` : ''}
+            </div>`;
+          }).join('') : '<div class="cr-rc-empty">Nenhum comprovante anexado ainda.</div>'}</div>
+          ${deposito > 0 ? '<div id="re-sum" class="cr-rc-sum"></div>' : ''}
+          ${anyOld() && !hasMismatch() ? `<label class="cr-rc-confirm">
+            <span class="cr-switch"><input type="checkbox" id="re-confirm" ${confirmed ? 'checked' : ''}><span class="cr-slider"></span></span>
+            <span>Confirmo que os comprovantes com data antiga estão corretos.</span>
+          </label>` : ''}
+        </div>`;
       refreshSummary();
       bind();
       onChange(valid());
@@ -132,7 +146,7 @@ window['VIEW_credit-requests'] = (() => {
           valores: novos.map(r => Number(r.valor) || 0),
           datas: novos.map(r => r.data || ''),
           existing: existentes.map(r => ({ id: r.id, valor: Number(r.valor) || 0, data: r.data || '' })),
-          sum: sum(), count: rows.length, valid: valid(),
+          sum: sum(), count: rows.length, valid: valid(), mismatch: hasMismatch(),
         };
       },
     };
@@ -385,6 +399,7 @@ window['VIEW_credit-requests'] = (() => {
       if (!clienteId) return showErr('Selecione o cliente.');
       if (!(valor > 0)) return showErr('Informe o valor de créditos desejado.');
       const rc = editor.collect();
+      if (rc.mismatch) return showErr('Há comprovante cujo pagador não corresponde ao cliente selecionado. Remova-o para continuar.');
       if (send) {
         if (!rc.count) return showErr('Anexe pelo menos um comprovante de depósito para enviar.');
         if (!rc.valid) return showErr(`A soma dos comprovantes (${fmtMoney0(rc.sum)}) deve ser igual ou maior que o depósito necessário (${fmtMoney0(deposito())}). Havendo data antiga, marque a confirmação.`);
@@ -941,7 +956,9 @@ window['VIEW_credit-requests'] = (() => {
           ${isManual ? `
           <tr><td><strong>Créditos desejados</strong></td><td class="num"><strong class="val-pos">${fmtMoney0(r.creditosACompar||0)}</strong></td></tr>
           <tr><td><strong>Depósito necessário (${result.percentualDeposito ?? 30}%)</strong></td><td class="num"><strong class="val-pos">${fmtMoney0(result.depositoNecessario ?? ((r.creditosACompar||0)*(result.percentualDeposito ?? 30)/100))}</strong></td></tr>
-          ${result.valorDepositado != null ? `<tr><td>Valor depositado (comprovante)</td><td class="num">${fmtMoney0(result.valorDepositado)}</td></tr>` : ''}
+          ${(Array.isArray(r.receipts) && r.receipts.length)
+            ? `<tr><td>Valor depositado (comprovantes)</td><td class="num">${fmtMoney0(r.receipts.reduce((s, x) => s + (Number(x.valor) || 0), 0))}</td></tr>`
+            : (result.valorDepositado != null ? `<tr><td>Valor depositado (comprovante)</td><td class="num">${fmtMoney0(result.valorDepositado)}</td></tr>` : '')}
           ` : `
           <tr><td>Modalidade</td><td>${r.modalidade === 'AL_NF' ? 'Alagoas NF (4%)' : 'Alagoas Dif (1.2%)'}</td></tr>
           <tr><td>Subtotal federal</td><td class="num">${UI.fmtMoney(total.subtotal||0)}</td></tr>
@@ -1058,6 +1075,7 @@ window['VIEW_credit-requests'] = (() => {
     document.getElementById('cr-send-go').onclick = async () => {
       showErr('');
       const rc = editor.collect();
+      if (rc.mismatch) return showErr('Há comprovante cujo pagador não corresponde ao cliente selecionado. Remova-o para continuar.');
       if (!rc.count) return showErr('Anexe pelo menos um comprovante de depósito.');
       if (!rc.valid) return showErr(`A soma dos comprovantes (${fmtMoney0(rc.sum)}) deve cobrir o restante (${fmtMoney0(restante)}). Havendo data antiga, marque a confirmação.`);
       const fd = new FormData();
@@ -1118,6 +1136,7 @@ window['VIEW_credit-requests'] = (() => {
     document.getElementById('ed-save').onclick = async () => {
       showErr('');
       const rc = editor.collect();
+      if (rc.mismatch) return showErr('Há comprovante cujo pagador não corresponde ao cliente selecionado. Remova-o para salvar.');
       const fd = new FormData();
       if (isManual) {
         const v = Number(document.getElementById('ed-valor').value) || 0;

@@ -318,10 +318,17 @@ export async function updateDraft(user, id, payload = {}, receipts = []) {
   const rcList = (receipts || []).filter(x => x && x.buffer);
   if (rcList.length) await persistReceipts(id, rcList);
 
-  // Atualiza marcador legado
-  const total = await prisma.creditRequestReceipt.count({ where: { creditRequestId: id } });
+  // Recalcula total depositado + marcador legado
+  const agg = await prisma.creditRequestReceipt.aggregate({
+    where: { creditRequestId: id }, _count: true, _sum: { valor: true },
+  });
+  const total = agg._count || 0;
   data.paymentReceiptName = total > 0 ? (total === 1 ? 'comprovante' : `${total} comprovante(s)`) : null;
   data.paymentReceiptUploadedAt = total > 0 ? new Date() : null;
+  if (isManual) {
+    const base = data.result || r.result || {};
+    data.result = { ...base, valorDepositado: agg._sum.valor || 0 };
+  }
 
   await prisma.creditRequest.update({ where: { id }, data });
   return getRequest(user, id);
@@ -363,6 +370,11 @@ export async function sendRequest(user, id, receipts = []) {
     const count = existing.length + rcList.length;
     data.paymentReceiptName = count === 1 ? (rcList[0].name || 'comprovante') : `${count} comprovante(s)`;
     data.paymentReceiptUploadedAt = new Date();
+  }
+  // Mantém o total depositado coerente com a soma real dos comprovantes.
+  if (isManual) {
+    const agg = await prisma.creditRequestReceipt.aggregate({ where: { creditRequestId: id }, _sum: { valor: true } });
+    data.result = { ...r.result, valorDepositado: agg._sum.valor || 0 };
   }
 
   const updated = await prisma.creditRequest.update({
