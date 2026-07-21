@@ -173,6 +173,22 @@ export async function create(req, res, next) {
     res.status(201).json(r);
   } catch (e) { next(e); }
 }
+export async function update(req, res, next) {
+  try {
+    const body = req.body || {};
+    let existing = [];
+    try { existing = body.existing ? JSON.parse(body.existing) : []; } catch { existing = []; }
+    const payload = {
+      message: body.message,
+      creditosManuais: (body.creditosManuais != null && body.creditosManuais !== '') ? Number(body.creditosManuais) : null,
+      existing,
+    };
+    const receipts = collectReceipts(req);
+    const r = await svc.updateDraft(req.user, req.params.id, payload, receipts);
+    await logAction({ user: req.user, action: 'UPDATE', entity: 'credit_request', entityId: req.params.id, ip: req.ip });
+    res.json(r);
+  } catch (e) { next(e); }
+}
 export async function send(req, res, next) {
   try {
     const receipts = collectReceipts(req);

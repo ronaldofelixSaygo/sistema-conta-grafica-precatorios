@@ -36,8 +36,10 @@ window['VIEW_credit-requests'] = (() => {
   function makeReceiptsEditor(mountEl, opts = {}) {
     let deposito = Number(opts.deposito || 0);
     let clienteNome = opts.clienteNome || '';
+    const requestId = opts.requestId || null;
     const onChange = opts.onChange || (() => {});
-    let rows = [];        // { file, valor, data, pagador }
+    // Linhas novas: { file, valor, data, pagador }. Linhas existentes: { id, filename, valor, data }.
+    let rows = (opts.existing || []).map(e => ({ id: e.id, filename: e.filename, valor: e.valor, data: e.data || null }));
     let confirmed = false;
 
     const sum = () => rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
@@ -62,13 +64,16 @@ window['VIEW_credit-requests'] = (() => {
         <div class="full" id="re-rows">${rows.map((r, i) => `
           <div style="border:1px solid var(--bd);border-radius:8px;padding:.5rem;margin-top:.4rem">
             <div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center">
-              <strong style="font-size:12px;word-break:break-all">📎 ${UI.escapeHtml(r.file.name)}</strong>
+              <strong style="font-size:12px;word-break:break-all">📎 ${UI.escapeHtml(r.file ? r.file.name : (r.filename || 'comprovante'))}</strong>
               <button type="button" class="btn small danger" data-rm="${i}">remover</button>
             </div>
             <div class="form-grid" style="margin-top:.4rem">
               <div><label>Valor (R$)</label><input type="number" step="0.01" min="0" data-f="valor" data-i="${i}" value="${r.valor != null ? r.valor : ''}"></div>
               <div><label>Data</label><input type="date" data-f="data" data-i="${i}" value="${r.data || ''}"></div>
-              <div style="display:flex;align-items:flex-end"><button type="button" class="btn small" data-ai="${i}">✨ Ler com IA</button></div>
+              <div style="display:flex;align-items:flex-end;gap:.3rem">
+                ${r.file ? `<button type="button" class="btn small" data-ai="${i}">✨ Ler com IA</button>` : ''}
+                ${(r.id && requestId) ? `<a class="btn small" href="/api/credit-requests/${requestId}/receipts/${r.id}?download=1">Baixar</a>` : ''}
+              </div>
             </div>
             ${_isOldDate(r.data) ? `<div style="color:var(--amber);font-size:12.5px;margin-top:.3rem;font-weight:600">⚠ Data ${_brDate(r.data)} é bem anterior a hoje. Confirme se anexou o comprovante correto.</div>` : ''}
             ${mismatch(r) ? `<div style="color:var(--amber);font-size:12.5px;margin-top:.3rem;font-weight:600">⚠ Pagador do comprovante ("${UI.escapeHtml(r.pagador)}") parece diferente do cliente selecionado. Confirme se é o comprovante certo.</div>` : ''}
@@ -119,10 +124,17 @@ window['VIEW_credit-requests'] = (() => {
       isValid: valid,
       setDeposito: (v) => { deposito = Number(v || 0); render(); },
       setClienteNome: (v) => { clienteNome = v || ''; render(); },
-      collect: () => ({
-        files: rows.map(r => r.file), valores: rows.map(r => Number(r.valor) || 0),
-        datas: rows.map(r => r.data || ''), sum: sum(), count: rows.length, valid: valid(),
-      }),
+      collect: () => {
+        const novos = rows.filter(r => r.file && !r.id);
+        const existentes = rows.filter(r => r.id);
+        return {
+          files: novos.map(r => r.file),
+          valores: novos.map(r => Number(r.valor) || 0),
+          datas: novos.map(r => r.data || ''),
+          existing: existentes.map(r => ({ id: r.id, valor: Number(r.valor) || 0, data: r.data || '' })),
+          sum: sum(), count: rows.length, valid: valid(),
+        };
+      },
     };
   }
 
@@ -948,7 +960,7 @@ window['VIEW_credit-requests'] = (() => {
               <td style="word-break:break-all">${UI.escapeHtml(rc.filename)}</td>
               <td class="num">${fmtMoney0(rc.valor || 0)}</td>
               <td>${rc.data ? new Date(rc.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '—'}</td>
-              <td><a class="btn small primary" href="/api/credit-requests/${r.id}/receipts/${rc.id}?download=1">⬇</a></td>
+              <td><a class="btn small" href="/api/credit-requests/${r.id}/receipts/${rc.id}?download=1">⬇ Baixar</a></td>
             </tr>`).join('')}
           </tbody></table>
           <div class="muted small">Total: <strong>${fmtMoney0(r.receipts.reduce((s, x) => s + (Number(x.valor) || 0), 0))}</strong></div>
@@ -975,6 +987,7 @@ window['VIEW_credit-requests'] = (() => {
     const actDiv = document.getElementById('cr-actions');
     let html = '';
     if (isOwner && r.status === 'DRAFT')              html += `<button class="btn primary" data-act="send">Enviar para o interveniente</button> `;
+    if ((isOwner || isStaff) && r.status === 'DRAFT') html += `<button class="btn" data-act="edit">Editar</button> `;
     if (isOwner && (r.status === 'DRAFT' || r.status === 'SENT')) html += `<button class="btn danger" data-act="cancel">Cancelar</button> `;
     if ((isResolver || isStaff) && r.status === 'SENT')   html += `<button class="btn" data-act="start">Marcar em andamento</button> `;
     if ((isResolver || isStaff) && (r.status === 'SENT' || r.status === 'IN_PROGRESS')) html += `<button class="btn primary" data-act="resolve">Concluir solicitação</button> `;
@@ -986,6 +999,7 @@ window['VIEW_credit-requests'] = (() => {
       if (!act) return;
       try {
         if (act === 'send')    { openSendForm(r); }
+        if (act === 'edit')    { openEditDraft(r); }
         if (act === 'cancel')  { await API.post(`/api/credit-requests/${r.id}/cancel`); UI.toast('Cancelada'); UI.closeModal(); render(); }
         if (act === 'start')   { await API.post(`/api/credit-requests/${r.id}/start`); UI.toast('Em andamento'); UI.closeModal(); render(); }
         if (act === 'resolve') { openResolveForm(r); }
@@ -1055,6 +1069,73 @@ window['VIEW_credit-requests'] = (() => {
         if (!resp.ok) { const j = await resp.json().catch(() => null); throw new Error(j?.error || j?.message || `HTTP ${resp.status}`); }
         UI.toast('Enviada'); UI.closeModal(); render();
       } catch (e) { showErr(e.message); }
+    };
+  }
+
+  // Editar um rascunho: valor desejado (manual), mensagem e comprovantes
+  // (adicionar novos, editar valor/data ou remover os existentes).
+  function openEditDraft(r) {
+    const isManual = !!(r.result && r.result.manual);
+    const creditos = Number(r.result?.creditos ?? r.creditosACompar ?? 0);
+    const cli = clientesCache.find(c => c.id === r.clienteId);
+    const pct = Number(r.result?.percentualDeposito ?? cli?.percentualDeposito ?? 30);
+    UI.openModal(`Editar rascunho — ${r.cliente?.nome || ''}`, `
+      <div class="form-grid">
+        ${isManual ? `<div class="full"><label>Valor de créditos desejado (R$) *</label>
+          <input type="number" min="0" step="1" id="ed-valor" value="${creditos}"></div>
+        <div class="full" style="padding:.6rem;background:var(--s2);border-radius:8px">
+          <div class="muted small">Depósito necessário (${pct}%)</div>
+          <div style="font-size:1.3rem;font-weight:700" id="ed-dep">R$ 0</div>
+        </div>` : ''}
+        <div class="full" id="ed-receipts"></div>
+        <div class="full"><label>Mensagem (opcional)</label><textarea id="ed-msg" rows="2">${UI.escapeHtml(r.message || '')}</textarea></div>
+        <div class="full" id="ed-err" style="display:none"></div>
+        <div class="full form-actions">
+          <button type="button" class="btn" id="ed-cancel">Voltar</button>
+          <button type="button" class="btn primary" id="ed-save">Salvar alterações</button>
+        </div>
+      </div>`);
+    const deposito = () => Math.round((Number(document.getElementById('ed-valor')?.value ?? creditos) || 0) * pct / 100);
+    const editor = makeReceiptsEditor(document.getElementById('ed-receipts'), {
+      deposito: isManual ? deposito() : 0,
+      clienteNome: r.cliente?.nome || '',
+      requestId: r.id,
+      existing: (r.receipts || []).map(x => ({ id: x.id, filename: x.filename, valor: x.valor, data: x.data ? String(x.data).slice(0, 10) : '' })),
+      onChange: () => {},
+    });
+    const depEl = document.getElementById('ed-dep');
+    if (depEl) depEl.textContent = fmtMoney0(deposito());
+    document.getElementById('ed-valor')?.addEventListener('input', () => {
+      if (depEl) depEl.textContent = fmtMoney0(deposito());
+      editor.setDeposito(deposito());
+    });
+    const showErr = (msg) => {
+      const e = document.getElementById('ed-err'); if (!e) return;
+      e.style.display = msg ? '' : 'none';
+      e.innerHTML = msg ? `<div style="padding:.6rem .8rem;border-radius:8px;background:rgba(220,50,50,.12);border:1px solid var(--red);color:var(--red);font-weight:600;font-size:14px">${UI.escapeHtml(msg)}</div>` : '';
+    };
+    document.getElementById('ed-cancel').onclick = () => openDetail(r);
+    document.getElementById('ed-save').onclick = async () => {
+      showErr('');
+      const rc = editor.collect();
+      const fd = new FormData();
+      if (isManual) {
+        const v = Number(document.getElementById('ed-valor').value) || 0;
+        if (!(v > 0)) return showErr('Informe o valor de créditos desejado.');
+        fd.append('creditosManuais', String(v));
+      }
+      fd.append('message', document.getElementById('ed-msg').value || '');
+      fd.append('existing', JSON.stringify(rc.existing || []));
+      rc.files.forEach(f => fd.append('comprovantes', f));
+      fd.append('valores', JSON.stringify(rc.valores));
+      fd.append('datas', JSON.stringify(rc.datas));
+      const btn = document.getElementById('ed-save');
+      try {
+        if (btn) btn.disabled = true;
+        const resp = await fetch(`/api/credit-requests/${r.id}`, { method: 'PUT', credentials: 'include', body: fd });
+        if (!resp.ok) { const j = await resp.json().catch(() => null); throw new Error(j?.error || j?.message || `HTTP ${resp.status}`); }
+        UI.toast('Rascunho atualizado'); UI.closeModal(); render();
+      } catch (e) { showErr(e.message); if (btn) btn.disabled = false; }
     };
   }
 

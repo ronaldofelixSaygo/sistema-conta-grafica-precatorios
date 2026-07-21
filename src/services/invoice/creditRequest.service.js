@@ -274,6 +274,59 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
   return created;
 }
 
+// Edita um rascunho: valor de crédito (manual), mensagem, e comprovantes
+// (adiciona novos, atualiza valor/data dos mantidos, apaga os removidos).
+export async function updateDraft(user, id, payload = {}, receipts = []) {
+  const r = await getRequest(user, id);
+  const isOwner = r.requestedById === user.id;
+  const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
+  if (!isOwner && !isStaff) { const e = new Error('Sem permissão'); e.status = 403; throw e; }
+  if (r.status !== 'DRAFT') { const e = new Error('Apenas rascunhos podem ser editados'); e.status = 400; throw e; }
+
+  const data = {};
+  if (payload.message !== undefined) data.message = payload.message || null;
+
+  // Manual: recalcula crédito e depósito necessário
+  const isManual = !!(r.result && r.result.manual);
+  if (isManual && payload.creditosManuais != null && Number(payload.creditosManuais) > 0) {
+    const cli = await prisma.cliente.findUnique({ where: { id: r.clienteId } });
+    const pct = Number(cli?.percentualDeposito ?? r.result.percentualDeposito ?? 30);
+    const creditos = Math.round(Number(payload.creditosManuais));
+    data.creditosACompar = creditos;
+    data.result = { ...r.result, creditos, percentualDeposito: pct, depositoNecessario: Math.round(creditos * pct / 100) };
+  }
+
+  // Reconcilia comprovantes existentes: mantém/atualiza os informados, apaga o resto
+  const kept = Array.isArray(payload.existing) ? payload.existing : [];
+  const keptMap = new Map(kept.map(k => [k.id, k]));
+  const current = await prisma.creditRequestReceipt.findMany({ where: { creditRequestId: id } });
+  for (const rc of current) {
+    if (!keptMap.has(rc.id)) {
+      if (rc.s3Key) storage.deleteObject(rc.s3Key).catch(() => {});
+      await prisma.creditRequestReceipt.delete({ where: { id: rc.id } });
+    } else {
+      const k = keptMap.get(rc.id);
+      const upd = { valor: Number(k.valor) || 0 };
+      if (k.data !== undefined) {
+        const d = k.data ? new Date(String(k.data).slice(0, 10) + 'T00:00:00.000Z') : null;
+        upd.data = (d && !isNaN(d.getTime())) ? d : null;
+      }
+      await prisma.creditRequestReceipt.update({ where: { id: rc.id }, data: upd }).catch(() => {});
+    }
+  }
+  // Adiciona novos comprovantes
+  const rcList = (receipts || []).filter(x => x && x.buffer);
+  if (rcList.length) await persistReceipts(id, rcList);
+
+  // Atualiza marcador legado
+  const total = await prisma.creditRequestReceipt.count({ where: { creditRequestId: id } });
+  data.paymentReceiptName = total > 0 ? (total === 1 ? 'comprovante' : `${total} comprovante(s)`) : null;
+  data.paymentReceiptUploadedAt = total > 0 ? new Date() : null;
+
+  await prisma.creditRequest.update({ where: { id }, data });
+  return getRequest(user, id);
+}
+
 // Envia: DRAFT → SENT — apenas o solicitante (ou STAFF)
 export async function sendRequest(user, id, receipts = []) {
   const r = await getRequest(user, id);

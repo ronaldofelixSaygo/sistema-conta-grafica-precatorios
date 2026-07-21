@@ -37,6 +37,8 @@ router.get('/',                                          ctrl.list);
 // create aceita 'file' (PDF da invoice) e N comprovantes de depósito
 router.post('/', receiptUpload, ctrl.create);
 router.get('/:id',                                       ctrl.get);
+// edita rascunho (valor, mensagem, add/atualiza/remove comprovantes)
+router.put('/:id', receiptUpload,                        ctrl.update);
 // send aceita 1..N comprovantes (anexa antes de enviar)
 router.post('/:id/send', receiptUpload,                  ctrl.send);
 router.get('/:id/receipts/:rid',                         ctrl.downloadReceiptItem);
