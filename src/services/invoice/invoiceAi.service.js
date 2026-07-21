@@ -3,7 +3,7 @@
 // necessários ao cálculo (formato JSON estruturado).
 // =====================================================================
 import { prisma } from '../../config/prisma.js';
-import { callAi, extractJson } from './aiClient.service.js';
+import { callAi, callAiVision, extractJson } from './aiClient.service.js';
 
 const DEFAULT_SYSTEM_PROMPT = `Você é um assistente especializado em ler invoices comerciais (commercial invoices) de importação para o Brasil e extrair dados estruturados.
 
@@ -207,6 +207,76 @@ export async function analyzeInvoicePdf(buffer) {
     fields: { ...cabecalho, ncmGroups, itemsRaw: items || [] },
     raw: parsed,
     promptVersion,
+  };
+}
+
+// --- Extração por regex (offline) — cobre a maioria dos comprovantes com texto.
+function _parseBrNumber(s) { return Number(String(s).replace(/\./g, '').replace(',', '.')); }
+function _dmyToIso(dmy) { const m = String(dmy).match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; }
+export function extractReceiptFields(text) {
+  const t = String(text || '').replace(/ /g, ' ');
+  let valor = null;
+  const vm = t.match(/valor[^\d]{0,60}?R?\$?\s*(\d{1,3}(?:\.\d{3})*,\d{2})/i)
+          || t.match(/R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})/)
+          || t.match(/(\d{1,3}(?:\.\d{3})+,\d{2})/);
+  if (vm) valor = _parseBrNumber(vm[1]);
+  let data = null;
+  const dm = t.match(/(?:data da transfer[êe]ncia|realizado em|efetuada em|emitido em|data\b)\D{0,20}?(\d{2}\/\d{2}\/\d{4})/i)
+          || t.match(/(\d{2}\/\d{2}\/\d{4})/);
+  if (dm) data = _dmyToIso(dm[1]);
+  return { valor: valor > 0 ? Math.round(valor * 100) / 100 : null, data };
+}
+
+// Normaliza uma data vinda da IA (aceita YYYY-MM-DD ou DD/MM/YYYY) → ISO ou null
+function _normalizeAiDate(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) return _dmyToIso(s);
+  return null;
+}
+
+// Lê VALOR e DATA de um comprovante (best-effort). Ordem:
+//  1) PDF com texto → regex (rápido, offline); se falhar, IA texto.
+//  2) Imagem/PDF escaneado → IA com visão.
+// Retorna { valor: number|null, data: 'YYYY-MM-DD'|null }. Cliente confirma depois.
+export async function analyzeReceiptValue(buffer, mime) {
+  const isPdf = (mime || '').includes('pdf');
+  let text = '';
+  if (isPdf) { try { text = await extractTextFromPdfBuffer(buffer); } catch {} }
+
+  // 1) Tentativa offline por regex (PDF com texto)
+  if (text && text.trim().length >= 20) {
+    const viaRegex = extractReceiptFields(text);
+    if (viaRegex.valor) return viaRegex;
+  }
+
+  // 2) IA (texto ou visão)
+  const settings = await getAiSettings();
+  if (!settings || !settings.enabled || !settings.apiKey) {
+    // Sem IA e sem regex: devolve vazio pro cliente digitar
+    return { valor: null, data: null };
+  }
+  const sys = 'Você lê comprovantes de depósito/transferência bancária brasileiros (vários bancos/layouts) e extrai o VALOR TOTAL e a DATA da transação. Responda APENAS um JSON puro: {"valor": number, "data": "YYYY-MM-DD"}. valor em reais com ponto decimal (ex.: 1234.56). Se não encontrar algum campo, use null.';
+  const common = { provider: settings.provider, model: settings.model, apiKey: settings.apiKey, systemPrompt: sys };
+
+  let out;
+  try {
+    if (text && text.trim().length >= 20) {
+      out = await callAi({ ...common, userMessage: `Comprovante (texto):\n${text}` });
+    } else {
+      out = await callAiVision({ ...common, userMessage: 'Leia o comprovante em anexo e extraia valor e data.', files: [{ mime: mime || 'image/jpeg', b64: buffer.toString('base64') }] });
+    }
+  } catch (e) {
+    // IA falhou (ex.: provedor sem visão) — devolve vazio pro cliente digitar
+    return { valor: null, data: null };
+  }
+
+  const parsed = extractJson(out.text) || {};
+  const valor = Number(parsed.valor);
+  return {
+    valor: Number.isFinite(valor) && valor > 0 ? Math.round(valor * 100) / 100 : null,
+    data: _normalizeAiDate(parsed.data),
   };
 }
 

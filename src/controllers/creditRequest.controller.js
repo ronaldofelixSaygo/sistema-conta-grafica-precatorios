@@ -103,6 +103,33 @@ export async function analyzePdf(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// === Leitura do valor de um comprovante via IA (best-effort) ===
+export async function analyzeReceipt(req, res, next) {
+  try {
+    if (!req.file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
+    const out = await ai.analyzeReceiptValue(req.file.buffer, req.file.mimetype);
+    res.json(out);
+  } catch (e) { next(e); }
+}
+
+// Normaliza os comprovantes recebidos no multipart em [{buffer,name,mime,valor}].
+// Aceita 'comprovantes' (N arquivos) + 'valores' (JSON array alinhado) e, por
+// retrocompat, o campo único 'comprovante'.
+function collectReceipts(req) {
+  const body = req.body || {};
+  let valores = [], datas = [];
+  try { valores = body.valores ? JSON.parse(body.valores) : []; } catch { valores = []; }
+  try { datas = body.datas ? JSON.parse(body.datas) : []; } catch { datas = []; }
+  const files = req.files?.comprovantes || [];
+  const out = files.map((f, i) => ({
+    buffer: f.buffer, name: f.originalname, mime: f.mimetype,
+    valor: Number(valores[i]) || 0, data: datas[i] || null,
+  }));
+  const single = req.files?.comprovante?.[0] || (req.file && req.file.fieldname === 'comprovante' ? req.file : null);
+  if (single) out.push({ buffer: single.buffer, name: single.originalname, mime: single.mimetype, valor: Number(body.valorDepositado) || 0, data: body.dataDeposito || null });
+  return out;
+}
+
 // === Simulação on-the-fly (sem persistir) ===
 export async function simulate(req, res, next) {
   try {
@@ -135,26 +162,21 @@ export async function create(req, res, next) {
       creditosManuais: (body.creditosManuais != null && body.creditosManuais !== '') ? Number(body.creditosManuais) : null,
       valorDepositado: (body.valorDepositado != null && body.valorDepositado !== '') ? Number(body.valorDepositado) : null,
     };
-    // create aceita multipart com 2 campos opcionais: 'file' (PDF da invoice) e 'comprovante'.
-    const pdfFile = req.files?.file?.[0] || req.file || null;
-    const compFile = req.files?.comprovante?.[0] || null;
+    // create aceita multipart: 'file' (PDF da invoice) + N comprovantes.
+    const pdfFile = req.files?.file?.[0] || null;
     const pdfBuffer = pdfFile?.buffer || null;
     const pdfName   = pdfFile?.originalname || null;
-    const receipt = compFile
-      ? { buffer: compFile.buffer, name: compFile.originalname, mime: compFile.mimetype }
-      : null;
+    const receipts = collectReceipts(req);
     const promptVersion = body.aiPromptVersion ? Number(body.aiPromptVersion) : null;
-    const r = await svc.createDraft(req.user, payload, pdfBuffer, pdfName, promptVersion, receipt);
+    const r = await svc.createDraft(req.user, payload, pdfBuffer, pdfName, promptVersion, receipts);
     await logAction({ user: req.user, action: 'CREATE', entity: 'credit_request', entityId: r.id, ip: req.ip });
     res.status(201).json(r);
   } catch (e) { next(e); }
 }
 export async function send(req, res, next) {
   try {
-    const receipt = req.file
-      ? { buffer: req.file.buffer, name: req.file.originalname, mime: req.file.mimetype }
-      : null;
-    const r = await svc.sendRequest(req.user, req.params.id, receipt);
+    const receipts = collectReceipts(req);
+    const r = await svc.sendRequest(req.user, req.params.id, receipts);
     await logAction({ user: req.user, action: 'SEND', entity: 'credit_request', entityId: r.id, ip: req.ip });
     res.json(r);
   } catch (e) { next(e); }
@@ -200,6 +222,17 @@ export async function downloadPaymentReceipt(req, res, next) {
     if (r.redirectUrl) return res.redirect(r.redirectUrl);
     const disposition = r._inline === false ? 'attachment' : 'inline';
     res.setHeader('Content-Type', r.mime);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(r.filename)}"`);
+    res.end(Buffer.from(r.bytes));
+  } catch (e) { next(e); }
+}
+export async function downloadReceiptItem(req, res, next) {
+  try {
+    const download = req.query.download === '1' || req.query.download === 'true';
+    const r = await svc.getReceiptItem(req.user, req.params.id, req.params.rid, { download });
+    if (r.redirectUrl) return res.redirect(r.redirectUrl);
+    const disposition = r._inline === false ? 'attachment' : 'inline';
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(r.filename)}"`);
     res.end(Buffer.from(r.bytes));
   } catch (e) { next(e); }

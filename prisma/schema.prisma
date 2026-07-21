@@ -691,6 +691,10 @@ model CreditRequest {
   // Desonerações vinculadas (1 solicitação pode gerar várias desonerações no tempo)
   desoneracoes    Desoneracao[]
 
+  // Comprovantes de depósito (pode haver mais de um; a soma dos valores deve
+  // cobrir o depósito exigido para enviar ao interveniente).
+  receipts        CreditRequestReceipt[]
+
   @@index([clienteId])
   @@index([partnerOfficeName, status])
   @@index([status])
@@ -987,6 +991,24 @@ model SystemAlert {
 
 // Config de SLA pra fluxo de Solicitação de Crédito. Key-value simples,
 // 2 linhas: SENT_TO_PROGRESS, IN_PROGRESS_TO_RESOLVED.
+// Comprovante(s) de depósito de uma Solicitação de Crédito. Vários por
+// solicitação — a soma dos `valor` deve cobrir o depósito exigido.
+model CreditRequestReceipt {
+  id              String        @id @default(uuid())
+  creditRequestId String
+  creditRequest   CreditRequest @relation(fields: [creditRequestId], references: [id], onDelete: Cascade)
+  filename        String
+  mimeType        String?
+  bytes           Bytes?        // legado/inline quando S3 desligado
+  s3Key           String?
+  valor           Float         @default(0)   // valor declarado/confirmado do depósito
+  data            DateTime?     // data do comprovante (para checagem de consistência)
+  createdAt       DateTime      @default(now())
+
+  @@index([creditRequestId])
+  @@map("credit_request_receipts")
+}
+
 model CreditSlaConfig {
   fase     String   @id   // SENT_TO_PROGRESS | IN_PROGRESS_TO_RESOLVED
   slaHours Int      @default(24)

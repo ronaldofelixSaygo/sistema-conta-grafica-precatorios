@@ -114,6 +114,69 @@ export async function callAi({ provider, model, apiKey, systemPrompt, userMessag
   }
 }
 
+// ── Visão (imagens/PDF) ──────────────────────────────────────────────
+// files: [{ mime, b64 }]. Usado pra ler valor de comprovantes (imagem/PDF).
+async function visionAnthropic({ apiKey, model, systemPrompt, userMessage, files }) {
+  const content = [{ type: 'text', text: userMessage }];
+  for (const f of files) {
+    if (f.mime === 'application/pdf') {
+      content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.b64 } });
+    } else {
+      content.push({ type: 'image', source: { type: 'base64', media_type: f.mime || 'image/jpeg', data: f.b64 } });
+    }
+  }
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: pickModel('anthropic', model), max_tokens: 1024, system: systemPrompt || undefined, messages: [{ role: 'user', content }] }),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`Anthropic ${r.status}: ${j?.error?.message || JSON.stringify(j)}`);
+  return { text: (j.content || []).map(c => c.text || '').join('').trim(), raw: j };
+}
+
+async function visionOpenAI({ apiKey, model, systemPrompt, userMessage, files }) {
+  const parts = [{ type: 'text', text: userMessage }];
+  for (const f of files) {
+    // OpenAI chat vision aceita imagens (não PDF) via data URL
+    if (f.mime !== 'application/pdf') parts.push({ type: 'image_url', image_url: { url: `data:${f.mime};base64,${f.b64}` } });
+  }
+  const messages = [];
+  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+  messages.push({ role: 'user', content: parts });
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model: pickModel('openai', model), messages, temperature: 0.1 }),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`OpenAI ${r.status}: ${j?.error?.message || JSON.stringify(j)}`);
+  return { text: j?.choices?.[0]?.message?.content?.trim() || '', raw: j };
+}
+
+async function visionGemini({ apiKey, model, systemPrompt, userMessage, files }) {
+  const m = pickModel('gemini', model);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const parts = [{ text: userMessage }];
+  for (const f of files) parts.push({ inlineData: { mimeType: f.mime, data: f.b64 } });
+  const body = { contents: [{ role: 'user', parts }] };
+  if (systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`Gemini ${r.status}: ${j?.error?.message || JSON.stringify(j)}`);
+  return { text: (j.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim(), raw: j };
+}
+
+export async function callAiVision({ provider, model, apiKey, systemPrompt, userMessage, files }) {
+  if (!apiKey) { const e = new Error('API key da IA não configurada'); e.status = 400; throw e; }
+  if (!files?.length) { const e = new Error('Nenhum arquivo para a IA analisar'); e.status = 400; throw e; }
+  const p = String(provider || 'anthropic').toLowerCase();
+  if (p === 'anthropic') return visionAnthropic({ apiKey, model, systemPrompt, userMessage, files });
+  if (p === 'openai')    return visionOpenAI({ apiKey, model, systemPrompt, userMessage, files });
+  if (p === 'gemini')    return visionGemini({ apiKey, model, systemPrompt, userMessage, files });
+  const e = new Error(`O provedor de IA "${p}" não suporta leitura de imagem. Informe o valor manualmente.`); e.status = 400; throw e;
+}
+
 // Tenta parsear bloco JSON da resposta (aceita ```json...``` ou objeto puro)
 export function extractJson(text) {
   if (!text) return null;

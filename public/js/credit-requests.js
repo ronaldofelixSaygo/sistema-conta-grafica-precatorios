@@ -11,6 +11,101 @@ window['VIEW_credit-requests'] = (() => {
   const ceilTo1000 = x => Math.ceil((Number(x) || 0) / 1000) * 1000;
   // Formata em reais SEM centavos (valores "redondos" da sugestão/depósito).
   const fmtMoney0 = x => 'R$ ' + Math.round(Number(x) || 0).toLocaleString('pt-BR');
+  // Data (ISO) considerada "bem anterior" se mais de N dias atrás.
+  const OLD_DAYS = 30;
+  const _isOldDate = iso => { if (!iso) return false; const d = new Date(iso); return !isNaN(d) && (Date.now() - d.getTime()) / 86400000 > OLD_DAYS; };
+  const _brDate = iso => (iso ? iso.split('-').reverse().join('/') : '');
+
+  // Editor de múltiplos comprovantes: arquivo + valor + data, com "Ler com IA"
+  // (pré-preenche valor/data; o cliente confirma). Valida a soma >= depósito e
+  // exige confirmação se alguma data for muito antiga. onChange(valid) avisa fora.
+  function makeReceiptsEditor(mountEl, opts = {}) {
+    let deposito = Number(opts.deposito || 0);
+    const onChange = opts.onChange || (() => {});
+    let rows = [];        // { file, valor, data }
+    let confirmed = false;
+
+    const sum = () => rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+    const anyOld = () => rows.some(r => _isOldDate(r.data));
+    const valid = () => rows.length > 0 && (deposito <= 0 || sum() >= deposito) && (!anyOld() || confirmed);
+
+    function refreshSummary() {
+      const box = mountEl.querySelector('#re-sum');
+      if (!box) return;
+      const s = sum(), okSum = deposito <= 0 || s >= deposito;
+      box.style.color = okSum ? 'var(--green)' : 'var(--red)';
+      box.textContent = `Soma dos comprovantes: ${fmtMoney0(s)} / necessário ${fmtMoney0(deposito)} ${okSum ? '✓' : '— falta ' + fmtMoney0(deposito - s)}`;
+    }
+    function render() {
+      mountEl.innerHTML = `
+        <div class="full">
+          <label>Comprovante(s) de depósito ${deposito > 0 ? '*' : ''}</label>
+          <input type="file" id="re-add" accept="application/pdf,image/*" multiple>
+          <small class="muted">Pode anexar mais de um. A IA tenta ler o valor e a data — confira antes de enviar.</small>
+        </div>
+        <div class="full" id="re-rows">${rows.map((r, i) => `
+          <div style="border:1px solid var(--bd);border-radius:8px;padding:.5rem;margin-top:.4rem">
+            <div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center">
+              <strong style="font-size:12px;word-break:break-all">📎 ${UI.escapeHtml(r.file.name)}</strong>
+              <button type="button" class="btn small danger" data-rm="${i}">remover</button>
+            </div>
+            <div class="form-grid" style="margin-top:.4rem">
+              <div><label>Valor (R$)</label><input type="number" step="0.01" min="0" data-f="valor" data-i="${i}" value="${r.valor != null ? r.valor : ''}"></div>
+              <div><label>Data</label><input type="date" data-f="data" data-i="${i}" value="${r.data || ''}"></div>
+              <div style="display:flex;align-items:flex-end"><button type="button" class="btn small" data-ai="${i}">✨ Ler com IA</button></div>
+            </div>
+            ${_isOldDate(r.data) ? `<div style="color:var(--amber);font-size:12.5px;margin-top:.3rem;font-weight:600">⚠ Data ${_brDate(r.data)} é bem anterior a hoje. Confirme se anexou o comprovante correto.</div>` : ''}
+          </div>`).join('')}</div>
+        ${deposito > 0 ? '<div class="full" id="re-sum" style="margin-top:.5rem;padding:.55rem .7rem;border-radius:8px;background:var(--s2);font-weight:700;font-size:14px"></div>' : ''}
+        ${anyOld() ? `<label class="full" style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;color:var(--amber);font-weight:600"><input type="checkbox" id="re-confirm" ${confirmed ? 'checked' : ''}> Confirmo que os comprovantes anexados estão corretos, mesmo com data antiga.</label>` : ''}`;
+      refreshSummary();
+      bind();
+      onChange(valid());
+    }
+    function bind() {
+      const add = mountEl.querySelector('#re-add');
+      if (add) add.onchange = (e) => {
+        for (const f of [...(e.target.files || [])]) { rows.push({ file: f, valor: null, data: null }); aiRead(rows.length - 1, false); }
+        render();
+      };
+      mountEl.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { rows.splice(Number(b.dataset.rm), 1); render(); });
+      mountEl.querySelectorAll('[data-f]').forEach(inp => {
+        inp.oninput = () => {
+          const i = Number(inp.dataset.i), f = inp.dataset.f;
+          rows[i][f] = f === 'valor' ? (Number(inp.value) || 0) : inp.value;
+          if (f === 'valor') refreshSummary();
+          onChange(valid());
+        };
+        inp.onchange = () => render(); // blur → re-render (atualiza aviso de data)
+      });
+      mountEl.querySelectorAll('[data-ai]').forEach(b => b.onclick = () => aiRead(Number(b.dataset.ai), true));
+      const cf = mountEl.querySelector('#re-confirm');
+      if (cf) cf.onchange = () => { confirmed = cf.checked; onChange(valid()); };
+    }
+    async function aiRead(i, manual) {
+      const r = rows[i]; if (!r) return;
+      try {
+        const fd = new FormData(); fd.append('file', r.file);
+        const resp = await fetch('/api/credit-requests/analyze-receipt', { method: 'POST', credentials: 'include', body: fd });
+        const j = await resp.json().catch(() => null);
+        if (!resp.ok) throw new Error(j?.error || 'Falha na leitura');
+        let got = false;
+        if (j && j.valor != null) { r.valor = j.valor; got = true; }
+        if (j && j.data) { r.data = j.data; got = true; }
+        render();
+        if (manual) UI.toast(got ? 'IA leu o comprovante — confira os valores' : 'IA não encontrou o valor — digite manualmente', got ? 'ok' : 'err');
+      } catch (e) { if (manual) UI.toast(e.message, 'err'); }
+    }
+    render();
+    return {
+      isValid: valid,
+      setDeposito: (v) => { deposito = Number(v || 0); render(); },
+      collect: () => ({
+        files: rows.map(r => r.file), valores: rows.map(r => Number(r.valor) || 0),
+        datas: rows.map(r => r.data || ''), sum: sum(), count: rows.length, valid: valid(),
+      }),
+    };
+  }
 
   async function render() {
     const el = document.getElementById('view-credit-requests');
@@ -204,14 +299,12 @@ window['VIEW_credit-requests'] = (() => {
           <div class="muted small">Depósito necessário (<span id="cm-pct">30</span>%)</div>
           <div style="font-size:1.3rem;font-weight:700" id="cm-dep">R$ 0</div>
         </div>
-        <div class="full"><label>Valor depositado (R$) <span class="muted small">(obrigatório para enviar)</span></label>
-          <input type="number" min="0" step="1" id="cm-depositado" placeholder="0"></div>
-        <div class="full"><label>Comprovante de depósito <span class="muted small">(obrigatório para enviar)</span></label>
-          <input type="file" id="cm-comprovante" accept="application/pdf,image/*"></div>
+        <div class="full" id="cm-receipts"></div>
         <div class="full"><label>Mensagem (opcional)</label><textarea id="cm-msg" rows="2"></textarea></div>
+        <div class="full" id="cm-err" style="display:none"></div>
         <div class="full form-actions">
           <button type="button" class="btn" id="cm-save">Salvar rascunho</button>
-          <button type="button" class="btn primary" id="cm-send">Enviar para o interveniente</button>
+          <button type="button" class="btn primary" id="cm-send" disabled>Enviar para o interveniente</button>
         </div>
       </div>`;
 
@@ -221,40 +314,52 @@ window['VIEW_credit-requests'] = (() => {
       return Number(cli?.percentualDeposito ?? 30);
     };
     const deposito = () => Math.round((Number(document.getElementById('cm-valor').value) || 0) * getPct() / 100);
+    const editor = makeReceiptsEditor(document.getElementById('cm-receipts'), {
+      deposito: deposito(),
+      onChange: (ok) => { const b = document.getElementById('cm-send'); if (b) b.disabled = !ok; },
+    });
     const refreshDep = () => {
       document.getElementById('cm-pct').textContent = String(getPct());
       document.getElementById('cm-dep').textContent = fmtMoney0(deposito());
+      editor.setDeposito(deposito());
     };
     document.getElementById('cm-valor').addEventListener('input', refreshDep);
     document.getElementById('cm-cliente')?.addEventListener('change', refreshDep);
     refreshDep();
 
+    const showErr = (msg) => {
+      const e = document.getElementById('cm-err'); if (!e) return;
+      e.style.display = msg ? '' : 'none';
+      e.innerHTML = msg ? `<div style="padding:.6rem .8rem;border-radius:8px;background:rgba(220,50,50,.12);border:1px solid var(--red);color:var(--red);font-weight:600;font-size:14px">${UI.escapeHtml(msg)}</div>` : '';
+    };
+
     async function submit(send) {
       const clienteId = document.getElementById('cm-cliente')?.value || fixedCliId;
       const valor = Number(document.getElementById('cm-valor').value) || 0;
-      if (!clienteId) return UI.toast('Selecione o cliente', 'err');
-      if (!(valor > 0)) return UI.toast('Informe o valor de créditos desejado', 'err');
+      showErr('');
+      if (!clienteId) return showErr('Selecione o cliente.');
+      if (!(valor > 0)) return showErr('Informe o valor de créditos desejado.');
+      const rc = editor.collect();
+      if (send) {
+        if (!rc.count) return showErr('Anexe pelo menos um comprovante de depósito para enviar.');
+        if (!rc.valid) return showErr(`A soma dos comprovantes (${fmtMoney0(rc.sum)}) deve ser igual ou maior que o depósito necessário (${fmtMoney0(deposito())}). Havendo data antiga, marque a confirmação.`);
+      }
       const fd = new FormData();
       fd.append('clienteId', clienteId);
       fd.append('manual', 'true');
       fd.append('creditosManuais', String(valor));
       fd.append('message', document.getElementById('cm-msg').value || '');
-      if (send) {
-        const file = document.getElementById('cm-comprovante')?.files?.[0];
-        const depositado = Number(document.getElementById('cm-depositado').value) || 0;
-        if (!file) return UI.toast('Anexe o comprovante de depósito', 'err');
-        if (depositado < deposito()) return UI.toast(`Valor depositado deve ser ≥ ${fmtMoney0(deposito())}`, 'err');
-        fd.append('autoSend', 'true');
-        fd.append('valorDepositado', String(depositado));
-        fd.append('comprovante', file);
-      }
+      if (send) fd.append('autoSend', 'true');
+      rc.files.forEach(f => fd.append('comprovantes', f));
+      fd.append('valores', JSON.stringify(rc.valores));
+      fd.append('datas', JSON.stringify(rc.datas));
       const btn = document.getElementById(send ? 'cm-send' : 'cm-save');
       try {
         if (btn) btn.disabled = true;
         const resp = await fetch('/api/credit-requests', { method: 'POST', credentials: 'include', body: fd });
         if (!resp.ok) { const j = await resp.json().catch(() => null); throw new Error(j?.error || j?.message || `HTTP ${resp.status}`); }
         UI.toast(send ? 'Solicitação enviada' : 'Rascunho salvo'); UI.closeModal(); render();
-      } catch (e) { UI.toast(e.message, 'err'); if (btn) btn.disabled = false; }
+      } catch (e) { showErr(e.message); if (btn) btn.disabled = false; }
     }
     document.getElementById('cm-save').onclick = () => submit(false);
     document.getElementById('cm-send').onclick = () => submit(true);
@@ -803,12 +908,23 @@ window['VIEW_credit-requests'] = (() => {
           `}
         </tbody></table>
         ${r.inputPdfName ? `<div class="muted small" style="margin-top:.4rem">📎 PDF original: <a href="/api/credit-requests/${r.id}/pdf" target="_blank">${UI.escapeHtml(r.inputPdfName)}</a></div>` : ''}
-        ${r.paymentReceiptName ? `<div class="small" style="margin-top:.4rem;padding:.5rem;background:var(--s2);border-radius:6px;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+        ${(Array.isArray(r.receipts) && r.receipts.length) ? `<div class="small" style="margin-top:.5rem;padding:.5rem;background:var(--s2);border-radius:6px">
+          <strong>🧾 Comprovantes de depósito (${r.receipts.length})</strong>
+          <table class="table" style="margin-top:.3rem;font-size:12px"><tbody>
+            ${r.receipts.map(rc => `<tr>
+              <td style="word-break:break-all">${UI.escapeHtml(rc.filename)}</td>
+              <td class="num">${fmtMoney0(rc.valor || 0)}</td>
+              <td>${rc.data ? new Date(rc.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '—'}</td>
+              <td><a class="btn small primary" href="/api/credit-requests/${r.id}/receipts/${rc.id}?download=1">⬇</a></td>
+            </tr>`).join('')}
+          </tbody></table>
+          <div class="muted small">Total: <strong>${fmtMoney0(r.receipts.reduce((s, x) => s + (Number(x.valor) || 0), 0))}</strong></div>
+        </div>` : (r.paymentReceiptName ? `<div class="small" style="margin-top:.4rem;padding:.5rem;background:var(--s2);border-radius:6px;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
           <span>🧾 <strong>Comprovante de depósito:</strong> ${UI.escapeHtml(r.paymentReceiptName)}</span>
           <span style="flex:1"></span>
           <button class="btn small" data-act="view-receipt" data-name="${UI.escapeHtml(r.paymentReceiptName)}">👁 Visualizar</button>
           <a class="btn small primary" href="/api/credit-requests/${r.id}/payment-receipt?download=1" download="${UI.escapeHtml(r.paymentReceiptName)}">⬇ Baixar</a>
-        </div>` : ''}
+        </div>` : '')}
       </div>
       ${r.message ? `<div class="panel"><h3>Mensagem do solicitante</h3><p>${UI.escapeHtml(r.message)}</p></div>` : ''}
       ${(r.resolutionNote || r.resolutionAttachmentName) ? `<div class="panel"><h3>Resposta do interveniente</h3>
@@ -859,40 +975,52 @@ window['VIEW_credit-requests'] = (() => {
   // Enviar um rascunho existente ao interveniente — exige o comprovante de depósito.
   function openSendForm(r) {
     const div = document.getElementById('cr-actions');
-    const has = !!r.paymentReceiptName;
+    const result = r.result || {};
+    const isManual = !!result.manual;
+    const jaExistentes = Array.isArray(r.receipts) ? r.receipts : [];
+    const somaExistente = jaExistentes.reduce((s, x) => s + (Number(x.valor) || 0), 0);
+    const necessario = isManual ? Number(result.depositoNecessario || 0) : 0;
+    const restante = Math.max(0, necessario - somaExistente);
+
     div.innerHTML = `
       <div class="panel" style="margin-top:.5rem;border:1px solid var(--accent,#e8821e)">
         <h3>Enviar para o interveniente</h3>
-        <form id="cr-send-form" class="form-grid">
-          <div class="full">
-            <label>Comprovante de depósito (PDF ou imagem)${has ? '' : ' *'}</label>
-            <input type="file" name="comprovante" accept="application/pdf,image/*">
-            <small class="muted">${has
-              ? 'Já existe um comprovante anexado. Envie outro arquivo apenas se quiser substituí-lo.'
-              : 'Obrigatório: anexe o comprovante do depósito do valor a creditar para avançar.'}</small>
-          </div>
+        ${isManual ? `<div class="muted small" style="margin-bottom:.5rem">
+          Depósito necessário: <strong>${fmtMoney0(necessario)}</strong>${somaExistente > 0 ? ` · já anexado: <strong>${fmtMoney0(somaExistente)}</strong> · falta: <strong>${fmtMoney0(restante)}</strong>` : ''}
+        </div>` : ''}
+        <div class="form-grid">
+          <div class="full" id="cr-send-receipts"></div>
+          <div class="full" id="cr-send-err" style="display:none"></div>
           <div class="full form-actions">
             <button type="button" class="btn" id="cr-send-back">Voltar</button>
-            <button type="submit" class="btn primary">Enviar</button>
+            <button type="button" class="btn primary" id="cr-send-go" disabled>Enviar</button>
           </div>
-        </form>
+        </div>
       </div>`;
+    const editor = makeReceiptsEditor(document.getElementById('cr-send-receipts'), {
+      deposito: restante,
+      onChange: (ok) => { const b = document.getElementById('cr-send-go'); if (b) b.disabled = !ok; },
+    });
+    const showErr = (msg) => {
+      const e = document.getElementById('cr-send-err'); if (!e) return;
+      e.style.display = msg ? '' : 'none';
+      e.innerHTML = msg ? `<div style="padding:.6rem .8rem;border-radius:8px;background:rgba(220,50,50,.12);border:1px solid var(--red);color:var(--red);font-weight:600;font-size:14px">${UI.escapeHtml(msg)}</div>` : '';
+    };
     document.getElementById('cr-send-back').onclick = () => openDetail(r);
-    document.getElementById('cr-send-form').onsubmit = async ev => {
-      ev.preventDefault();
-      const fd = new FormData(ev.target);
-      const f = fd.get('comprovante');
-      if (!has && (!f || !f.name)) return UI.toast('Anexe o comprovante de depósito', 'err');
+    document.getElementById('cr-send-go').onclick = async () => {
+      showErr('');
+      const rc = editor.collect();
+      if (!rc.count) return showErr('Anexe pelo menos um comprovante de depósito.');
+      if (!rc.valid) return showErr(`A soma dos comprovantes (${fmtMoney0(rc.sum)}) deve cobrir o restante (${fmtMoney0(restante)}). Havendo data antiga, marque a confirmação.`);
+      const fd = new FormData();
+      rc.files.forEach(f => fd.append('comprovantes', f));
+      fd.append('valores', JSON.stringify(rc.valores));
+      fd.append('datas', JSON.stringify(rc.datas));
       try {
-        const resp = await fetch(`/api/credit-requests/${r.id}/send`, {
-          method: 'POST', credentials: 'include', body: fd,
-        });
-        if (!resp.ok) {
-          const j = await resp.json().catch(() => null);
-          throw new Error(j?.error || j?.message || `HTTP ${resp.status}`);
-        }
+        const resp = await fetch(`/api/credit-requests/${r.id}/send`, { method: 'POST', credentials: 'include', body: fd });
+        if (!resp.ok) { const j = await resp.json().catch(() => null); throw new Error(j?.error || j?.message || `HTTP ${resp.status}`); }
         UI.toast('Enviada'); UI.closeModal(); render();
-      } catch (e) { UI.toast(e.message, 'err'); }
+      } catch (e) { showErr(e.message); }
     };
   }
 

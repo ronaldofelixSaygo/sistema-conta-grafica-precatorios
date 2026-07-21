@@ -23,15 +23,23 @@ router.post('/ai/prompt/:id/activate',     requireAdmin, ctrl.activatePrompt);
 
 // Análise IA + simulação
 router.post('/analyze-pdf', upload.single('file'),       ctrl.analyzePdf);
+router.post('/analyze-receipt', upload.single('file'),   ctrl.analyzeReceipt);
 router.post('/simulate',                                 ctrl.simulate);
+
+const receiptUpload = upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'comprovante', maxCount: 1 },
+  { name: 'comprovantes', maxCount: 10 },
+]);
 
 // Credit requests
 router.get('/',                                          ctrl.list);
-// create aceita 'file' (PDF da invoice) e/ou 'comprovante' (depósito) no mesmo multipart
-router.post('/', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'comprovante', maxCount: 1 }]), ctrl.create);
+// create aceita 'file' (PDF da invoice) e N comprovantes de depósito
+router.post('/', receiptUpload, ctrl.create);
 router.get('/:id',                                       ctrl.get);
-// send aceita 'comprovante' opcional (anexa antes de enviar, se ainda não houver)
-router.post('/:id/send', upload.single('comprovante'),   ctrl.send);
+// send aceita 1..N comprovantes (anexa antes de enviar)
+router.post('/:id/send', receiptUpload,                  ctrl.send);
+router.get('/:id/receipts/:rid',                         ctrl.downloadReceiptItem);
 router.post('/:id/start',                                ctrl.start);
 router.post('/:id/resolve', upload.single('file'),       ctrl.resolve);
 router.post('/:id/cancel',                               ctrl.cancel);

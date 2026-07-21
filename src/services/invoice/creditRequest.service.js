@@ -8,6 +8,37 @@ import { calcularInvoice } from './taxCalculator.service.js';
 import * as email from '../email.service.js';
 import * as storage from '../storage.service.js';
 
+// Soma os valores declarados dos comprovantes.
+function sumReceipts(receipts) {
+  return (receipts || []).reduce((s, x) => s + (Number(x?.valor) || 0), 0);
+}
+
+// Persiste N comprovantes (S3 quando ligado, senão bytes inline) vinculados
+// à solicitação. Cada um guarda o valor declarado/confirmado.
+async function persistReceipts(creditRequestId, receipts) {
+  for (const rc of (receipts || [])) {
+    if (!rc?.buffer) continue;
+    let s3Key = null, bytes = null;
+    const name = rc.name || 'comprovante';
+    const mime = rc.mime || 'application/octet-stream';
+    if (storage.isEnabled()) {
+      const key = storage.buildKey('credit-requests', [creditRequestId, 'receipts'], name);
+      await storage.uploadBuffer({
+        key, buffer: rc.buffer, contentType: mime,
+        contentDisposition: `inline; filename="${encodeURIComponent(name)}"`,
+      });
+      s3Key = key;
+    } else {
+      bytes = rc.buffer;
+    }
+    let data = null;
+    if (rc.data) { const d = new Date(String(rc.data).slice(0, 10) + 'T00:00:00.000Z'); if (!isNaN(d.getTime())) data = d; }
+    await prisma.creditRequestReceipt.create({
+      data: { creditRequestId, filename: name, mimeType: mime, bytes, s3Key, valor: Number(rc.valor) || 0, data },
+    });
+  }
+}
+
 // Quem pode CRIAR solicitação: CLIENT (próprio) ou SAYGO/ADM (em nome de qualquer cliente)
 function ensureRequester(user) {
   if (!user) { const e = new Error('Não autenticado'); e.status = 401; throw e; }
@@ -84,6 +115,10 @@ const REQUEST_SELECT_NO_BYTES = {
   cliente: { select: { id: true, nome: true, escritorio: true } },
   requestedBy: { select: { id: true, name: true, email: true } },
   resolvedBy:  { select: { id: true, name: true } },
+  receipts: {
+    select: { id: true, filename: true, mimeType: true, valor: true, data: true, createdAt: true },
+    orderBy: { createdAt: 'asc' },
+  },
 };
 
 export async function getRequest(user, id) {
@@ -103,6 +138,22 @@ export async function getRequest(user, id) {
   return r;
 }
 
+// Download de um comprovante específico (novo modelo, N por solicitação).
+export async function getReceiptItem(user, id, receiptId, opts = {}) {
+  await getRequest(user, id); // valida permissão de acesso à solicitação
+  const rc = await prisma.creditRequestReceipt.findFirst({
+    where: { id: receiptId, creditRequestId: id },
+  });
+  if (!rc) { const e = new Error('Comprovante não encontrado'); e.status = 404; throw e; }
+  const inline = !opts.download;
+  if (rc.s3Key) {
+    const url = await storage.getDownloadUrl(rc.s3Key, { filename: rc.filename, inline });
+    return { redirectUrl: url };
+  }
+  if (!rc.bytes) { const e = new Error('Arquivo indisponível'); e.status = 404; throw e; }
+  return { bytes: rc.bytes, filename: rc.filename, mime: rc.mimeType || 'application/octet-stream', _inline: inline };
+}
+
 // Helper interno pra downloads — carrega só o byte que precisa.
 async function _loadBytes(id, field) {
   const r = await prisma.creditRequest.findUnique({
@@ -118,7 +169,7 @@ export function simulate(input) {
 
 // Cria DRAFT (cálculo + dados). Se autoSend=true, já envia (status SENT) na mesma operação.
 // Solicitante: CLIENT (sempre) ou SAYGO/ADM (em nome de um cliente)
-export async function createDraft(user, payload, pdfBuffer = null, pdfName = null, aiPromptVersion = null, receipt = null) {
+export async function createDraft(user, payload, pdfBuffer = null, pdfName = null, aiPromptVersion = null, receipts = []) {
   ensureRequester(user);
   const cli = await resolveCliente(user, payload.clienteId);
 
@@ -147,23 +198,24 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
     creditosACompar = result.creditos.al_nf;
   }
 
-  // REGRA DE NEGÓCIO: para avançar ao interveniente (autoSend), o cliente
-  // precisa anexar o comprovante de depósito.
-  const hasReceipt = !!(receipt && receipt.buffer);
-  if (autoSend && !hasReceipt) {
-    const e = new Error('Comprovante de depósito é obrigatório para enviar ao interveniente');
+  // Comprovantes de depósito (0..N). Para enviar (autoSend) exige ≥1.
+  const rcList = (receipts || []).filter(rc => rc && rc.buffer);
+  const hasReceipts = rcList.length > 0;
+  const depositoTotal = sumReceipts(rcList);
+  if (autoSend && !hasReceipts) {
+    const e = new Error('Anexe pelo menos um comprovante de depósito para enviar ao interveniente');
     e.status = 400; throw e;
   }
-  // Manual: o valor depositado (comprovante) precisa cobrir o depósito exigido.
-  if (autoSend && isManual &&
-      (result.valorDepositado == null || result.valorDepositado < result.depositoNecessario)) {
-    const e = new Error(`O comprovante deve ter valor igual ou maior que o depósito necessário (R$ ${result.depositoNecessario}).`);
+  // Manual: a soma dos comprovantes precisa cobrir o depósito exigido.
+  if (autoSend && isManual && depositoTotal < result.depositoNecessario) {
+    const e = new Error(`A soma dos comprovantes (R$ ${depositoTotal}) deve ser igual ou maior que o depósito necessário (R$ ${result.depositoNecessario}).`);
     e.status = 400; throw e;
   }
-  const receiptName = hasReceipt ? (receipt.name || 'comprovante') : null;
-  const receiptMime = hasReceipt ? (receipt.mime || 'application/octet-stream') : null;
-  // Quando S3 está ligado, sobe depois do create (precisa do id real). Sem S3, grava bytes inline.
-  const receiptBytesData = (hasReceipt && !storage.isEnabled()) ? receipt.buffer : null;
+  if (isManual && hasReceipts) result.valorDepositado = depositoTotal;
+  // Marcador legado (compat com telas/listagens antigas).
+  const receiptName = hasReceipts
+    ? (rcList.length === 1 ? (rcList[0].name || 'comprovante') : `${rcList.length} comprovante(s)`)
+    : null;
 
   // Sobe PDF de entrada pro S3 (se configurado). Senão, bytes inline.
   let inputPdfS3Key = null;
@@ -197,9 +249,7 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
       inputPdfBytes: inputPdfBytesData,
       inputPdfS3Key,
       paymentReceiptName: receiptName,
-      paymentReceiptMime: receiptMime,
-      paymentReceiptBytes: receiptBytesData,
-      paymentReceiptUploadedAt: hasReceipt ? new Date() : null,
+      paymentReceiptUploadedAt: hasReceipts ? new Date() : null,
       aiPromptVersion: aiPromptVersion ?? null,
     },
     select: {
@@ -210,15 +260,8 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
     },
   });
 
-  // Comprovante no S3 (precisa do id real). Sobe e grava a key.
-  if (hasReceipt && storage.isEnabled()) {
-    const key = storage.buildKey('credit-requests', [created.id, 'payment-receipt'], receiptName);
-    await storage.uploadBuffer({
-      key, buffer: receipt.buffer, contentType: receiptMime,
-      contentDisposition: `inline; filename="${encodeURIComponent(receiptName)}"`,
-    });
-    await prisma.creditRequest.update({ where: { id: created.id }, data: { paymentReceiptS3Key: key } });
-  }
+  // Grava os comprovantes (precisa do id real).
+  if (hasReceipts) await persistReceipts(created.id, rcList);
 
   // Notificação em background (não bloqueia a resposta)
   if (autoSend) {
@@ -232,7 +275,7 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
 }
 
 // Envia: DRAFT → SENT — apenas o solicitante (ou STAFF)
-export async function sendRequest(user, id, receipt = null) {
+export async function sendRequest(user, id, receipts = []) {
   const r = await getRequest(user, id);
   const isOwner = r.requestedById === user.id;
   const isStaff = user.role === 'ADM' || user.role === 'SAYGO';
@@ -244,28 +287,29 @@ export async function sendRequest(user, id, receipt = null) {
   const data = { status: 'SENT', sentAt: new Date() };
 
   // REGRA DE NEGÓCIO: não avança ao interveniente sem comprovante de depósito.
-  // Aceita o comprovante anexado agora (receipt) ou um já existente na solicitação.
-  const hasReceipt = !!(receipt && receipt.buffer);
-  if (!r.paymentReceiptName && !hasReceipt) {
-    const e = new Error('Comprovante de depósito é obrigatório para enviar ao interveniente');
+  const rcList = (receipts || []).filter(rc => rc && rc.buffer);
+  const existing = Array.isArray(r.receipts) ? r.receipts : [];
+  const hasAny = rcList.length > 0 || existing.length > 0 || !!r.paymentReceiptName;
+  if (!hasAny) {
+    const e = new Error('Anexe pelo menos um comprovante de depósito para enviar ao interveniente');
     e.status = 400; throw e;
   }
-  if (hasReceipt) {
-    const name = receipt.name || 'comprovante';
-    const mime = receipt.mime || 'application/octet-stream';
-    data.paymentReceiptName = name;
-    data.paymentReceiptMime = mime;
-    data.paymentReceiptUploadedAt = new Date();
-    if (storage.isEnabled()) {
-      const key = storage.buildKey('credit-requests', [id, 'payment-receipt'], name);
-      await storage.uploadBuffer({
-        key, buffer: receipt.buffer, contentType: mime,
-        contentDisposition: `inline; filename="${encodeURIComponent(name)}"`,
-      });
-      data.paymentReceiptS3Key = key;
-    } else {
-      data.paymentReceiptBytes = receipt.buffer;
+  // Manual: a soma (existentes + novos) precisa cobrir o depósito exigido.
+  const isManual = !!(r.result && r.result.manual);
+  if (isManual) {
+    const necessario = Number(r.result.depositoNecessario || 0);
+    const totalExistente = existing.reduce((s, x) => s + (Number(x.valor) || 0), 0);
+    const total = totalExistente + sumReceipts(rcList);
+    if (total < necessario) {
+      const e = new Error(`A soma dos comprovantes (R$ ${total}) deve ser igual ou maior que o depósito necessário (R$ ${necessario}).`);
+      e.status = 400; throw e;
     }
+  }
+  if (rcList.length) {
+    await persistReceipts(id, rcList);
+    const count = existing.length + rcList.length;
+    data.paymentReceiptName = count === 1 ? (rcList[0].name || 'comprovante') : `${count} comprovante(s)`;
+    data.paymentReceiptUploadedAt = new Date();
   }
 
   const updated = await prisma.creditRequest.update({
