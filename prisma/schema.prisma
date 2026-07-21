@@ -12,6 +12,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─── SLA: feriados e expediente (dias úteis) ─────────────────────────
+// Usados no cálculo de prazo das etapas do Kanban em horário comercial,
+// ignorando sábados, domingos e feriados cadastrados.
+model Feriado {
+  id         Int      @id @default(autoincrement())
+  data       DateTime @db.Date          // data do feriado (ano ignorado quando recorrente)
+  nome       String
+  uf         String?                    // opcional: escopo estadual/municipal
+  recorrente Boolean  @default(false)   // repete todo ano no mesmo dia/mês
+  createdAt  DateTime @default(now())
+
+  @@map("feriados")
+}
+
+// Singleton (id=1) com a janela de expediente considerada no SLA.
+model SlaConfig {
+  id         Int      @id @default(1)
+  horaInicio Int      @default(8)       // início do expediente (hora cheia, 0-23)
+  horaFim    Int      @default(18)      // fim do expediente (hora cheia, 1-24)
+  updatedAt  DateTime @updatedAt
+
+  @@map("sla_config")
+}
+
 // ─── Roles ───────────────────────────────────────────────────────────
 enum Role {
   ADM       // Administrador: enxerga e edita tudo (incl. usuários, audit)

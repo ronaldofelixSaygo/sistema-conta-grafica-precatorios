@@ -578,9 +578,8 @@ window.VIEW_kanban = (() => {
     const statusColor = sp.status === 'COMPLETED' ? 'var(--green)'
                       : sp.status === 'IN_PROGRESS' ? 'var(--amber)'
                       : sp.status === 'BLOCKED' ? 'var(--red)' : 'var(--t3)';
-    const slaDeadline = sp.startedAt
-      ? new Date(new Date(sp.startedAt).getTime() + sp.slaHours * 3600_000)
-      : null;
+    // Prazo previsto vem calculado do backend (horário comercial / dias úteis).
+    const slaDeadline = sp.slaDeadline ? new Date(sp.slaDeadline) : null;
     const overdue = slaDeadline && sp.status !== 'COMPLETED' && slaDeadline < new Date();
     const isStaff = AUTH.isStaff();
 

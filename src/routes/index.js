@@ -19,6 +19,7 @@ import creditRequests from './creditRequest.routes.js';
 import ncm from './ncm.routes.js';
 import partnerKinds from './partnerKind.routes.js';
 import desoneracoes from './desoneracoes.routes.js';
+import sla from './sla.routes.js';
 
 const router = Router();
 
@@ -44,5 +45,6 @@ router.use('/credit-requests', creditRequests);
 router.use('/ncm',             ncm);
 router.use('/partner-kinds',   partnerKinds);
 router.use('/desoneracoes',    desoneracoes);
+router.use('/sla',             sla);
 
 export default router;

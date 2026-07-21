@@ -3,7 +3,7 @@ window.VIEW_parametros = (() => {
   let stages = [];
   // Persiste a aba selecionada entre re-renders e re-aberturas de tela
   const TAB_STORAGE_KEY = 'vision.parametros.activeTab';
-  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'desoneracoes', 'sla', 'email', 'ia', 'ncm', 'storage'];
+  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'desoneracoes', 'sla', 'feriados', 'email', 'ia', 'ncm', 'storage'];
   let activeTab = (() => {
     try {
       const v = localStorage.getItem(TAB_STORAGE_KEY);
@@ -51,6 +51,7 @@ window.VIEW_parametros = (() => {
         <button class="btn ${activeTab==='tipos'?'primary':''}"       data-tab="tipos">Tipos de Interveniente</button>
         <button class="btn ${activeTab==='desoneracoes'?'primary':''}" data-tab="desoneracoes">Docs Desonerações</button>
         <button class="btn ${activeTab==='sla'?'primary':''}"         data-tab="sla">SLA</button>
+        <button class="btn ${activeTab==='feriados'?'primary':''}"    data-tab="feriados">Feriados & Expediente</button>
         <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail</button>
         <button class="btn ${activeTab==='ia'?'primary':''}"          data-tab="ia">IA (extração de invoice)</button>
         <button class="btn ${activeTab==='ncm'?'primary':''}"         data-tab="ncm">NCM / Anuentes</button>
@@ -62,6 +63,7 @@ window.VIEW_parametros = (() => {
     if (activeTab === 'tipos')      return loadKinds();
     if (activeTab === 'desoneracoes') return loadDesonConfig();
     if (activeTab === 'sla')        return loadSlaConfig();
+    if (activeTab === 'feriados')   return loadFeriados();
     if (activeTab === 'email')      return loadEmail();
     if (activeTab === 'ia')         return loadIa();
     if (activeTab === 'ncm')        return loadNcm();
@@ -479,6 +481,91 @@ window.VIEW_parametros = (() => {
         UI.toast('SLA de Crédito salvo');
       } catch (e) { UI.toast(e.message, 'err'); }
     };
+  }
+
+  // ===== Feriados & Expediente (SLA em dias úteis) =====
+  async function loadFeriados() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = '<div class="muted">Carregando…</div>';
+    let cfg, feriados;
+    try {
+      [cfg, feriados] = await Promise.all([
+        API.get('/api/sla/config'),
+        API.get('/api/sla/feriados'),
+      ]);
+    } catch (e) { c.innerHTML = `<div class="err">${UI.escapeHtml(e.message)}</div>`; return; }
+
+    const fmtData = (d, rec) => {
+      const dt = new Date(d);
+      return rec
+        ? dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' }) + ' (todo ano)'
+        : dt.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+    };
+
+    c.innerHTML = `
+      <div class="panel">
+        <h3>🕐 Expediente (dias úteis)</h3>
+        <p class="muted small" style="margin-bottom:.8rem">
+          Janela usada no cálculo de SLA das etapas do Kanban. O prazo conta apenas
+          horas dentro do expediente, de segunda a sexta, pulando os feriados abaixo.
+        </p>
+        <form id="form-exped" class="form-grid">
+          <div><label>Início</label><input type="number" min="0" max="23" name="horaInicio" value="${cfg.horaInicio}" style="max-width:120px"> <span class="muted small">h</span></div>
+          <div><label>Fim</label><input type="number" min="1" max="24" name="horaFim" value="${cfg.horaFim}" style="max-width:120px"> <span class="muted small">h</span></div>
+          <div class="full form-actions" style="justify-content:flex-end">
+            <button type="submit" class="btn primary">Salvar expediente</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin:0 0 .8rem">📅 Feriados</h3>
+        <form id="form-feriado" class="form-grid" style="margin-bottom:1rem">
+          <div><label>Data</label><input type="date" name="data" required></div>
+          <div><label>Nome</label><input name="nome" required placeholder="Ex.: Natal"></div>
+          <div><label>UF (opcional)</label><input name="uf" maxlength="2" placeholder="AL" style="max-width:100px;text-transform:uppercase"></div>
+          <div><label style="display:flex;align-items:center;gap:.4rem;margin-top:1.4rem"><input type="checkbox" name="recorrente"> Repete todo ano</label></div>
+          <div class="full form-actions" style="justify-content:flex-end">
+            <button type="submit" class="btn primary">+ Adicionar feriado</button>
+          </div>
+        </form>
+        <table class="table">
+          <thead><tr><th>Data</th><th>Nome</th><th>UF</th><th></th></tr></thead>
+          <tbody>${feriados.length ? feriados.map(f => `
+            <tr>
+              <td>${fmtData(f.data, f.recorrente)}</td>
+              <td>${UI.escapeHtml(f.nome)}</td>
+              <td>${UI.escapeHtml(f.uf || '—')}</td>
+              <td><button class="btn small danger" data-del="${f.id}">x</button></td>
+            </tr>`).join('') : '<tr><td colspan="4" class="muted small" style="padding:1rem">Nenhum feriado cadastrado.</td></tr>'}
+          </tbody>
+        </table>
+      </div>`;
+
+    document.getElementById('form-exped').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        await API.put('/api/sla/config', { horaInicio: Number(fd.get('horaInicio')), horaFim: Number(fd.get('horaFim')) });
+        UI.toast('Expediente salvo');
+      } catch (e) { UI.toast(e.message, 'err'); }
+    };
+    document.getElementById('form-feriado').onsubmit = async ev => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        await API.post('/api/sla/feriados', {
+          data: fd.get('data'), nome: fd.get('nome'),
+          uf: fd.get('uf'), recorrente: !!fd.get('recorrente'),
+        });
+        UI.toast('Feriado adicionado'); loadFeriados();
+      } catch (e) { UI.toast(e.message, 'err'); }
+    };
+    c.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('Excluir feriado?')) return;
+      try { await API.del(`/api/sla/feriados/${b.dataset.del}`); UI.toast('Excluído'); loadFeriados(); }
+      catch (e) { UI.toast(e.message, 'err'); }
+    });
   }
 
   // ===== Storage (uso de espaço no banco) =====

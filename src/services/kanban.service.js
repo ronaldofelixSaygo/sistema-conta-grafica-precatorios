@@ -4,6 +4,19 @@ import { MAX_UPLOAD_BYTES } from '../utils/kanban.constants.js';
 import * as stageDef from './stageDef.service.js';
 import * as email from './email.service.js';
 import * as storage from './storage.service.js';
+import { computeBusinessDeadline, getSlaContext } from './sla.service.js';
+
+// Decora uma stageProgress com o prazo previsto (em horário comercial/dias
+// úteis) e as horas realizadas (tempo corrido, informativo).
+function decorateStage(s, ctx) {
+  return {
+    ...s,
+    slaDeadline: s.startedAt ? computeBusinessDeadline(new Date(s.startedAt), s.slaHours, ctx) : null,
+    realizedHours: s.startedAt && s.completedAt
+      ? Math.round((new Date(s.completedAt) - new Date(s.startedAt)) / 36e5 * 10) / 10
+      : null,
+  };
+}
 
 // Atualiza campos de status do Cliente quando uma etapa é concluída.
 // O mapeamento é por LABEL da etapa (case-insensitive) pra ser robusto a mudanças de key.
@@ -108,6 +121,7 @@ export async function listCards(user) {
     },
     orderBy: { startedAt: 'desc' },
   });
+  const ctx = await getSlaContext();
   return cards.map(c => ({
     id: c.id,
     clienteId: c.clienteId,
@@ -118,13 +132,7 @@ export async function listCards(user) {
     completedAt: c.completedAt,
     notes: c.notes,
     attachments: c._count.attachments,
-    stages: c.stages.map(s => ({
-      ...s,
-      slaDeadline: s.startedAt ? new Date(new Date(s.startedAt).getTime() + s.slaHours * 3600_000) : null,
-      realizedHours: s.startedAt && s.completedAt
-        ? Math.round((new Date(s.completedAt) - new Date(s.startedAt)) / 36e5 * 10) / 10
-        : null,
-    })),
+    stages: c.stages.map(s => decorateStage(s, ctx)),
   }));
 }
 
@@ -176,7 +184,8 @@ export async function getCard(user, cardId) {
     },
   });
   if (!card) { const e = new Error('Card nao encontrado'); e.status = 404; throw e; }
-  return card;
+  const ctx = await getSlaContext();
+  return { ...card, stages: card.stages.map(s => decorateStage(s, ctx)) };
 }
 
 export async function updateStage(user, cardId, stage, payload) {
