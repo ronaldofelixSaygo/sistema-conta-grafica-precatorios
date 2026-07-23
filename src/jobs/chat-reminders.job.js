@@ -40,7 +40,7 @@ async function tick() {
       },
       include: {
         from: { select: { id: true, name: true, email: true } },
-        to:   { select: { id: true, name: true, email: true, active: true } },
+        to:   { select: { id: true, name: true, email: true, active: true, receberEmails: true } },
       },
       take: 50, // limite por tick pra não estourar
       orderBy: { createdAt: 'asc' },

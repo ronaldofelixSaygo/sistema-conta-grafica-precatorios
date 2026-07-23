@@ -77,7 +77,7 @@ export function bindChatSockets(io) {
             });
             if (!m || m.readAt) return; // já leu — não notifica
             const to = await prisma.user.findUnique({
-              where: { id: toUserId }, select: { id: true, email: true, name: true, active: true },
+              where: { id: toUserId }, select: { id: true, email: true, name: true, active: true, receberEmails: true },
             });
             if (!to?.active || !to.email) return;
             await email.notifyChatMessage({

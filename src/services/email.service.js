@@ -520,6 +520,8 @@ export async function notifyDesoneracaoStepAdvance({ desoneracaoId, fromStep, to
 export async function notifyChatMessage({ messageId, fromUser, toUser, content }) {
   try {
     if (!toUser?.email) return;
+    // Preferência do destinatário: se optou por não receber e-mails, não envia.
+    if (toUser.receberEmails === false) { console.warn('[email] notifyChatMessage skip: destinatário não recebe e-mails'); return; }
     const s = await getSettings();
     if (!s.enabled) { console.warn('[email] notifyChatMessage skip: email desabilitado'); return; }
     if (s.notifyChat === false) { console.warn('[email] notifyChatMessage skip: trigger desativado'); return; }

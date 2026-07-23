@@ -96,6 +96,7 @@ window.VIEW_usuarios = (() => {
         </div>
 
         <div class="full"><label><input type="checkbox" name="active" ${u.active!==false?'checked':''}> Ativo</label></div>
+        <div class="full"><label><input type="checkbox" name="receberEmails" ${u.receberEmails!==false?'checked':''}> Receber e-mails de alerta (ex.: mensagens de chat)</label></div>
         <div class="full form-actions">
           <button type="button" class="btn" id="us-cancel">Cancelar</button>
           <button type="submit" class="btn primary">Salvar</button>
@@ -125,6 +126,7 @@ window.VIEW_usuarios = (() => {
       const fd = new FormData(form);
       const data = Object.fromEntries(fd.entries());
       data.active = !!fd.get('active');
+      data.receberEmails = !!fd.get('receberEmails');
       if (!data.password) delete data.password;
       // Garantia client-side: limpa vínculos que não fazem sentido pro role
       if (data.role !== 'PARTNER') { data.parceiroId = ''; data.officeName = ''; }

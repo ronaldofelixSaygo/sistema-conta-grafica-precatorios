@@ -52,6 +52,8 @@ model User {
   name         String
   // Apelido/identificação curta exibida no chat como "NOME - APELIDO"
   apelido      String?
+  // Se false, o usuário não recebe e-mails de alerta (ex.: mensagens de chat)
+  receberEmails Boolean  @default(true)
   role         Role      @default(CLIENT)
 
   // Para PARTNER: nome do escritório (deve bater com Cliente.escritorio)
