@@ -212,6 +212,20 @@ export async function createDraft(user, payload, pdfBuffer = null, pdfName = nul
     e.status = 400; throw e;
   }
   if (isManual && hasReceipts) result.valorDepositado = depositoTotal;
+  // Invoice/PDF: depósito = % do cliente sobre o crédito adquirido (+10% arredondado).
+  if (autoSend && !isManual) {
+    const pctInv = Number(cli.percentualDeposito ?? 30);
+    const adquirido = Math.ceil((creditosACompar * 1.10) / 1000) * 1000;
+    const depInv = Math.round(adquirido * pctInv / 100 * 100) / 100;
+    if (depositoTotal < depInv) {
+      const e = new Error(`A soma dos comprovantes (R$ ${depositoTotal}) deve ser igual ou maior que o depósito necessário (R$ ${depInv}).`);
+      e.status = 400; throw e;
+    }
+    result.percentualDeposito = pctInv;
+    result.creditoAdquirido = adquirido;
+    result.depositoNecessario = depInv;
+    result.valorDepositado = depositoTotal;
+  }
   // Marcador legado (compat com telas/listagens antigas).
   const receiptName = hasReceipts
     ? (rcList.length === 1 ? (rcList[0].name || 'comprovante') : `${rcList.length} comprovante(s)`)
@@ -354,16 +368,22 @@ export async function sendRequest(user, id, receipts = []) {
     const e = new Error('Anexe pelo menos um comprovante de depósito para enviar ao interveniente');
     e.status = 400; throw e;
   }
-  // Manual: a soma (existentes + novos) precisa cobrir o depósito exigido.
+  // A soma (existentes + novos) precisa cobrir o depósito exigido.
   const isManual = !!(r.result && r.result.manual);
+  const totalExistente = existing.reduce((s, x) => s + (Number(x.valor) || 0), 0);
+  const totalDep = totalExistente + sumReceipts(rcList);
+  let depNecessario;
   if (isManual) {
-    const necessario = Number(r.result.depositoNecessario || 0);
-    const totalExistente = existing.reduce((s, x) => s + (Number(x.valor) || 0), 0);
-    const total = totalExistente + sumReceipts(rcList);
-    if (total < necessario) {
-      const e = new Error(`A soma dos comprovantes (R$ ${total}) deve ser igual ou maior que o depósito necessário (R$ ${necessario}).`);
-      e.status = 400; throw e;
-    }
+    depNecessario = Number(r.result.depositoNecessario || 0);
+  } else {
+    const cli = await prisma.cliente.findUnique({ where: { id: r.clienteId } });
+    const pctInv = Number(cli?.percentualDeposito ?? 30);
+    const adquirido = Math.ceil(((r.creditosACompar || 0) * 1.10) / 1000) * 1000;
+    depNecessario = Math.round(adquirido * pctInv / 100 * 100) / 100;
+  }
+  if (totalDep < depNecessario) {
+    const e = new Error(`A soma dos comprovantes (R$ ${totalDep}) deve ser igual ou maior que o depósito necessário (R$ ${depNecessario}).`);
+    e.status = 400; throw e;
   }
   if (rcList.length) {
     await persistReceipts(id, rcList);
@@ -372,9 +392,9 @@ export async function sendRequest(user, id, receipts = []) {
     data.paymentReceiptUploadedAt = new Date();
   }
   // Mantém o total depositado coerente com a soma real dos comprovantes.
-  if (isManual) {
+  {
     const agg = await prisma.creditRequestReceipt.aggregate({ where: { creditRequestId: id }, _sum: { valor: true } });
-    data.result = { ...r.result, valorDepositado: agg._sum.valor || 0 };
+    data.result = { ...r.result, valorDepositado: agg._sum.valor || 0, depositoNecessario: depNecessario };
   }
 
   const updated = await prisma.creditRequest.update({

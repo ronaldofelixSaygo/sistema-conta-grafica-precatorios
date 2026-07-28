@@ -533,54 +533,67 @@ window['VIEW_credit-requests'] = (() => {
       showSendConfirm();
     };
 
-    // Mostra o passo de upload do comprovante de depósito (obrigatório p/ enviar).
-    function showSendConfirm() {
+    // Passo de envio: calcula o depósito, monta o editor de comprovantes com
+    // validação de soma e checagem de pagador (igual à entrada manual).
+    async function showSendConfirm() {
       const box = document.getElementById('cr-result');
+      box.innerHTML = '<div class="muted" style="margin-top:.6rem">Calculando depósito…</div>';
+      let necessario = 0;
+      try { const sim = await API.post('/api/credit-requests/simulate', { inputs: buildInputs() }); necessario = sim?.total?.icms_al_nf || 0; } catch {}
+      const cli = clientesCache.find(c => c.id === Number(form.clienteId.value || 0));
+      const pct = Number(cli?.percentualDeposito ?? 30);
+      const adquirido = ceilTo1000(necessario * 1.10);
+      const deposito = Math.round(adquirido * pct / 100 * 100) / 100;
       box.innerHTML = `
         <div class="panel" style="margin-top:.6rem;border:1px solid var(--accent,#e8821e)">
-          <h3>Comprovante de depósito</h3>
-          <p class="muted small" style="margin:.2rem 0 .6rem">
-            Para avançar para o interveniente, anexe o comprovante do depósito do valor
-            que deseja incluir como crédito na conta gráfica.
-          </p>
-          <div class="full">
-            <label>Comprovante (PDF ou imagem) *</label>
-            <input type="file" id="cr-comprovante" accept="application/pdf,image/*">
+          <h3>Enviar para o interveniente</h3>
+          <div class="muted small" style="margin-bottom:.5rem">
+            Crédito a adquirir: <strong>${fmtMoney0(adquirido)}</strong> · Depósito necessário (${pct}%): <strong>${UI.fmtMoney(deposito)}</strong>
           </div>
+          <div id="inv-receipts"></div>
+          <div id="inv-err" style="display:none"></div>
           <div class="form-actions" style="margin-top:.6rem">
             <button type="button" class="btn" id="cr-send-cancel">Voltar</button>
-            <button type="button" class="btn primary" id="cr-send-confirm">Confirmar e enviar</button>
+            <button type="button" class="btn primary" id="cr-send-confirm" disabled>Confirmar e enviar</button>
           </div>
         </div>`;
       box.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      const editor = makeReceiptsEditor(document.getElementById('inv-receipts'), {
+        deposito, clienteNome: cli?.nome || '',
+        onChange: (ok) => { const b = document.getElementById('cr-send-confirm'); if (b) b.disabled = !ok; },
+      });
+      const showErr = (msg) => {
+        const e = document.getElementById('inv-err'); if (!e) return;
+        e.style.display = msg ? '' : 'none';
+        e.innerHTML = msg ? `<div style="padding:.6rem .8rem;border-radius:8px;background:rgba(220,50,50,.12);border:1px solid var(--red);color:var(--red);font-weight:600;font-size:14px">${UI.escapeHtml(msg)}</div>` : '';
+      };
       document.getElementById('cr-send-cancel').onclick = () => { box.innerHTML = ''; };
-      document.getElementById('cr-send-confirm').onclick = doSend;
+      document.getElementById('cr-send-confirm').onclick = () => doSend(editor, deposito, showErr);
     }
 
-    async function doSend() {
-      const file = document.getElementById('cr-comprovante')?.files?.[0];
-      if (!file) return UI.toast('Anexe o comprovante de depósito', 'err');
-      const btn = document.getElementById('cr-send-confirm');
+    async function doSend(editor, deposito, showErr) {
+      showErr('');
+      const rc = editor.collect();
+      if (rc.mismatch) return showErr('Há comprovante cujo pagador não corresponde ao cliente selecionado. Remova-o para continuar.');
+      if (!rc.count) return showErr('Anexe pelo menos um comprovante de depósito.');
+      if (!rc.valid) return showErr(`A soma dos comprovantes (${fmtMoney0(rc.sum)}) deve ser igual ou maior que o depósito necessário (${fmtMoney0(deposito)}). Havendo data antiga, marque a confirmação.`);
       readGruposFromTable();
+      const btn = document.getElementById('cr-send-confirm');
       const fd = new FormData();
       fd.append('clienteId', form.clienteId.value);
       fd.append('modalidade', form.modalidade.value);
       fd.append('message', form.message.value || '');
       fd.append('inputs', JSON.stringify(buildInputs()));
       fd.append('autoSend', 'true');
-      fd.append('comprovante', file);
+      rc.files.forEach(f => fd.append('comprovantes', f));
+      fd.append('valores', JSON.stringify(rc.valores));
+      fd.append('datas', JSON.stringify(rc.datas));
       try {
         if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
         const resp = await fetch('/api/credit-requests', { method: 'POST', credentials: 'include', body: fd });
-        if (!resp.ok) {
-          const j = await resp.json().catch(() => null);
-          throw new Error(j?.error || j?.message || `HTTP ${resp.status}`);
-        }
+        if (!resp.ok) { const j = await resp.json().catch(() => null); throw new Error(j?.error || j?.message || `HTTP ${resp.status}`); }
         UI.toast('Solicitação enviada para o interveniente'); UI.closeModal(); render();
-      } catch (e) {
-        UI.toast(e.message, 'err');
-        if (btn) { btn.disabled = false; btn.textContent = 'Confirmar e enviar'; }
-      }
+      } catch (e) { showErr(e.message); if (btn) { btn.disabled = false; btn.textContent = 'Confirmar e enviar'; } }
     }
   }
 
@@ -788,7 +801,7 @@ window['VIEW_credit-requests'] = (() => {
     const margem = Math.max(0, adquirido - necessario);
     const cliId = Number(document.querySelector('select[name="clienteId"]')?.value || 0);
     const pct = Number(clientesCache.find(c => c.id === cliId)?.percentualDeposito ?? 30);
-    const deposito = ceilTo1000(adquirido * pct / 100);
+    const deposito = Math.round(adquirido * pct / 100 * 100) / 100;
 
     out.innerHTML = `
       <div class="panel" style="margin-top:1rem">
@@ -931,7 +944,7 @@ window['VIEW_credit-requests'] = (() => {
     const _adq = ceilTo1000(_nec * 1.10);
     const _marg = Math.max(0, _adq - _nec);
     const _pctDep = Number(clientesCache.find(c => c.id === r.clienteId)?.percentualDeposito ?? result.percentualDeposito ?? 30);
-    const _dep = ceilTo1000(_adq * _pctDep / 100);
+    const _dep = Math.round(_adq * _pctDep / 100 * 100) / 100;
 
     const ncmRows = (result.porNcm || []).map(g => {
       const b = g.breakdown||{}, c = g.cenarios||{};
