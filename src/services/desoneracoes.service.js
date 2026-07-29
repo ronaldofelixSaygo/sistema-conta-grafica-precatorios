@@ -14,6 +14,7 @@
 import { prisma } from '../config/prisma.js';
 import * as storage from './storage.service.js';
 import * as email from './email.service.js';
+import * as invoiceAi from './invoice/invoiceAi.service.js';
 
 // Defaults da config de responsáveis por etapa (semeadas no boot).
 const STEP_CONFIG_DEFAULTS = [
@@ -569,12 +570,26 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
     e.status = 400; throw e;
   }
 
-  // EMISSAO_DMI: precisa preencher valor ICMS desonerado antes de avançar.
+  // EMISSAO_DMI: o valor do ICMS é LIDO automaticamente da DMI anexada
+  // (campo "ICMS Comp. C/Gráfica"). Não é mais informado manualmente pelo parceiro.
+  // Se a leitura falhar, o processo segue e o valor pode ser informado na aprovação.
   if (etapaAtual === 'EMISSAO_DMI') {
-    if (!cur.valorIcmsDesonerado || cur.valorIcmsDesonerado <= 0) {
-      const e = new Error('Informe o Valor ICMS a desonerar (vem da DMI devolvida pelo escritório) antes de avançar');
-      e.status = 400; throw e;
-    }
+    try {
+      const dmiDoc = await prisma.desoneracaoDocumento.findFirst({
+        where: { desoneracaoId: id, tipo: 'DMI' }, orderBy: { createdAt: 'desc' },
+      });
+      if (dmiDoc) {
+        let buf = null;
+        if (dmiDoc.s3Key) { try { buf = await storage.downloadBuffer(dmiDoc.s3Key); } catch {} }
+        else if (dmiDoc.bytes) buf = Buffer.from(dmiDoc.bytes);
+        if (buf) {
+          const val = await invoiceAi.analyzeDmiIcms(buf, dmiDoc.mime);
+          if (val && val > 0) {
+            await prisma.desoneracao.update({ where: { id }, data: { valorIcmsDesonerado: val } });
+          }
+        }
+      }
+    } catch (e) { console.warn('[desoneracoes] extração ICMS da DMI falhou:', e.message); }
   }
   // EMISSAO_NF: cliente precisa de pelo menos 1 entrada + 1 saída anexadas,
   // e NENHUMA NF pode estar marcada como rejeitada (cliente deve excluir e
@@ -670,7 +685,7 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
 // Aprovação final: gera Movimentação e marca status CONCLUIDA.
 // Permitida pra STAFF (ADM/SAYGO) ou pro CLIENTE dono do processo.
 // Parceiro/despachante NÃO aprova — ele só conclui as etapas.
-export async function approveAndCreateMovimentacao(user, id) {
+export async function approveAndCreateMovimentacao(user, id, { valorIcmsManual } = {}) {
   const d = await prisma.desoneracao.findUnique({
     where: { id },
     include: { cliente: true, steps: { include: { parceiro: true } } },
@@ -686,8 +701,17 @@ export async function approveAndCreateMovimentacao(user, id) {
     const e = new Error('Só é possível aprovar quando status = AGUARDANDO_APROVACAO'); e.status = 400; throw e;
   }
   if (!d.duimpDi) { const e = new Error('DUIMP/DI é obrigatório pra criar a movimentação'); e.status = 400; throw e; }
+  // Valor do ICMS: normalmente já foi lido da DMI. Plano B: se não houver,
+  // aceita um valor informado manualmente na aprovação (não trava o processo).
   if (!d.valorIcmsDesonerado || d.valorIcmsDesonerado <= 0) {
-    const e = new Error('Valor ICMS desonerado obrigatório'); e.status = 400; throw e;
+    if (valorIcmsManual != null && Number(valorIcmsManual) > 0) {
+      const v = Math.round(Number(valorIcmsManual) * 100) / 100;
+      await prisma.desoneracao.update({ where: { id }, data: { valorIcmsDesonerado: v } });
+      d.valorIcmsDesonerado = v;
+    } else {
+      const e = new Error('Não foi possível ler o "ICMS Comp. C/Gráfica" da DMI. Informe o valor manualmente para concluir.');
+      e.status = 400; throw e;
+    }
   }
   const protocoloStep = d.steps.find(s => s.etapa === 'PROTOCOLO_ICMS');
   const parceiroNome = protocoloStep?.parceiro?.nome || d.cliente.escritorio || 'Saygo';

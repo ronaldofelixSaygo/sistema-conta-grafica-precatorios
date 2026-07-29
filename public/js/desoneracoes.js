@@ -162,7 +162,7 @@ window.VIEW_desoneracoes = (() => {
         <div><label>Nº Processo *</label><input name="numeroProcesso" placeholder="número de controle do cliente" required></div>
         <div><label>Valor mercadoria (R$)</label><input type="number" step="0.01" name="valorMercadoria" placeholder="opcional"></div>
         <div class="full muted small" style="border-top:1px solid var(--bd);padding-top:.4rem;margin-top:.2rem">
-          ℹ O <strong>valor do ICMS a desonerar</strong> é preenchido na etapa <strong>Emissão DMI</strong>, quando o escritório devolve a DMI com o valor calculado.
+          ℹ O <strong>valor do ICMS a desonerar</strong> é lido automaticamente da <strong>DMI</strong> anexada na etapa <strong>Emissão DMI</strong> (campo "ICMS Comp. C/Gráfica"). Se a leitura falhar, é possível informá-lo na aprovação.
         </div>
         <div class="full form-actions">
           <button type="button" class="btn" id="des-cancel">Cancelar</button>
@@ -315,8 +315,15 @@ window.VIEW_desoneracoes = (() => {
         <table class="table"><tbody>
           <tr><td>Cliente</td><td>${UI.escapeHtml(d.cliente?.nome)}</td></tr>
           <tr><td>DUIMP/DI</td><td>${UI.escapeHtml(d.duimpDi || '—')}</td></tr>
-          <tr><td>Valor ICMS desonerado</td><td class="num">${UI.fmtMoney(d.valorIcmsDesonerado)}</td></tr>
+          <tr><td>Valor ICMS desonerado <span class="muted small">(lido da DMI)</span></td><td class="num">${
+            (d.valorIcmsDesonerado && d.valorIcmsDesonerado > 0)
+              ? UI.fmtMoney(d.valorIcmsDesonerado)
+              : (canApprove
+                  ? `<input id="des-icms-manual" type="number" step="0.01" min="0" placeholder="não lido — informe" style="width:200px;padding:6px 8px;background:var(--s1);border:1px solid var(--bd2);border-radius:6px">`
+                  : '—')
+          }</td></tr>
         </tbody></table>
+        ${(!d.valorIcmsDesonerado || d.valorIcmsDesonerado <= 0) ? '<div class="muted small" style="color:var(--amber)">⚠ Não foi possível ler o "ICMS Comp. C/Gráfica" da DMI. Informe o valor manualmente para concluir.</div>' : ''}
         ${(canApprove || canCancel) ? `
           <div class="form-actions" style="margin-top:.6rem">
             ${canCancel ? '<button class="btn danger" id="des-cancel-btn">Cancelar desoneração</button>' : ''}
@@ -328,18 +335,9 @@ window.VIEW_desoneracoes = (() => {
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
     const podeAvancar = !!cur?.podeAtuar;
     const respLabel = renderRespLabel(d, cur);
-    // Painel especial: na etapa EMISSAO_DMI o responsável preenche o valor ICMS desonerado.
-    const isEtapaDmi = d.currentStep === 'EMISSAO_DMI';
     return `<div class="panel">
       <h3>Etapa atual: ${STEP_LABELS[d.currentStep]}</h3>
       <div class="muted small" style="margin:.3rem 0">Responsável: <strong>${respLabel || '—'}</strong></div>
-      ${isEtapaDmi ? `
-        <div style="background:var(--s2);padding:.6rem .8rem;border-radius:6px;margin:.5rem 0">
-          <label style="font-size:11px;text-transform:uppercase;color:var(--t3)">Valor ICMS a desonerar (R$) — vem da DMI devolvida pelo escritório</label>
-          <input id="des-valor-icms" type="number" step="0.01" min="0" value="${d.valorIcmsDesonerado ?? ''}" style="width:100%;padding:8px 10px;background:var(--s1);border:1px solid var(--bd2);border-radius:6px" ${podeAvancar?'':'readonly'}>
-          <div class="muted small" style="margin-top:.3rem">Obrigatório pra avançar dessa etapa. Será usado pra criar a movimentação no extrato do cliente ao concluir.</div>
-        </div>
-      ` : ''}
       ${isStaff ? `
         <div style="display:flex;gap:.6rem;align-items:center;margin:.5rem 0">
           <label class="muted small">Trocar parceiro:</label>
@@ -642,14 +640,8 @@ window.VIEW_desoneracoes = (() => {
     // Avançar etapa
     document.getElementById('des-advance-btn')?.addEventListener('click', async () => {
       const parc = document.getElementById('step-parc')?.value || null;
-      // Se está na etapa DMI, salva o valor ICMS antes de avançar (responsável preencheu).
-      if (d.currentStep === 'EMISSAO_DMI') {
-        const inp = document.getElementById('des-valor-icms');
-        const valor = inp ? Number(inp.value) : 0;
-        if (!valor || valor <= 0) { UI.toast('Informe o Valor ICMS a desonerar (vem da DMI)', 'err'); return; }
-        try { await API.put(`/api/desoneracoes/${id}`, { valorIcmsDesonerado: valor }); }
-        catch (e) { UI.toast('Falha ao salvar valor ICMS: ' + e.message, 'err'); return; }
-      }
+      // A etapa Emissão DMI agora exige apenas o upload do documento da DMI
+      // (o valor do ICMS não é mais informado aqui).
       try {
         await API.post(`/api/desoneracoes/${id}/advance`, { parceiroId: parc });
         UI.toast('Etapa avançada');
@@ -667,9 +659,17 @@ window.VIEW_desoneracoes = (() => {
     });
     // Aprovar
     document.getElementById('des-approve-btn')?.addEventListener('click', async () => {
+      // Plano B: se o ICMS não foi lido da DMI, exige o valor manual aqui.
+      const inp = document.getElementById('des-icms-manual');
+      let body = {};
+      if (inp) {
+        const v = Number(inp.value);
+        if (!v || v <= 0) { UI.toast('Informe o valor do ICMS a desonerar', 'err'); return; }
+        body = { valorIcmsManual: v };
+      }
       if (!confirm('Aprovar e criar a movimentação de Débito de Liquidação no extrato do cliente?')) return;
       try {
-        await API.post(`/api/desoneracoes/${id}/approve`);
+        await API.post(`/api/desoneracoes/${id}/approve`, body);
         UI.toast('Movimentação criada — desoneração concluída'); UI.closeModal(); render();
       } catch (e) { UI.toast(e.message, 'err'); }
     });

@@ -292,4 +292,56 @@ export async function analyzeReceiptValue(buffer, mime) {
   };
 }
 
+// Extrai texto preservando o layout (linhas por coordenada Y, ordenadas por X).
+// Necessário para tabelas/formulários (ex.: DMI) onde rótulo e valor precisam
+// ficar na mesma linha — o extractTextFromPdfBuffer simples embaralha a ordem.
+export async function extractPdfLayoutText(buffer) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer), disableFontFace: true, useSystemFonts: false }).promise;
+  let out = '';
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    const lines = new Map();
+    for (const it of content.items) {
+      const x = it.transform[4], y = Math.round(it.transform[5]);
+      let key = null;
+      for (const k of lines.keys()) { if (Math.abs(k - y) <= 2) { key = k; break; } }
+      if (key == null) { key = y; lines.set(key, []); }
+      lines.get(key).push({ x, s: it.str });
+    }
+    const ys = [...lines.keys()].sort((a, b) => b - a);
+    for (const y of ys) out += lines.get(y).sort((a, b) => a.x - b.x).map(o => o.s).join(' ') + '\n';
+  }
+  return out;
+}
+
+function _dmiFromText(text) {
+  const t = String(text || '').replace(/[ \t]+/g, ' ');
+  const m = t.match(/ICMS\s*Comp[^\d\n]{0,40}?(\d{1,3}(?:\.\d{3})*,\d{2})/i);
+  return m ? _parseBrNumber(m[1]) : null;
+}
+
+// Lê o valor de "ICMS Comp. C/Gráfica" (ICMS a desonerar) de uma DMI.
+// PDF com texto → layout + regex (offline); senão IA (texto/visão). null se não achar.
+export async function analyzeDmiIcms(buffer, mime) {
+  const isPdf = (mime || '').includes('pdf');
+  if (isPdf) {
+    try { const v = _dmiFromText(await extractPdfLayoutText(buffer)); if (v) return v; } catch {}
+  }
+  const settings = await getAiSettings();
+  if (!settings || !settings.enabled || !settings.apiKey) return null;
+  const sys = 'Você lê uma DMI (desoneração de ICMS) e extrai o valor do campo "ICMS Comp. C/Gráfica" (ICMS a compensar na conta gráfica). Responda APENAS JSON {"valor": number} em reais com ponto decimal. Se não achar, {"valor": null}.';
+  const common = { provider: settings.provider, model: settings.model, apiKey: settings.apiKey, systemPrompt: sys };
+  try {
+    let text = '';
+    if (isPdf) { try { text = await extractTextFromPdfBuffer(buffer); } catch {} }
+    const out = (text && text.trim().length >= 20)
+      ? await callAi({ ...common, userMessage: `DMI (texto):\n${text}` })
+      : await callAiVision({ ...common, userMessage: 'Leia a DMI e extraia o valor de "ICMS Comp. C/Gráfica".', files: [{ mime: mime || 'application/pdf', b64: buffer.toString('base64') }] });
+    const v = Number((extractJson(out.text) || {}).valor);
+    return Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : null;
+  } catch { return null; }
+}
+
 export { DEFAULT_SYSTEM_PROMPT };

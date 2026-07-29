@@ -63,7 +63,7 @@ export async function advance(req, res, next) {
 }
 export async function approve(req, res, next) {
   try {
-    const r = await svc.approveAndCreateMovimentacao(req.user, req.params.id);
+    const r = await svc.approveAndCreateMovimentacao(req.user, req.params.id, { valorIcmsManual: req.body?.valorIcmsManual });
     await logAction({ user: req.user, action: 'APPROVE', entity: 'desoneracao', entityId: req.params.id, ip: req.ip });
     res.json(r);
   } catch (e) { next(e); }
