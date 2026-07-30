@@ -145,14 +145,14 @@ export async function upsertStepConfig({ etapa, responsavelTipo, kindCode, label
   });
 }
 
-// ENVIO_NF_OFICIAL foi removida do fluxo. Re-anexação de NF rejeitada
-// acontece dentro da própria EMISSAO_NF (parceiro rejeita → cliente refaz na
-// mesma etapa 3 → parceiro valida de novo na etapa 4 → vai pra etapa 5).
+// Fluxo: após validar as NFs (etapa 4), o cliente anexa as NFs FINAIS/oficiais
+// (ENVIO_NF_OFICIAL) e só então segue para o Protocolo ICMS.
 const STEPS_ORDER = [
   'DOCS_DESPACHANTE',
   'EMISSAO_DMI',
   'EMISSAO_NF',
   'VALIDACAO_NF',
+  'ENVIO_NF_OFICIAL',
   'PROTOCOLO_ICMS',
   'CONCLUIDO',
 ];
@@ -629,6 +629,17 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
       e.status = 400; throw e;
     }
   }
+  // ENVIO_NF_OFICIAL: o cliente precisa anexar o PDF oficial de TODAS as NFs validadas.
+  if (etapaAtual === 'ENVIO_NF_OFICIAL') {
+    const validadas = cur.notas.filter(n => n.validada && !n.rejeitada);
+    if (!validadas.length) {
+      const e = new Error('Não há NFs validadas para anexar o PDF oficial'); e.status = 400; throw e;
+    }
+    const semOficial = validadas.filter(n => !n.oficialNome);
+    if (semOficial.length) {
+      const e = new Error(`${semOficial.length} NF(s) validada(s) ainda sem o PDF oficial/final anexado`); e.status = 400; throw e;
+    }
+  }
   // EMISSAO_NF (retorno): se o cliente voltou pra etapa 3 por NFs rejeitadas,
   // ele precisa ter EXCLUÍDO ou substituído as rejeitadas antes de avançar.
   if (etapaAtual === 'EMISSAO_NF') {
@@ -660,9 +671,12 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
       });
     } else {
       await tx.desoneracao.update({ where: { id }, data: { currentStep: proxima } });
-      await tx.desoneracaoStep.update({
+      // upsert: processos criados antes de existir a etapa "NFs Finais" não têm
+      // a linha da etapa — cria na hora (responsável cliente, sem parceiro).
+      await tx.desoneracaoStep.upsert({
         where: { desoneracaoId_etapa: { desoneracaoId: id, etapa: proxima } },
-        data: { startedAt: new Date() },
+        update: { startedAt: new Date() },
+        create: { desoneracaoId: id, etapa: proxima, parceiroId: null, startedAt: new Date() },
       });
     }
     await tx.desoneracaoEvento.create({

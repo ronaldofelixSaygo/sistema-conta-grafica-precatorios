@@ -3,22 +3,22 @@ window.VIEW_desoneracoes = (() => {
   let parceirosCache = [];
   let clientesCache = [];
 
-  // ENVIO_NF_OFICIAL foi removida do fluxo. A re-anexação de NFs rejeitadas
-  // acontece dentro da EMISSAO_NF (volta pra etapa 3 quando há rejeitada).
   const STEP_LABELS = {
     DOCS_DESPACHANTE:  '1. Docs do Despachante',
     EMISSAO_DMI:       '2. Emissão DMI',
     EMISSAO_NF:        '3. Emissão NFs',
     VALIDACAO_NF:      '4. Validação NFs',
-    PROTOCOLO_ICMS:    '5. Protocolo ICMS',
+    ENVIO_NF_OFICIAL:  '5. NFs Finais',
+    PROTOCOLO_ICMS:    '6. Protocolo ICMS',
     CONCLUIDO:         '✓ Concluído',
   };
-  const STEP_ORDER = ['DOCS_DESPACHANTE','EMISSAO_DMI','EMISSAO_NF','VALIDACAO_NF','PROTOCOLO_ICMS'];
+  const STEP_ORDER = ['DOCS_DESPACHANTE','EMISSAO_DMI','EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL','PROTOCOLO_ICMS'];
   const ETAPA_DOC_TIPOS = {
     DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL','CCT','OUTRO'],
     EMISSAO_DMI:      ['DMI','OUTRO'],
     EMISSAO_NF:       ['OUTRO'],
     VALIDACAO_NF:     ['OUTRO'],
+    ENVIO_NF_OFICIAL: ['OUTRO'],
     PROTOCOLO_ICMS:   ['DESPACHO','CONTA_GRAFICA','OUTRO'],
   };
   function isStepReached(d, target) {
@@ -373,23 +373,31 @@ window.VIEW_desoneracoes = (() => {
     const podeValidar   = podeAtuarAgora && d.currentStep === 'VALIDACAO_NF';
     // Exclusão: enquanto a etapa "Emissão NFs" estiver ativa (staff também)
     const podeRemover   = podeAtuarAgora && d.currentStep === 'EMISSAO_NF';
+    // Etapa "NFs Finais": cliente anexa o PDF oficial de cada NF validada.
+    const podeAnexarOficial = podeAtuarAgora && d.currentStep === 'ENVIO_NF_OFICIAL';
 
-    const linhas = (d.notas || []).map(n => `
+    const linhas = (d.notas || []).map(n => {
+      const temOficial = !!(n.oficialBytes || n.oficialNome);
+      const tipoNf = n.tipo === 'SAIDA' ? 'NF Saída' : (n.tipo === 'ENTRADA' ? 'NF Entrada' : 'NF');
+      return `
       <div class="doc-row">
-        <div class="doc-tipo">NF</div>
+        <div class="doc-tipo">${tipoNf}</div>
         <div class="doc-file">
           <div class="doc-file-item">
             <span class="doc-name" title="${UI.escapeHtml(n.oficialNome || n.numero)}">📄 ${UI.escapeHtml(n.oficialNome || n.numero)}</span>
-            ${(n.oficialBytes || n.oficialNome) ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial?download=1" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
+            ${temOficial ? `<a class="doc-download" href="/api/desoneracoes/notas/${n.id}/oficial?download=1" download="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Baixar">⬇</a>` : ''}
           </div>
           ${n.validada ? '<span class="pill green small" style="margin-top:.2rem">Validada</span>' : ''}
+          ${podeAnexarOficial && n.validada && !temOficial ? '<span class="pill amber small" style="margin-top:.2rem">Falta NF final</span>' : ''}
         </div>
         <div class="doc-actions">
-          ${(n.oficialBytes || n.oficialNome) ? `<button class="btn small" data-nf-view="${n.id}" data-nf-name="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Visualizar">👁</button>` : ''}
+          ${temOficial ? `<button class="btn small" data-nf-view="${n.id}" data-nf-name="${UI.escapeHtml(n.oficialNome||'nf.pdf')}" title="Visualizar">👁</button>` : ''}
           ${podeValidar && !n.validada ? `<button class="btn small" data-nf-validar="${n.id}" title="Validar">✓</button>` : ''}
           ${podeRemover ? `<button class="btn small danger" data-nf-del="${n.id}" title="Excluir">✕</button>` : ''}
+          ${podeAnexarOficial && n.validada ? `<label class="btn primary small btn-anexar" style="cursor:pointer" title="${temOficial?'Substituir':'Anexar'} NF final">📎 ${temOficial?'Substituir':'Anexar NF final'}<input type="file" data-nf-oficial="${n.id}" style="display:none" accept=".pdf,image/*"></label>` : ''}
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return `<div class="panel">
       <h3>Notas Fiscais</h3>
       ${d.notas?.length
@@ -402,6 +410,7 @@ window.VIEW_desoneracoes = (() => {
         </label>
         <div class="muted small" style="margin-top:.3rem">Selecione 1 ou mais arquivos de NF. O parceiro escritório vai conferir e validar.</div>
       </div>` : ''}
+      ${podeAnexarOficial ? '<div class="muted small" style="margin-top:.6rem">Anexe o PDF final/oficial de cada NF validada. Todas precisam ter a NF final para avançar ao Protocolo ICMS.</div>' : ''}
     </div>`;
   }
 
@@ -484,11 +493,11 @@ window.VIEW_desoneracoes = (() => {
     // rejeita alguma NF na etapa 4.
     const todasEtapas = [
       'DOCS_DESPACHANTE','EMISSAO_DMI',
-      'EMISSAO_NF','VALIDACAO_NF',
+      'EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL',
       'PROTOCOLO_ICMS',
     ];
     const sections = todasEtapas.map(etapa => {
-      const conteudo = ['EMISSAO_NF','VALIDACAO_NF'].includes(etapa)
+      const conteudo = ['EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL'].includes(etapa)
         ? renderEtapaNotas(d, etapa, isStaff, podeAtuarAgora)
         : `<div class="doc-grid">${rowsByEtapa[etapa].map(t => renderLinha(etapa, t)).join('')}</div>`;
       return `<div style="margin-bottom:.6rem">
@@ -532,6 +541,8 @@ window.VIEW_desoneracoes = (() => {
     const podeRemover   = canEditNFsAgora;
     const podeValidar   = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
     const podeRejeitar  = ativo && etapa === 'VALIDACAO_NF' && isCurrent;
+    // Etapa "NFs Finais": cliente anexa o PDF oficial de cada NF validada.
+    const podeAnexarOficial = ativo && etapa === 'ENVIO_NF_OFICIAL' && isCurrent && d.status === 'EM_ANDAMENTO';
 
     if (!notas.length && !podeAdicionar) {
       return `<div class="doc-grid"><div class="doc-row disabled">
@@ -542,13 +553,14 @@ window.VIEW_desoneracoes = (() => {
     }
 
     const linhas = notas.map(n => {
+      const temOficial = !!(n.oficialBytes || n.oficialNome);
       const statusBlock = n.rejeitada
         ? `<div style="margin-top:.3rem">
              <span class="pill red" style="font-size:10px">Rejeitada</span>
              ${n.rejeitadaMotivo ? `<div class="nf-motivo">⚠ <strong>Motivo:</strong> ${UI.escapeHtml(n.rejeitadaMotivo)}</div>` : ''}
            </div>`
         : n.validada
-          ? '<span class="pill green" style="margin-top:.2rem;font-size:10px;display:inline-block">Validada</span>'
+          ? `<span class="pill green" style="margin-top:.2rem;font-size:10px;display:inline-block">Validada</span>${podeAnexarOficial && !temOficial ? ' <span class="pill amber" style="font-size:10px">Falta NF final</span>' : ''}`
           : '';
       const tipoLabel = n.tipo === 'SAIDA' ? 'NF-S' : 'NF-E';
       return `
@@ -566,6 +578,7 @@ window.VIEW_desoneracoes = (() => {
           ${podeValidar && !n.validada ? `<button class="btn small" data-nf-validar="${n.id}" title="Validar">✓</button>` : ''}
           ${podeRejeitar && !n.rejeitada ? `<button class="btn small danger" data-nf-rejeitar="${n.id}" title="Rejeitar">✗</button>` : ''}
           ${podeRemover ? `<button class="btn small danger" data-nf-del="${n.id}" title="Excluir">✕</button>` : ''}
+          ${podeAnexarOficial && n.validada ? `<label class="btn primary small btn-anexar" style="cursor:pointer" title="${temOficial?'Substituir':'Anexar'} NF final">📎 ${temOficial?'Substituir':'NF final'}<input type="file" data-nf-oficial="${n.id}" style="display:none" accept=".pdf,image/*"></label>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -579,7 +592,9 @@ window.VIEW_desoneracoes = (() => {
       ? (temRejeitada
           ? 'Substitua as NFs rejeitadas. Mínimo: 1 NF de Entrada e 1 NF de Saída.'
           : 'Anexe pelo menos 1 NF de Entrada e 1 NF de Saída.')
-      : 'Aprove (✓) ou rejeite (✗) cada NF. Ao rejeitar, o processo volta automaticamente pro cliente substituir.';
+      : etapa === 'ENVIO_NF_OFICIAL'
+        ? 'Anexe o PDF final/oficial de cada NF validada. Todas precisam ter a NF final para avançar ao Protocolo ICMS.'
+        : 'Aprove (✓) ou rejeite (✗) cada NF. Ao rejeitar, o processo volta automaticamente pro cliente substituir.';
 
     // 2 botões dedicados (Entrada / Saída) na etapa 3
     const adicionarHtml = podeAdicionar ? `
