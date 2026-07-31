@@ -65,6 +65,7 @@ const DOC_TIPOS_BUILTIN = [
   { code: 'DMI',            label: 'DMI — Documento de Movimentação Interna', sort: 8 },
   { code: 'DESPACHO',       label: 'Despacho ICMS',                       sort: 9 },
   { code: 'CONTA_GRAFICA',  label: 'Conta Gráfica atualizada',            sort: 10 },
+  { code: 'NF_FINAL',       label: 'NF Final (PDF oficial)',              sort: 11 },
 ];
 // Tipos legados: marcamos inativos pra não aparecer em selects, mas documentos
 // já anexados com esses tipos continuam acessíveis (são histórico).
@@ -175,6 +176,7 @@ const DEFAULT_DOCS_BY_STEP = {
     RODOVIARIO: ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
   },
   EMISSAO_DMI:    { TODOS: ['DMI'] },
+  ENVIO_NF_OFICIAL: { TODOS: ['NF_FINAL'] },
   PROTOCOLO_ICMS: { TODOS: ['DESPACHO', 'CONTA_GRAFICA'] },
 };
 
@@ -629,17 +631,8 @@ export async function advanceStep(user, id, { parceiroId, notes } = {}) {
       e.status = 400; throw e;
     }
   }
-  // ENVIO_NF_OFICIAL: o cliente precisa anexar o PDF oficial de TODAS as NFs validadas.
-  if (etapaAtual === 'ENVIO_NF_OFICIAL') {
-    const validadas = cur.notas.filter(n => n.validada && !n.rejeitada);
-    if (!validadas.length) {
-      const e = new Error('Não há NFs validadas para anexar o PDF oficial'); e.status = 400; throw e;
-    }
-    const semOficial = validadas.filter(n => !n.oficialNome);
-    if (semOficial.length) {
-      const e = new Error(`${semOficial.length} NF(s) validada(s) ainda sem o PDF oficial/final anexado`); e.status = 400; throw e;
-    }
-  }
+  // ENVIO_NF_OFICIAL: o cliente anexa os PDFs finais das NFs (tipo NF_FINAL).
+  // A obrigatoriedade (≥1 NF_FINAL) é validada por getRequiredDocs acima.
   // EMISSAO_NF (retorno): se o cliente voltou pra etapa 3 por NFs rejeitadas,
   // ele precisa ter EXCLUÍDO ou substituído as rejeitadas antes de avançar.
   if (etapaAtual === 'EMISSAO_NF') {
@@ -799,7 +792,7 @@ const ETAPA_DOC_TIPOS = {
   EMISSAO_DMI:      ['DMI','OUTRO'],
   EMISSAO_NF:       ['OUTRO'],
   VALIDACAO_NF:     ['OUTRO'],
-  ENVIO_NF_OFICIAL: ['OUTRO'],
+  ENVIO_NF_OFICIAL: ['NF_FINAL','OUTRO'],
   PROTOCOLO_ICMS:   ['DESPACHO','CONTA_GRAFICA','OUTRO'],
 };
 export function getTiposDocPermitidos(etapa) {

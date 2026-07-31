@@ -6,7 +6,7 @@ window.VIEW_desoneracoes = (() => {
   const STEP_LABELS = {
     DOCS_DESPACHANTE:  '1. Docs do Despachante',
     EMISSAO_DMI:       '2. Emissão DMI',
-    EMISSAO_NF:        '3. Emissão NFs',
+    EMISSAO_NF:        '3. NFs (espelho) p/ validação',
     VALIDACAO_NF:      '4. Validação NFs',
     ENVIO_NF_OFICIAL:  '5. NFs Finais',
     PROTOCOLO_ICMS:    '6. Protocolo ICMS',
@@ -18,7 +18,7 @@ window.VIEW_desoneracoes = (() => {
     EMISSAO_DMI:      ['DMI','OUTRO'],
     EMISSAO_NF:       ['OUTRO'],
     VALIDACAO_NF:     ['OUTRO'],
-    ENVIO_NF_OFICIAL: ['OUTRO'],
+    ENVIO_NF_OFICIAL: ['NF_FINAL','OUTRO'],
     PROTOCOLO_ICMS:   ['DESPACHO','CONTA_GRAFICA','OUTRO'],
   };
   function isStepReached(d, target) {
@@ -420,6 +420,7 @@ window.VIEW_desoneracoes = (() => {
   const DOCS_PREVISTOS_POR_ETAPA = {
     DOCS_DESPACHANTE: ['PL','PI','AFRMM','CTE_AWB_BL'],
     EMISSAO_DMI:      ['DMI'],
+    ENVIO_NF_OFICIAL: ['NF_FINAL'],
     PROTOCOLO_ICMS:   ['DESPACHO','CONTA_GRAFICA'],
   };
   function renderDocs(d, isStaff) {
@@ -428,7 +429,7 @@ window.VIEW_desoneracoes = (() => {
     const podeAtuarAgora = (isStaff || cur?.podeAtuar) && d.status === 'EM_ANDAMENTO';
 
     const rowsByEtapa = {};
-    for (const etapa of ['DOCS_DESPACHANTE','EMISSAO_DMI','PROTOCOLO_ICMS']) {
+    for (const etapa of ['DOCS_DESPACHANTE','EMISSAO_DMI','ENVIO_NF_OFICIAL','PROTOCOLO_ICMS']) {
       rowsByEtapa[etapa] = [...DOCS_PREVISTOS_POR_ETAPA[etapa]];
     }
     // Etapa 1 ganha DUIMP ou DI+JUSTIFICATIVA conforme tipoDocImport
@@ -497,7 +498,7 @@ window.VIEW_desoneracoes = (() => {
       'PROTOCOLO_ICMS',
     ];
     const sections = todasEtapas.map(etapa => {
-      const conteudo = ['EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL'].includes(etapa)
+      const conteudo = ['EMISSAO_NF','VALIDACAO_NF'].includes(etapa)
         ? renderEtapaNotas(d, etapa, isStaff, podeAtuarAgora)
         : `<div class="doc-grid">${rowsByEtapa[etapa].map(t => renderLinha(etapa, t)).join('')}</div>`;
       return `<div style="margin-bottom:.6rem">
