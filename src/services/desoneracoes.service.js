@@ -92,6 +92,12 @@ async function ensureDocTiposBuiltin() {
         update: {}, // se admin reativar, respeita
       });
     }
+    // BL foi repurposado de legado ("BL/CTE/AWB") para o conhecimento de
+    // transporte do modal MARÍTIMO — força o rótulo/estado novos.
+    await prisma.desoneracaoDocTipo.update({
+      where: { code: 'BL' },
+      data: { label: 'BL — Conhecimento de Embarque (marítimo)', active: true, isBuiltin: true, sort: 7 },
+    }).catch(() => {});
     _docTiposEnsured = true;
   } catch (e) {
     console.warn('[desoneracoes] seed docTipos falhou:', e.message);
