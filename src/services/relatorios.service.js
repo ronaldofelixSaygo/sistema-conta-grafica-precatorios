@@ -85,6 +85,13 @@ export async function relatorioPdf(user, q, res) {
   const debitos  = rows.filter(r => r.valorAjustado < 0).reduce((s, r) => s + r.valorAjustado, 0);
   const saldo    = creditos + debitos;
 
+  // Saldo ACUMULADO: soma de TODO o extrato do cliente (ignora o filtro de
+  // período/tipo), respeitando apenas o escopo do usuário e o cliente filtrado.
+  const accWhere = { AND: [movimentacaoScope(user)] };
+  if (q.cliente_id) accWhere.AND.push({ clienteId: Number(q.cliente_id) });
+  const accAgg = await prisma.movimentacao.aggregate({ where: accWhere, _sum: { valorAjustado: true } });
+  const saldoAcumulado = accAgg._sum.valorAjustado || 0;
+
   // Header info
   let clienteLabel = 'Todos os clientes';
   if (q.cliente_id) {
@@ -125,13 +132,14 @@ export async function relatorioPdf(user, q, res) {
   .info { display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:8px 12px; background:#f3f4f6; border-radius:6px; margin-bottom:16px; font-size:13px }
   .info b { color:var(--txt) }
   .info span { color:var(--muted) }
-  .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:18px }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px }
   .kpi { padding:14px; border-radius:8px; text-align:center }
   .kpi .lbl { font-size:11px; letter-spacing:.5px; text-transform:uppercase; font-weight:600; margin-bottom:4px }
   .kpi .val { font-size:20px; font-weight:700 }
   .kpi.cred { background:#dcfce7 } .kpi.cred .val { color:var(--green) } .kpi.cred .lbl { color:var(--green) }
   .kpi.deb  { background:#fee2e2 } .kpi.deb  .val { color:var(--red)   } .kpi.deb  .lbl { color:var(--red)   }
   .kpi.sld  { background:#dbeafe } .kpi.sld  .val { color:var(--blue)  } .kpi.sld  .lbl { color:var(--blue)  }
+  .kpi.acc  { background:#ede9fe } .kpi.acc  .val { color:#6d28d9 }      .kpi.acc  .lbl { color:#6d28d9 }
   table { width:100%; border-collapse:collapse; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.05); border-radius:6px; overflow:hidden }
   thead th { background:var(--orange); color:#fff; padding:10px 12px; text-align:left; font-size:12px; letter-spacing:.5px; text-transform:uppercase }
   tbody td { padding:8px 12px; border-bottom:1px solid var(--bd); font-size:13px }
@@ -161,7 +169,8 @@ export async function relatorioPdf(user, q, res) {
   <div class="kpis">
     <div class="kpi cred"><div class="lbl">Créditos</div><div class="val">${fmtMoney(creditos)}</div></div>
     <div class="kpi deb"><div class="lbl">Débitos</div><div class="val">${fmtMoney(debitos)}</div></div>
-    <div class="kpi sld"><div class="lbl">Saldo</div><div class="val">${fmtMoney(saldo)}</div></div>
+    <div class="kpi sld"><div class="lbl">Saldo do período</div><div class="val">${fmtMoney(saldo)}</div></div>
+    <div class="kpi acc"><div class="lbl">Saldo acumulado</div><div class="val">${fmtMoney(saldoAcumulado)}</div></div>
   </div>
   <table>
     <thead>

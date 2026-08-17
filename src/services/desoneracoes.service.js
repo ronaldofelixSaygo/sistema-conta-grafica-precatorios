@@ -61,15 +61,18 @@ const DOC_TIPOS_BUILTIN = [
   { code: 'PL',             label: 'PL — Packing List',                   sort: 4 },
   { code: 'PI',             label: 'PI — Proforma Invoice / Commercial Invoice', sort: 5 },
   { code: 'AFRMM',          label: 'AFRMM — Comprovante AFRMM',           sort: 6 },
-  { code: 'CTE_AWB_BL',     label: 'Conhecimento de Transporte (CTE/AWB/BL)', sort: 7 },
-  { code: 'DMI',            label: 'DMI — Documento de Movimentação Interna', sort: 8 },
-  { code: 'DESPACHO',       label: 'Despacho ICMS',                       sort: 9 },
-  { code: 'CONTA_GRAFICA',  label: 'Conta Gráfica atualizada',            sort: 10 },
-  { code: 'NF_FINAL',       label: 'NF Final (PDF oficial)',              sort: 11 },
+  { code: 'BL',             label: 'BL — Conhecimento de Embarque (marítimo)', sort: 7 },
+  { code: 'AWB',            label: 'AWB — Air Waybill (aéreo)',           sort: 8 },
+  { code: 'CRT',            label: 'CRT — Conhecimento Rodoviário (rodoviário)', sort: 9 },
+  { code: 'DMI',            label: 'DMI — Documento de Movimentação Interna', sort: 10 },
+  { code: 'DESPACHO',       label: 'Despacho ICMS',                       sort: 11 },
+  { code: 'CONTA_GRAFICA',  label: 'Conta Gráfica atualizada',            sort: 12 },
+  { code: 'NF_FINAL',       label: 'NF Final (PDF oficial)',              sort: 13 },
 ];
 // Tipos legados: marcamos inativos pra não aparecer em selects, mas documentos
 // já anexados com esses tipos continuam acessíveis (são histórico).
-const DOC_TIPOS_LEGACY = ['BL','CCT'];
+// CTE_AWB_BL foi separado em BL/AWB/CRT (conforme o modal).
+const DOC_TIPOS_LEGACY = ['CTE_AWB_BL','CCT'];
 
 let _docTiposEnsured = false;
 async function ensureDocTiposBuiltin() {
@@ -170,10 +173,10 @@ function nextStep(cur) {
 // tipoDocImport da desoneração (ver getRequiredDocs).
 const DEFAULT_DOCS_BY_STEP = {
   DOCS_DESPACHANTE: {
-    TODOS:      ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
-    MARITIMO:   ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
-    AEREO:      ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
-    RODOVIARIO: ['PL', 'PI', 'AFRMM', 'CTE_AWB_BL'],
+    TODOS:      ['PL', 'PI'],
+    MARITIMO:   ['PL', 'PI', 'AFRMM', 'BL'],
+    AEREO:      ['PL', 'PI', 'AWB'],
+    RODOVIARIO: ['PL', 'PI', 'CRT'],
   },
   EMISSAO_DMI:    { TODOS: ['DMI'] },
   ENVIO_NF_OFICIAL: { TODOS: ['NF_FINAL'] },
@@ -788,7 +791,7 @@ export async function cancelDesoneracao(user, id, reason) {
 // CTE_AWB_BL é o tipo unificado novo; BL/CCT são legados mas continuam aceitos
 // pra retrocompat com documentos já anexados antes da unificação.
 const ETAPA_DOC_TIPOS = {
-  DOCS_DESPACHANTE: ['DUIMP','DI','DI_JUSTIFICATIVA','PL','PI','AFRMM','CTE_AWB_BL','BL','CCT','OUTRO'],
+  DOCS_DESPACHANTE: ['DUIMP','DI','DI_JUSTIFICATIVA','PL','PI','AFRMM','BL','AWB','CRT','CTE_AWB_BL','CCT','OUTRO'],
   EMISSAO_DMI:      ['DMI','OUTRO'],
   EMISSAO_NF:       ['OUTRO'],
   VALIDACAO_NF:     ['OUTRO'],

@@ -14,7 +14,7 @@ window.VIEW_desoneracoes = (() => {
   };
   const STEP_ORDER = ['DOCS_DESPACHANTE','EMISSAO_DMI','EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL','PROTOCOLO_ICMS'];
   const ETAPA_DOC_TIPOS = {
-    DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL','CCT','OUTRO'],
+    DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL','AWB','CRT','CCT','OUTRO'],
     EMISSAO_DMI:      ['DMI','OUTRO'],
     EMISSAO_NF:       ['OUTRO'],
     VALIDACAO_NF:     ['OUTRO'],
@@ -418,11 +418,18 @@ window.VIEW_desoneracoes = (() => {
   // antigos BL e CCT — admin pode renomear/criar tipos novos em Parâmetros.
   // Etapa 1: DI/DUIMP é determinado pelo tipoDocImport da desoneração.
   const DOCS_PREVISTOS_POR_ETAPA = {
-    DOCS_DESPACHANTE: ['PL','PI','AFRMM','CTE_AWB_BL'],
+    DOCS_DESPACHANTE: ['PL','PI'],
     EMISSAO_DMI:      ['DMI'],
     ENVIO_NF_OFICIAL: ['NF_FINAL'],
     PROTOCOLO_ICMS:   ['DESPACHO','CONTA_GRAFICA'],
   };
+  // Docs do despachante que variam conforme o modal de transporte.
+  // AFRMM só é exigido no marítimo; o conhecimento de transporte muda: BL/AWB/CRT.
+  function docsDespachantePorModal(modal) {
+    if (modal === 'AEREO') return ['AWB'];
+    if (modal === 'RODOVIARIO') return ['CRT'];
+    return ['AFRMM','BL']; // MARITIMO (e fallback)
+  }
   function renderDocs(d, isStaff) {
     const docs = d.documentos || [];
     const cur = (d.steps || []).find(s => s.etapa === d.currentStep);
@@ -432,6 +439,8 @@ window.VIEW_desoneracoes = (() => {
     for (const etapa of ['DOCS_DESPACHANTE','EMISSAO_DMI','ENVIO_NF_OFICIAL','PROTOCOLO_ICMS']) {
       rowsByEtapa[etapa] = [...DOCS_PREVISTOS_POR_ETAPA[etapa]];
     }
+    // Docs que variam por modal (AFRMM só marítimo; transporte BL/AWB/CRT)
+    rowsByEtapa.DOCS_DESPACHANTE.push(...docsDespachantePorModal(d.modal));
     // Etapa 1 ganha DUIMP ou DI+JUSTIFICATIVA conforme tipoDocImport
     if (d.tipoDocImport === 'DI') {
       rowsByEtapa.DOCS_DESPACHANTE.unshift('DI_JUSTIFICATIVA');

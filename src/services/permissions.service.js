@@ -31,7 +31,7 @@ function defaultsFor(role, behavior, mod) {
     canDelete: ['clientes','movimentacoes','kanban','acionamentos','credit-requests','desoneracoes','parceiros','comissoes'].includes(mod),
   };
   if (role === 'CLIENT') return {
-    canView:   ['dashboard','clientes','movimentacoes','saldos','kanban','acionamentos','credit-requests','desoneracoes','chat','consulta-ncm'].includes(mod),
+    canView:   ['dashboard','clientes','movimentacoes','saldos','relatorios','kanban','acionamentos','credit-requests','desoneracoes','chat','consulta-ncm'].includes(mod),
     canCreate: ['acionamentos','credit-requests'].includes(mod),
     canEdit:   false,
     canDelete: false,
