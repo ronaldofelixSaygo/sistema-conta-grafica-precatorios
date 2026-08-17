@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma.js';
 import { clienteScope, movimentacaoScope } from '../utils/scope.js';
 import { getStorageUsage, checkAndAlertIfNeeded } from './storageAlert.service.js';
+import { computeBusinessDeadline, getSlaContext } from './sla.service.js';
 
 // Defaults caso não exista config no banco. A leitura usa CreditSlaConfig.
 const CREDIT_SLA_TO_START_H_DEFAULT   = 24;
@@ -31,7 +32,7 @@ function aderencia(okCount, totalCount) {
 // Calcula SLA do Kanban a partir dos KanbanStageProgress.
 // Conta etapas IN_PROGRESS (now < deadline) + COMPLETED (concluída antes do deadline).
 // Etapas PENDING não contam (ainda não começaram).
-async function getKanbanSlaAderencia(prisma, hasDate, dateRange) {
+async function getKanbanSlaAderencia(prisma, hasDate, dateRange, ctx) {
   const stages = await prisma.kanbanStageProgress.findMany({
     where: {
       status: { in: ['IN_PROGRESS', 'COMPLETED'] },
@@ -41,12 +42,14 @@ async function getKanbanSlaAderencia(prisma, hasDate, dateRange) {
   });
   let ok = 0;
   for (const s of stages) {
-    const deadline = new Date(s.startedAt.getTime() + (s.slaHours || 72) * MS_PER_H);
+    // Prazo em horário comercial (dias úteis, pulando feriados)
+    const deadline = computeBusinessDeadline(s.startedAt, s.slaHours || 72, ctx);
     if (s.status === 'COMPLETED') {
-      if (s.completedAt && s.completedAt <= deadline) ok++;
+      if (!deadline) ok++;
+      else if (s.completedAt && s.completedAt <= deadline) ok++;
     } else {
       // IN_PROGRESS: ainda dentro do prazo conta como OK
-      if (new Date() <= deadline) ok++;
+      if (!deadline || new Date() <= deadline) ok++;
     }
   }
   return aderencia(ok, stages.length);
@@ -54,7 +57,7 @@ async function getKanbanSlaAderencia(prisma, hasDate, dateRange) {
 
 // SLA de desoneração: cada etapa tem startedAt + slaHours (config), avalia
 // completedAt (se concluída) ou now (em andamento). Junta config por etapa.
-async function getDesoneracaoSlaAderencia(prisma, hasDate, dateRange) {
+async function getDesoneracaoSlaAderencia(prisma, hasDate, dateRange, ctx) {
   const [steps, configs] = await Promise.all([
     prisma.desoneracaoStep.findMany({
       where: { startedAt: { not: null, ...(hasDate ? dateRange : {}) } },
@@ -66,11 +69,12 @@ async function getDesoneracaoSlaAderencia(prisma, hasDate, dateRange) {
   let ok = 0;
   for (const s of steps) {
     const sla = slaByEtapa.get(s.etapa) || 48;
-    const deadline = new Date(s.startedAt.getTime() + sla * MS_PER_H);
+    // Prazo em horário comercial (dias úteis, pulando feriados)
+    const deadline = computeBusinessDeadline(s.startedAt, sla, ctx);
     if (s.completedAt) {
-      if (s.completedAt <= deadline) ok++;
+      if (!deadline || s.completedAt <= deadline) ok++;
     } else {
-      if (new Date() <= deadline) ok++;
+      if (!deadline || new Date() <= deadline) ok++;
     }
   }
   return aderencia(ok, steps.length);
@@ -78,7 +82,7 @@ async function getDesoneracaoSlaAderencia(prisma, hasDate, dateRange) {
 
 // SLA de Crédito: avalia 2 transições — SENT→IN_PROGRESS (CREDIT_SLA_TO_START_H)
 // e IN_PROGRESS→RESOLVED (CREDIT_SLA_TO_RESOLVE_H). Cada uma vira uma "etapa".
-async function getCreditoSlaAderencia(prisma, hasDate, dateRange) {
+async function getCreditoSlaAderencia(prisma, hasDate, dateRange, ctx) {
   const [requests, sla] = await Promise.all([
     prisma.creditRequest.findMany({
       where: { sentAt: { not: null, ...(hasDate ? dateRange : {}) } },
@@ -89,25 +93,27 @@ async function getCreditoSlaAderencia(prisma, hasDate, dateRange) {
   let ok = 0;
   let total = 0;
   const now = new Date();
+  // ok se não há prazo (SLA 0) ou se o evento ocorreu até o prazo
+  const meets = (deadline, when) => !deadline || (when && when <= deadline);
   for (const r of requests) {
-    // Fase 1: SENT → IN_PROGRESS (ou ainda aguardando)
+    // Fase 1: SENT → IN_PROGRESS (ou ainda aguardando) — prazo em horário comercial
     total++;
-    const deadline1 = r.sentAt.getTime() + sla.toStart * MS_PER_H;
+    const d1 = computeBusinessDeadline(r.sentAt, sla.toStart, ctx);
     if (r.inProgressAt) {
-      if (r.inProgressAt.getTime() <= deadline1) ok++;
+      if (meets(d1, r.inProgressAt)) ok++;
     } else if (r.status === 'CANCELLED' || r.status === 'RESOLVED') {
-      if (r.resolvedAt && r.resolvedAt.getTime() <= deadline1) ok++;
+      if (meets(d1, r.resolvedAt)) ok++;
     } else {
-      if (now.getTime() <= deadline1) ok++;
+      if (meets(d1, now)) ok++;
     }
     // Fase 2: IN_PROGRESS → RESOLVED (só conta se chegou a IN_PROGRESS)
     if (r.inProgressAt) {
       total++;
-      const deadline2 = r.inProgressAt.getTime() + sla.toResolve * MS_PER_H;
+      const d2 = computeBusinessDeadline(r.inProgressAt, sla.toResolve, ctx);
       if (r.resolvedAt) {
-        if (r.resolvedAt.getTime() <= deadline2) ok++;
+        if (meets(d2, r.resolvedAt)) ok++;
       } else {
-        if (now.getTime() <= deadline2) ok++;
+        if (meets(d2, now)) ok++;
       }
     }
   }
@@ -130,6 +136,9 @@ async function getStaffIndicators(user, q) {
   // garante que se o app rodar pouco a noite e o cron interno não pegar, ao
   // logar pela manhã ele já avisa.
   checkAndAlertIfNeeded().catch(() => {});
+
+  // Contexto de SLA (expediente + feriados) — cacheado; usado nos 3 fluxos.
+  const slaCtx = await getSlaContext();
 
   const [
     kanbanByStage, kanbanTotal,
@@ -170,10 +179,10 @@ async function getStaffIndicators(user, q) {
     prisma.desoneracao.count({
       where: { ...(hasDate ? { createdAt: dateRange } : {}), status: 'EM_ANDAMENTO' },
     }),
-    // Aderência SLA — uma promise pra cada fluxo
-    getKanbanSlaAderencia(prisma, hasDate, dateRange),
-    getDesoneracaoSlaAderencia(prisma, hasDate, dateRange),
-    getCreditoSlaAderencia(prisma, hasDate, dateRange),
+    // Aderência SLA — uma promise pra cada fluxo (prazo em horário comercial)
+    getKanbanSlaAderencia(prisma, hasDate, dateRange, slaCtx),
+    getDesoneracaoSlaAderencia(prisma, hasDate, dateRange, slaCtx),
+    getCreditoSlaAderencia(prisma, hasDate, dateRange, slaCtx),
     // Uso de storage (Neon free 500 MB)
     getStorageUsage(),
   ]);
