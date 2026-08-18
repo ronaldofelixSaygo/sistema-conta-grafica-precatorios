@@ -3,7 +3,7 @@ window.VIEW_parametros = (() => {
   let stages = [];
   // Persiste a aba selecionada entre re-renders e re-aberturas de tela
   const TAB_STORAGE_KEY = 'vision.parametros.activeTab';
-  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'desoneracoes', 'sla', 'feriados', 'email', 'ia', 'ncm', 'storage'];
+  const VALID_TABS = ['permissoes', 'etapas', 'tipos', 'desoneracoes', 'sla', 'feriados', 'email', 'ia', 'teste-leitura', 'ncm', 'storage'];
   let activeTab = (() => {
     try {
       const v = localStorage.getItem(TAB_STORAGE_KEY);
@@ -54,6 +54,7 @@ window.VIEW_parametros = (() => {
         <button class="btn ${activeTab==='feriados'?'primary':''}"    data-tab="feriados">Feriados & Expediente</button>
         <button class="btn ${activeTab==='email'?'primary':''}"      data-tab="email">E-mail</button>
         <button class="btn ${activeTab==='ia'?'primary':''}"          data-tab="ia">IA (extração de invoice)</button>
+        <button class="btn ${activeTab==='teste-leitura'?'primary':''}" data-tab="teste-leitura">Testar leitura</button>
         <button class="btn ${activeTab==='ncm'?'primary':''}"         data-tab="ncm">NCM / Anuentes</button>
         <button class="btn ${activeTab==='storage'?'primary':''}"     data-tab="storage">Storage</button>
       </div>
@@ -66,6 +67,7 @@ window.VIEW_parametros = (() => {
     if (activeTab === 'feriados')   return loadFeriados();
     if (activeTab === 'email')      return loadEmail();
     if (activeTab === 'ia')         return loadIa();
+    if (activeTab === 'teste-leitura') return loadTesteLeitura();
     if (activeTab === 'ncm')        return loadNcm();
     if (activeTab === 'storage')    return loadStorage();
     return loadStages();
@@ -658,6 +660,70 @@ window.VIEW_parametros = (() => {
         </div>` : ''}
     `;
     document.getElementById('storage-refresh').onclick = loadStorage;
+  }
+
+  // ===== Testar leitura (sandbox de extração por IA) =====
+  async function loadTesteLeitura() {
+    const c = document.getElementById('param-content');
+    c.innerHTML = `
+      <div class="panel">
+        <h3>🔎 Testar leitura por IA</h3>
+        <p class="muted small" style="margin-bottom:.8rem">
+          Suba um documento de exemplo e veja o que a IA consegue extrair — sem criar
+          nenhuma solicitação. Use para validar/ajustar antes de mexer no
+          <strong>AI_SYSTEM_PROMPT</strong> (aba IA). Requer IA habilitada e, para PDFs
+          escaneados/imagem, um provedor com visão (Anthropic ou Gemini).
+        </p>
+        <div class="form-grid">
+          <div><label>Tipo de documento</label>
+            <select id="tl-tipo">
+              <option value="invoice">Invoice (extração de itens/NCM)</option>
+              <option value="comprovante">Comprovante de depósito (valor/data/pagador)</option>
+              <option value="dmi">DMI (ICMS Comp. C/Gráfica)</option>
+            </select>
+          </div>
+          <div><label>Arquivo (PDF ou imagem)</label>
+            <input type="file" id="tl-file" accept="application/pdf,image/*">
+          </div>
+          <div class="full form-actions" style="justify-content:flex-start">
+            <button class="btn primary" id="tl-run">Analisar com IA</button>
+          </div>
+        </div>
+        <div id="tl-out" style="margin-top:.6rem"></div>
+      </div>`;
+
+    document.getElementById('tl-run').onclick = async () => {
+      const file = document.getElementById('tl-file')?.files?.[0];
+      const tipo = document.getElementById('tl-tipo').value;
+      const out = document.getElementById('tl-out');
+      if (!file) { UI.toast('Selecione um arquivo', 'err'); return; }
+      out.innerHTML = '<div class="muted">Analisando com a IA…</div>';
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('tipo', tipo);
+        const resp = await fetch('/api/credit-requests/analyze-test', { method: 'POST', credentials: 'include', body: fd });
+        const j = await resp.json().catch(() => null);
+        if (!resp.ok) throw new Error(j?.error || `HTTP ${resp.status}`);
+        // Resumo amigável por tipo
+        let resumo = '';
+        const r = j.resultado || {};
+        if (tipo === 'comprovante') {
+          resumo = `<div class="muted small">Valor: <strong>${r.valor != null ? UI.fmtMoney(r.valor) : '—'}</strong> · Data: <strong>${r.data || '—'}</strong> · Pagador: <strong>${UI.escapeHtml(r.pagador || '—')}</strong></div>`;
+        } else if (tipo === 'dmi') {
+          resumo = `<div class="muted small">ICMS Comp. C/Gráfica: <strong>${r.valor != null ? UI.fmtMoney(r.valor) : '— (não encontrado)'}</strong></div>`;
+        } else {
+          const n = (r.fields?.ncmGroups || []).length;
+          resumo = `<div class="muted small">NCMs extraídos: <strong>${n}</strong> · Importador: <strong>${UI.escapeHtml(r.fields?.importadorNome || '—')}</strong> · Câmbio: <strong>${r.fields?.taxa_cambio ?? '—'}</strong></div>`;
+        }
+        out.innerHTML = `
+          <div style="padding:.5rem .7rem;border:1px solid var(--green);background:rgba(31,160,102,.10);border-radius:8px;margin-bottom:.5rem">${resumo}</div>
+          <div class="muted small" style="margin-bottom:.2rem">Resposta completa (JSON):</div>
+          <pre style="background:var(--s2);padding:.7rem;border-radius:8px;font-size:11px;max-height:340px;overflow:auto">${UI.escapeHtml(JSON.stringify(j.resultado, null, 2))}</pre>`;
+      } catch (e) {
+        out.innerHTML = `<div style="padding:.6rem .8rem;border-radius:8px;background:rgba(220,50,50,.12);border:1px solid var(--red);color:var(--red);font-weight:600;font-size:14px">${UI.escapeHtml(e.message)}</div>`;
+      }
+    };
   }
 
   // ===== NCM / Anuentes =====

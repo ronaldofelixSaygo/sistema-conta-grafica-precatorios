@@ -24,6 +24,8 @@ router.post('/ai/prompt/:id/activate',     requireAdmin, ctrl.activatePrompt);
 // Análise IA + simulação
 router.post('/analyze-pdf', upload.single('file'),       ctrl.analyzePdf);
 router.post('/analyze-receipt', upload.single('file'),   ctrl.analyzeReceipt);
+// Sandbox de teste de leitura (admin): invoice | comprovante | dmi
+router.post('/analyze-test', requireAdmin, upload.single('file'), ctrl.analyzeTest);
 router.post('/simulate',                                 ctrl.simulate);
 
 const receiptUpload = upload.fields([

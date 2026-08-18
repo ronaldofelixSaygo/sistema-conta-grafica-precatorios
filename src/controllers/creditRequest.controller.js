@@ -112,6 +112,24 @@ export async function analyzeReceipt(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// === Teste de leitura (sandbox admin): roda a extração sem gravar nada ===
+export async function analyzeTest(req, res, next) {
+  try {
+    if (!req.file) { const e = new Error('Arquivo não enviado'); e.status = 400; throw e; }
+    const tipo = String(req.body?.tipo || 'invoice');
+    const buf = req.file.buffer, mime = req.file.mimetype;
+    let resultado;
+    if (tipo === 'comprovante') {
+      resultado = await ai.analyzeReceiptValue(buf, mime);
+    } else if (tipo === 'dmi') {
+      resultado = { valor: await ai.analyzeDmiIcms(buf, mime) };
+    } else {
+      resultado = await ai.analyzeInvoicePdf(buf); // invoice
+    }
+    res.json({ tipo, arquivo: req.file.originalname, resultado });
+  } catch (e) { next(e); }
+}
+
 // Normaliza os comprovantes recebidos no multipart em [{buffer,name,mime,valor}].
 // Aceita 'comprovantes' (N arquivos) + 'valores' (JSON array alinhado) e, por
 // retrocompat, o campo único 'comprovante'.
