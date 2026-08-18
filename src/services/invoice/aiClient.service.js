@@ -138,8 +138,12 @@ async function visionAnthropic({ apiKey, model, systemPrompt, userMessage, files
 async function visionOpenAI({ apiKey, model, systemPrompt, userMessage, files }) {
   const parts = [{ type: 'text', text: userMessage }];
   for (const f of files) {
-    // OpenAI chat vision aceita imagens (não PDF) via data URL
-    if (f.mime !== 'application/pdf') parts.push({ type: 'image_url', image_url: { url: `data:${f.mime};base64,${f.b64}` } });
+    if (f.mime === 'application/pdf') {
+      // Chat Completions aceita PDF via content part `file` (modelos multimodais)
+      parts.push({ type: 'file', file: { filename: 'documento.pdf', file_data: `data:application/pdf;base64,${f.b64}` } });
+    } else {
+      parts.push({ type: 'image_url', image_url: { url: `data:${f.mime};base64,${f.b64}` } });
+    }
   }
   const messages = [];
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
