@@ -138,25 +138,36 @@ export async function analyzeInvoicePdf(buffer) {
     const e = new Error('API Key não configurada em Parâmetros → IA.'); e.status = 400; throw e;
   }
 
-  const rawText = await extractTextFromPdfBuffer(buffer);
-  if (!rawText || rawText.trim().length < 30) {
-    const e = new Error('Não foi possível extrair texto deste PDF (talvez seja imagem)'); e.status = 422; throw e;
-  }
+  let rawText = '';
+  try { rawText = await extractTextFromPdfBuffer(buffer); } catch {}
 
   const systemPrompt = await getActivePromptText();
-  const userMessage = `Texto extraído do PDF da invoice. Extraia os campos pedidos no formato JSON puro:\n\n---INÍCIO DO TEXTO---\n${rawText}\n---FIM DO TEXTO---`;
+  const common = { provider: settings.provider, model: settings.model, apiKey: settings.apiKey, systemPrompt };
 
-  const { text } = await callAi({
-    provider: settings.provider,
-    model: settings.model,
-    apiKey: settings.apiKey,
-    systemPrompt,
-    userMessage,
-  });
+  let text;
+  if (rawText && rawText.trim().length >= 30) {
+    // PDF com camada de texto → envia o texto.
+    const userMessage = `Texto extraído do PDF da invoice. Extraia os campos pedidos no formato JSON puro:\n\n---INÍCIO DO TEXTO---\n${rawText}\n---FIM DO TEXTO---`;
+    ({ text } = await callAi({ ...common, userMessage }));
+  } else {
+    // PDF sem texto (imagem/escaneado, ex.: "Print To PDF") → leitura por VISÃO.
+    // Requer provedor/modelo com visão (Anthropic Claude ou Gemini leem PDF;
+    // OpenAI só imagem). Se falhar, orienta o usuário.
+    try {
+      ({ text } = await callAiVision({
+        ...common,
+        userMessage: 'Esta é uma invoice comercial (imagem/PDF escaneado). Leia o documento e extraia os campos pedidos no formato JSON puro.',
+        files: [{ mime: 'application/pdf', b64: buffer.toString('base64') }],
+      }));
+    } catch (e) {
+      const err = new Error('Este PDF é uma imagem (sem texto). A leitura por visão falhou — verifique em Parâmetros → IA se o provedor/modelo tem suporte a visão (ex.: Anthropic Claude ou Gemini). Detalhe: ' + (e.message || ''));
+      err.status = 422; throw err;
+    }
+  }
 
   const parsed = extractJson(text);
   if (!parsed || typeof parsed !== 'object') {
-    const e = new Error('IA respondeu em formato inesperado. Texto: ' + text.slice(0, 300)); e.status = 502; throw e;
+    const e = new Error('IA respondeu em formato inesperado. Texto: ' + String(text || '').slice(0, 300)); e.status = 502; throw e;
   }
 
   // Suporta tanto o NOVO formato (com items[]) quanto o legado (campos flat)
