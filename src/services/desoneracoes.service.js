@@ -213,7 +213,9 @@ async function getRequiredDocs(modal, etapa, tipoDocImport = null) {
       if (!baseDocs.includes('DI'))               baseDocs = ['DI', ...baseDocs];
       if (!baseDocs.includes('DI_JUSTIFICATIVA')) baseDocs = ['DI_JUSTIFICATIVA', ...baseDocs];
     } else if (tipoDocImport === 'DUIMP') {
-      if (!baseDocs.includes('DUIMP'))            baseDocs = ['DUIMP', ...baseDocs];
+      // DUIMP: exige APENAS o próprio DUIMP. PL/PI/BL/AWB/CRT/AFRMM ficam
+      // opcionais (sem trava para avançar). DI mantém a exigência completa.
+      baseDocs = ['DUIMP'];
     }
   }
   return baseDocs;
