@@ -14,7 +14,7 @@ window.VIEW_desoneracoes = (() => {
   };
   const STEP_ORDER = ['DOCS_DESPACHANTE','EMISSAO_DMI','EMISSAO_NF','VALIDACAO_NF','ENVIO_NF_OFICIAL','PROTOCOLO_ICMS'];
   const ETAPA_DOC_TIPOS = {
-    DOCS_DESPACHANTE: ['DUIMP','PL','PI','AFRMM','BL','AWB','CRT','CCT','OUTRO'],
+    DOCS_DESPACHANTE: ['DUIMP','DI','DI_JUSTIFICATIVA','CI','PL','PI','AFRMM','BL','AWB','CRT','CCT','OUTRO'],
     EMISSAO_DMI:      ['DMI','OUTRO'],
     EMISSAO_NF:       ['OUTRO'],
     VALIDACAO_NF:     ['OUTRO'],
@@ -443,6 +443,7 @@ window.VIEW_desoneracoes = (() => {
     rowsByEtapa.DOCS_DESPACHANTE.push(...docsDespachantePorModal(d.modal));
     // Etapa 1 ganha DUIMP ou DI+JUSTIFICATIVA conforme tipoDocImport
     if (d.tipoDocImport === 'DI') {
+      rowsByEtapa.DOCS_DESPACHANTE.unshift('CI');
       rowsByEtapa.DOCS_DESPACHANTE.unshift('DI_JUSTIFICATIVA');
       rowsByEtapa.DOCS_DESPACHANTE.unshift('DI');
     } else if (d.tipoDocImport === 'DUIMP') {

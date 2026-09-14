@@ -58,6 +58,7 @@ const DOC_TIPOS_BUILTIN = [
   { code: 'DUIMP',          label: 'DUIMP — Extrato da Declaração Única', sort: 1 },
   { code: 'DI',             label: 'DI — Extrato da Declaração de Importação', sort: 2 },
   { code: 'DI_JUSTIFICATIVA', label: 'DI — Declaração de Justificativa',  sort: 3 },
+  { code: 'CI',             label: 'CI — Comprovante de Importação',      sort: 14 },
   { code: 'PL',             label: 'PL — Packing List',                   sort: 4 },
   { code: 'PI',             label: 'PI — Proforma Invoice / Commercial Invoice', sort: 5 },
   { code: 'AFRMM',          label: 'AFRMM — Comprovante AFRMM',           sort: 6 },
@@ -210,8 +211,10 @@ async function getRequiredDocs(modal, etapa, tipoDocImport = null) {
   // Etapa 1 (DOCS_DESPACHANTE): adiciona DUIMP, ou DI+JUSTIFICATIVA, conforme escolha do user
   if (etapa === 'DOCS_DESPACHANTE' && tipoDocImport) {
     if (tipoDocImport === 'DI') {
-      if (!baseDocs.includes('DI'))               baseDocs = ['DI', ...baseDocs];
-      if (!baseDocs.includes('DI_JUSTIFICATIVA')) baseDocs = ['DI_JUSTIFICATIVA', ...baseDocs];
+      // DI exige: DI + Justificativa + CI (Comprovante de Importação),
+      // além dos docs base (PL/PI + doc de transporte do modal).
+      const diDocs = ['DI', 'DI_JUSTIFICATIVA', 'CI'];
+      baseDocs = [...diDocs, ...baseDocs.filter(d => !diDocs.includes(d))];
     } else if (tipoDocImport === 'DUIMP') {
       // DUIMP: exige APENAS o próprio DUIMP. PL/PI/BL/AWB/CRT/AFRMM ficam
       // opcionais (sem trava para avançar). DI mantém a exigência completa.
@@ -799,7 +802,7 @@ export async function cancelDesoneracao(user, id, reason) {
 // CTE_AWB_BL é o tipo unificado novo; BL/CCT são legados mas continuam aceitos
 // pra retrocompat com documentos já anexados antes da unificação.
 const ETAPA_DOC_TIPOS = {
-  DOCS_DESPACHANTE: ['DUIMP','DI','DI_JUSTIFICATIVA','PL','PI','AFRMM','BL','AWB','CRT','CTE_AWB_BL','CCT','OUTRO'],
+  DOCS_DESPACHANTE: ['DUIMP','DI','DI_JUSTIFICATIVA','CI','PL','PI','AFRMM','BL','AWB','CRT','CTE_AWB_BL','CCT','OUTRO'],
   EMISSAO_DMI:      ['DMI','OUTRO'],
   EMISSAO_NF:       ['OUTRO'],
   VALIDACAO_NF:     ['OUTRO'],
