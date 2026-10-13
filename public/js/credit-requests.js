@@ -904,13 +904,21 @@ window['VIEW_credit-requests'] = (() => {
           grupos = [emptyGrupo()];
         }
         out.innerHTML = `
-          <div class="muted small" style="margin-bottom:.5rem">✓ ${ncmGroups.length} NCM(s) extraído(s) pela IA. Clique em "Usar esses dados" para revisar e completar os impostos.</div>
+          <div class="muted small" style="margin-bottom:.5rem">✓ ${ncmGroups.length} NCM(s) extraído(s) pela IA${f.invoiceNumero ? ` · Invoice ${UI.escapeHtml(f.invoiceNumero)}` : ''}${f.incoterm ? ` · ${UI.escapeHtml(f.incoterm)}` : ''}${f.soma_itens_usd ? ` · US$ ${Number(f.soma_itens_usd).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''}. Clique em "Usar esses dados" para revisar — as alíquotas de cada NCM são buscadas automaticamente.</div>
+          ${(f.avisos || []).length ? `<div style="background:var(--s2);border-left:3px solid #d99a00;padding:.5rem .7rem;border-radius:6px;margin-bottom:.5rem;font-size:12px">
+            <strong>⚠ Confira antes de enviar:</strong>
+            <ul style="margin:.3rem 0 0 1rem;padding:0">${f.avisos.map(a => `<li>${UI.escapeHtml(a)}</li>`).join('')}</ul>
+          </div>` : ''}
           <pre style="background:var(--s2);padding:.6rem;border-radius:6px;font-size:11px;max-height:200px;overflow:auto">${UI.escapeHtml(JSON.stringify({ cabecalho, grupos }, null, 2))}</pre>
           <div class="form-actions" style="margin-top:.6rem">
             <button class="btn primary" id="cr-pdf-use">Usar esses dados no formulário</button>
           </div>`;
-        document.getElementById('cr-pdf-use').onclick = () => {
+        document.getElementById('cr-pdf-use').onclick = async () => {
           drawInvoiceForm(cliOpts);
+          // Busca alíquotas (II/IPI/PIS/Cofins) dos NCMs lidos pela IA e já calcula os impostos
+          if (grupos.some(g => (g.ncm || '').replace(/\D/g, '').length >= 8)) {
+            try { await recalcAllFromBackend(); } catch (e) { console.warn('Lookup automático de NCM falhou', e); }
+          }
         };
       } catch (e) {
         out.innerHTML = `<div class="err">Erro: ${UI.escapeHtml(e.message)}</div>`;
