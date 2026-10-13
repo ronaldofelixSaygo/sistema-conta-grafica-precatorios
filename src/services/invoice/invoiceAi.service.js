@@ -5,37 +5,50 @@
 import { prisma } from '../../config/prisma.js';
 import { callAi, callAiVision, extractJson } from './aiClient.service.js';
 
-const DEFAULT_SYSTEM_PROMPT = `Você é um assistente especializado em ler invoices comerciais (commercial invoices) de importação para o Brasil e extrair dados estruturados.
+const DEFAULT_SYSTEM_PROMPT = `Você é um especialista em comércio exterior brasileiro e lê invoices comerciais (commercial invoices, proformas e cotações FOB/CIF) de importação para extrair dados estruturados para o cálculo de créditos de ICMS.
 
-Você receberá o TEXTO BRUTO extraído de um PDF de invoice. Sua tarefa é identificar TODOS os itens (linhas) da invoice e retornar um JSON puro (sem markdown, sem explicações) com a estrutura abaixo:
+Você receberá o TEXTO extraído de um PDF (linhas preservadas na ordem do layout) ou o próprio documento (imagem/PDF). Retorne APENAS um JSON puro (sem markdown, sem texto antes ou depois) com esta estrutura:
 
 {
-  "importadorNome": string | null,
-  "importadorCnpj": string | null,
-  "exportadorNome": string | null,
-  "exportadorPais": string | null,
-  "uf": string,                     // UF de desembaraço (default "AL")
-  "taxa_cambio": number | null,     // R$/USD do dia (null se não constar)
-  "frete_usd_total": number,        // frete internacional total em USD (0 se EXW/sem frete)
-  "seguro_usd_total": number,       // seguro total em USD (0 se não houver)
-  "items": [                        // ⚠ UMA ENTRADA POR LINHA da invoice
+  "invoiceNumero": string | null,     // nº da invoice/proforma (ex.: "HC20260416001")
+  "invoiceData": "YYYY-MM-DD" | null, // data de emissão
+  "incoterm": string | null,          // FOB, CIF, CFR, EXW, FCA, DAP...
+  "localIncoterm": string | null,     // porto/local do incoterm (ex.: "Tianjin")
+  "moeda": string,                    // moeda dos valores (default "USD")
+  "importadorNome": string | null,    // BUYER / CONSIGNEE / IMPORTER (a empresa brasileira)
+  "importadorCnpj": string | null,    // CNPJ do importador no formato 00.000.000/0000-00
+  "exportadorNome": string | null,    // SELLER / SHIPPER / EXPORTER
+  "exportadorPais": string | null,    // país do exportador, em português (ex.: "China")
+  "uf": string,                       // UF do importador/desembaraço (sigla; default "AL")
+  "taxa_cambio": number | null,       // R$/USD SOMENTE se estiver escrita no documento; senão null
+  "frete_usd_total": number,          // frete internacional em USD
+  "seguro_usd_total": number,         // seguro internacional em USD
+  "total_invoice_usd": number | null, // valor TOTAL da invoice como impresso
+  "items": [                          // UMA entrada por LINHA de produto
     {
-      "ncm": string,                // NCM com pontuação (ex.: "8517.62.59")
-      "descricao": string,          // descrição/nome do produto (Part No. + descrição)
-      "quantidade": number,
-      "unit_price_usd": number,     // preço unitário USD
-      "extension_usd": number       // total da linha (qtd × unit_price)
+      "ncm": string | null,           // NCM/HS IMPRESSO no documento (ex.: "7306.30.00"); null se não houver
+      "ncm_sugerido": string | null,  // quando "ncm" for null: sua melhor classificação NCM (8 dígitos, "0000.00.00")
+      "ncm_justificativa": string | null, // 1 frase: por que esse NCM
+      "descricao": string,            // nome do produto + especificação (ex.: "Q195 Steel Pipe 19mm x 0.22mm x 5500mm")
+      "quantidade": number,           // quantidade NA MESMA UNIDADE do preço unitário
+      "unidade": string | null,       // unidade do preço: "KG", "PCS", "M", "TON", "SET"...
+      "unit_price_usd": number,       // preço unitário
+      "extension_usd": number,        // TOTAL DA LINHA exatamente como impresso
+      "peso_liquido_kg": number | null
     }
   ]
 }
 
-REGRAS:
-- Liste TODAS as linhas de produto, mesmo que tenham o mesmo NCM. O sistema agrupa depois.
-- Não some/agregue items aqui — devolva linha-a-linha como aparecem.
-- Use ponto decimal (1234.56), nunca vírgula.
-- Se um campo não aparece, use null (em vez de adivinhar).
-- Não devolva alíquotas — o usuário preenche II/IPI/PIS/Cofins por NCM no formulário.
-- Retorne APENAS o JSON, sem markdown, sem texto antes ou depois.`;
+REGRAS IMPORTANTES:
+1. Itens: liste TODAS as linhas de produto, sem agregar. Ignore linhas de subtotal/total, dados bancários, fotos, condições de pagamento e observações.
+2. Quantidade x unidade: use a quantidade na unidade em que o preço é cobrado. Ex.: colunas "Total quantity (pieces)=16000", "Total Qty (Kgs)=8960", "FOB (Usd/kg)=0.844", "Total Value=7562.24" → quantidade=8960, unidade="KG", unit_price_usd=0.844, extension_usd=7562.24. Confira: quantidade × unit_price_usd ≈ extension_usd.
+3. extension_usd é sempre o valor total da linha impresso; nunca invente. Se a linha não tiver total, calcule quantidade × preço unitário.
+4. NCM: se o documento trouxer NCM/HS code, copie-o em "ncm" (formato 0000.00.00; HS de 6 dígitos → complete com "00" e repita em ncm_sugerido). Se NÃO trouxer, deixe "ncm": null e SEMPRE preencha "ncm_sugerido" com o NCM brasileiro (TEC/Mercosul) mais provável pela descrição, material e especificação técnica. Ex.: tubos de aço carbono soldados, seção circular, diâmetro pequeno → "7306.30.00"; tubos sem costura de ferro/aço → 7304; parafusos de aço → 7318.15.00.
+5. Frete e seguro: FOB, FCA, EXW → frete_usd_total=0 e seguro_usd_total=0, salvo se o documento listar frete/seguro separadamente. CFR/CIF → use os valores de frete/seguro informados; se não estiverem discriminados, 0.
+6. Números: ponto decimal (1234.56), sem separador de milhar, sem símbolo de moeda. "$15,800" → 15800.
+7. CNPJ: normalize para 00.000.000/0000-00 (ex.: "61331341/000215" → "61.331.341/0002-15").
+8. Se um campo não aparece, use null — não adivinhe (exceto ncm_sugerido, que deve ser sempre preenchido quando ncm for null).
+9. Não devolva alíquotas de impostos.`;
 
 export async function getActivePromptText() {
   // 1) tenta versão ativa do prompt customizado
@@ -128,6 +141,65 @@ export async function extractTextFromPdfBuffer(buffer) {
   return out;
 }
 
+// ── Helpers da leitura de invoice ─────────────────────────────────────
+function _num(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  let s = String(v).replace(/[^\d.,-]/g, '');
+  if (!s) return null;
+  // "1.234,56" (BR) → 1234.56 ; "1,234.56" (US) → 1234.56 ; "15,800" → 15800
+  if (s.includes(',') && s.includes('.')) {
+    s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  } else if (s.includes(',')) {
+    s = /,\d{3}$/.test(s) ? s.replace(/,/g, '') : s.replace(',', '.');
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+const _r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// Normaliza NCM pra "0000.00.00". Aceita HS de 6 dígitos (completa com 00).
+function _fmtNcm(v) {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.length === 6) d += '00';
+  if (d.length !== 8) return null;
+  return `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6)}`;
+}
+
+function _fmtCnpj(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (d.length !== 14) return v ? String(v).trim() : '';
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+}
+
+// Cotação PTAX (venda) mais recente do Banco Central. null se indisponível.
+export async function fetchPtaxUsd() {
+  const fmt = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}-${d.getFullYear()}`;
+  const fim = new Date();
+  const ini = new Date(fim.getTime() - 10 * 86400000);
+  const url = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)?@dataInicial='${fmt(ini)}'&@dataFinalCotacao='${fmt(fim)}'&$format=json&$top=100`;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const last = (j.value || []).at(-1);
+    if (!last?.cotacaoVenda) return null;
+    return { taxa: Number(last.cotacaoVenda), data: String(last.dataHoraCotacao).slice(0, 10) };
+  } catch { return null; }
+}
+
+// Bloco anexado a prompts customizados antigos (cadastrados em Parâmetros → IA)
+// que ainda não conhecem os campos novos — garante que itens sem NCM não se percam.
+const PROMPT_COMPLEMENTO = `
+
+REGRAS COMPLEMENTARES (sistema):
+- Para cada item, se a invoice NÃO trouxer NCM/HS, use "ncm": null e preencha "ncm_sugerido" com o NCM brasileiro mais provável (8 dígitos, "0000.00.00") e "ncm_justificativa" com 1 frase.
+- "quantidade" deve estar na mesma unidade do preço unitário (ex.: kg quando o preço é USD/kg) e "extension_usd" é o total da linha impresso.
+- Inclua também "invoiceNumero", "invoiceData" (YYYY-MM-DD), "incoterm" e "total_invoice_usd" (total impresso).`;
+
 // Pipeline completo: PDF buffer → texto → IA → JSON estruturado
 export async function analyzeInvoicePdf(buffer) {
   const settings = await getAiSettings();
@@ -138,21 +210,24 @@ export async function analyzeInvoicePdf(buffer) {
     const e = new Error('API Key não configurada em Parâmetros → IA.'); e.status = 400; throw e;
   }
 
+  // Texto com layout (linhas por coordenada) preserva as colunas das tabelas;
+  // o texto "plano" embaralha a ordem e confunde qtd/preço/total.
   let rawText = '';
-  try { rawText = await extractTextFromPdfBuffer(buffer); } catch {}
+  try { rawText = await extractPdfLayoutText(buffer); } catch {}
+  if (!rawText || rawText.trim().length < 30) {
+    try { rawText = await extractTextFromPdfBuffer(buffer); } catch {}
+  }
 
-  const systemPrompt = await getActivePromptText();
+  let systemPrompt = await getActivePromptText();
+  if (!/ncm_sugerido/.test(systemPrompt)) systemPrompt += PROMPT_COMPLEMENTO;
   const common = { provider: settings.provider, model: settings.model, apiKey: settings.apiKey, systemPrompt };
 
   let text;
   if (rawText && rawText.trim().length >= 30) {
-    // PDF com camada de texto → envia o texto.
-    const userMessage = `Texto extraído do PDF da invoice. Extraia os campos pedidos no formato JSON puro:\n\n---INÍCIO DO TEXTO---\n${rawText}\n---FIM DO TEXTO---`;
+    const userMessage = `Texto extraído do PDF da invoice (uma linha do documento por linha). Extraia os campos pedidos no formato JSON puro:\n\n---INÍCIO DO TEXTO---\n${rawText}\n---FIM DO TEXTO---`;
     ({ text } = await callAi({ ...common, userMessage }));
   } else {
-    // PDF sem texto (imagem/escaneado, ex.: "Print To PDF") → leitura por VISÃO.
-    // Requer provedor/modelo com visão (Anthropic Claude ou Gemini leem PDF;
-    // OpenAI só imagem). Se falhar, orienta o usuário.
+    // PDF sem texto (imagem/escaneado) → leitura por VISÃO.
     try {
       ({ text } = await callAiVision({
         ...common,
@@ -169,53 +244,182 @@ export async function analyzeInvoicePdf(buffer) {
   if (!parsed || typeof parsed !== 'object') {
     const e = new Error('IA respondeu em formato inesperado. Texto: ' + String(text || '').slice(0, 300)); e.status = 502; throw e;
   }
+  return postProcessInvoice(parsed, common);
+}
 
-  // Suporta tanto o NOVO formato (com items[]) quanto o legado (campos flat)
+// Quando o NCM sugerido não existe na tabela TEC do sistema (ex.: IA sugeriu
+// "7306.30.00" mas a TEC tem 7306.30.10 / 7306.30.90), busca os NCMs válidos
+// da mesma posição e pede pra IA escolher o correto entre eles.
+async function _refineNcmPelaTec(sugerido, descricoes, aiCommon) {
+  const d = String(sugerido || '').replace(/\D/g, '');
+  if (d.length !== 8 || !aiCommon) return null;
+  let cands = [];
+  for (const len of [6, 4]) {
+    try {
+      cands = await prisma.ncmTributo.findMany({
+        where: { ncm: { startsWith: d.slice(0, len) } },
+        select: { ncm: true, descricao: true }, orderBy: { ncm: 'asc' }, take: 80,
+      });
+    } catch { return null; }
+    if (cands.some(c => c.ncm.length === 8)) break;
+  }
+  const finais = cands.filter(c => c.ncm.length === 8);
+  if (!finais.length) return null;
+  if (finais.length === 1) return finais[0].ncm;
+  // Descrição hierárquica (posição > subposição > item) pra IA entender o contexto
+  const pais = new Map(cands.filter(c => c.ncm.length < 8).map(c => [c.ncm, c.descricao]));
+  const linhas = finais.map(c => {
+    const ctx = [c.ncm.slice(0, 4), c.ncm.slice(0, 5), c.ncm.slice(0, 6), c.ncm.slice(0, 7)]
+      .map(k => pais.get(k)).filter(Boolean).join(' > ');
+    return `${c.ncm}: ${ctx ? ctx + ' > ' : ''}${c.descricao || ''}`;
+  }).join('\n');
+  try {
+    const { text } = await callAi({
+      ...aiCommon,
+      systemPrompt: 'Você é especialista em classificação fiscal (NCM/TEC Mercosul). Escolha, ENTRE AS OPÇÕES DADAS, o NCM que melhor classifica o produto. Responda APENAS JSON {"ncm": "00000000", "justificativa": "1 frase"}.',
+      userMessage: `Produto(s):\n${descricoes.map(x => '- ' + x).join('\n')}\n\nOpções válidas na TEC:\n${linhas}`,
+    });
+    const j = extractJson(text) || {};
+    const esc = String(j.ncm || '').replace(/\D/g, '');
+    const ok = finais.find(c => c.ncm === esc);
+    return ok ? { ncm: ok.ncm, justificativa: j.justificativa || null } : null;
+  } catch { return null; }
+}
+
+// Normaliza a resposta da IA, completa NCM (impresso → sugerido), confere
+// totais e busca PTAX quando a invoice não traz câmbio. Exportada p/ testes.
+export async function postProcessInvoice(parsed, aiCommon = null) {
+  const avisos = [];
   const items = Array.isArray(parsed.items) ? parsed.items : null;
+
+  let taxa = _num(parsed.taxa_cambio);
+  let taxaFonte = taxa ? 'invoice' : null;
+  if (!taxa) {
+    const ptax = await fetchPtaxUsd();
+    if (ptax) {
+      taxa = ptax.taxa; taxaFonte = 'ptax';
+      avisos.push(`Taxa de câmbio não consta na invoice — preenchida com a PTAX venda do Banco Central de ${ptax.data.split('-').reverse().join('/')} (R$ ${ptax.taxa.toFixed(4)}). Ajuste se necessário.`);
+    } else {
+      avisos.push('Taxa de câmbio não consta na invoice — informe manualmente.');
+    }
+  }
+
+  const incMatch = String(parsed.incoterm || '').toUpperCase().match(/\b(EXW|FCA|FAS|FOB|CFR|CNF|C&F|CIF|CPT|CIP|DAP|DPU|DAT|DDP)\b/);
+  const incoterm = incMatch ? incMatch[1].replace('CNF', 'CFR').replace('C&F', 'CFR') : (parsed.incoterm ? String(parsed.incoterm).toUpperCase().trim() : null);
+  let frete = _num(parsed.frete_usd_total ?? parsed.frete_usd) || 0;
+  let seguro = _num(parsed.seguro_usd_total ?? parsed.seguro_usd) || 0;
+  if (incoterm && ['FOB', 'FCA', 'EXW', 'FAS'].includes(incoterm) && frete === 0) {
+    avisos.push(`Invoice ${incoterm}: frete e seguro internacionais não estão inclusos — informe-os em cada NCM se já forem conhecidos.`);
+  }
+
   const cabecalho = {
     importadorNome: parsed.importadorNome ?? parsed.importador_nome ?? '',
-    importadorCnpj: parsed.importadorCnpj ?? parsed.importador_cnpj ?? '',
+    importadorCnpj: _fmtCnpj(parsed.importadorCnpj ?? parsed.importador_cnpj ?? ''),
     exportadorNome: parsed.exportadorNome ?? parsed.exportador_nome ?? '',
     exportadorPais: parsed.exportadorPais ?? parsed.exportador_pais ?? '',
-    uf: parsed.uf ?? 'AL',
-    taxa_cambio: parsed.taxa_cambio ?? null,
-    frete_usd_total: Number(parsed.frete_usd_total ?? parsed.frete_usd ?? 0),
-    seguro_usd_total: Number(parsed.seguro_usd_total ?? parsed.seguro_usd ?? 0),
+    uf: (parsed.uf && String(parsed.uf).trim().toUpperCase().slice(0, 2)) || 'AL',
+    taxa_cambio: taxa ? Number(taxa.toFixed(4)) : null,
+    taxa_cambio_fonte: taxaFonte,
+    frete_usd_total: frete,
+    seguro_usd_total: seguro,
+    invoiceNumero: parsed.invoiceNumero ?? null,
+    invoiceData: _normalizeAiDate(parsed.invoiceData),
+    incoterm,
+    total_invoice_usd: _num(parsed.total_invoice_usd),
   };
 
-  // Agrupa items por NCM (canonicaliza removendo pontos pra comparar, mas guarda original)
-  let ncmGroups = [];
-  if (items) {
-    const map = new Map();
-    for (const it of items) {
-      const ncm = String(it.ncm || '').trim();
-      if (!ncm) continue;
-      const key = ncm.replace(/\D/g, '');
-      const cur = map.get(key) || { ncm, items: [], extension_usd_total: 0, quantidade_total: 0 };
-      cur.items.push({
-        descricao: it.descricao || '',
-        quantidade: Number(it.quantidade) || 0,
-        unit_price_usd: Number(it.unit_price_usd) || 0,
-        extension_usd: Number(it.extension_usd) || 0,
-      });
-      cur.extension_usd_total += Number(it.extension_usd) || 0;
-      cur.quantidade_total += Number(it.quantidade) || 0;
-      map.set(key, cur);
-    }
-    ncmGroups = [...map.values()];
-  } else if (parsed.ncm && (parsed.vmle_usd ?? 0) > 0) {
-    // Legado: 1 NCM + valor total único
-    ncmGroups = [{
-      ncm: String(parsed.ncm),
-      items: [{ descricao: '', quantidade: 1, unit_price_usd: Number(parsed.vmle_usd), extension_usd: Number(parsed.vmle_usd) }],
-      extension_usd_total: Number(parsed.vmle_usd),
-      quantidade_total: 1,
-    }];
+  // Normaliza itens
+  const norm = [];
+  for (const it of items || []) {
+    const qtd = _num(it.quantidade) || 0;
+    const unit = _num(it.unit_price_usd) || 0;
+    let ext = _num(it.extension_usd);
+    if (!ext && qtd && unit) ext = qtd * unit;
+    ext = _r2(ext);
+    if (!ext && !it.descricao) continue;
+    const impresso = _fmtNcm(it.ncm);
+    const sugerido = _fmtNcm(it.ncm_sugerido);
+    norm.push({
+      ncm: impresso || sugerido || '',
+      ncm_origem: impresso ? 'invoice' : (sugerido ? 'sugerido_ia' : null),
+      ncm_justificativa: it.ncm_justificativa || null,
+      descricao: it.descricao || '',
+      quantidade: qtd,
+      unidade: it.unidade || null,
+      unit_price_usd: unit,
+      extension_usd: ext,
+    });
   }
+
+  // Confere se os NCMs existem na tabela TEC do sistema
+  const ncmDigits = [...new Set(norm.map(i => i.ncm.replace(/\D/g, '')).filter(Boolean))];
+  let existentes = null;
+  if (ncmDigits.length) {
+    try {
+      const rows = await prisma.ncmTributo.findMany({ where: { ncm: { in: ncmDigits } }, select: { ncm: true } });
+      existentes = new Set(rows.map(r => r.ncm));
+    } catch {}
+  }
+
+  // NCM sugerido pela IA que não existe na TEC → refina entre os NCMs válidos
+  if (existentes) {
+    const refinados = new Map();
+    for (const it of norm) {
+      const k = it.ncm.replace(/\D/g, '');
+      if (it.ncm_origem !== 'sugerido_ia' || !k || existentes.has(k)) continue;
+      if (!refinados.has(k)) {
+        const descs = norm.filter(x => x.ncm === it.ncm).map(x => x.descricao).slice(0, 10);
+        refinados.set(k, await _refineNcmPelaTec(it.ncm, descs, aiCommon));
+      }
+      const r = refinados.get(k);
+      if (r) {
+        const nk = typeof r === 'string' ? r : r.ncm;
+        it.ncm = _fmtNcm(nk);
+        if (r.justificativa) it.ncm_justificativa = r.justificativa;
+        existentes.add(nk);
+      }
+    }
+  }
+
+  // Agrupa por NCM (itens sem NCM ficam num grupo vazio pra não perder valor)
+  const map = new Map();
+  for (const it of norm) {
+    const key = it.ncm.replace(/\D/g, '') || '__SEM_NCM__';
+    const cur = map.get(key) || {
+      ncm: it.ncm, ncm_origem: it.ncm_origem, ncm_justificativa: it.ncm_justificativa,
+      ncm_cadastrado: existentes ? existentes.has(key) : null,
+      items: [], extension_usd_total: 0, quantidade_total: 0,
+    };
+    cur.items.push({ descricao: it.descricao, quantidade: it.quantidade, unidade: it.unidade, unit_price_usd: it.unit_price_usd, extension_usd: it.extension_usd });
+    cur.extension_usd_total = _r2(cur.extension_usd_total + it.extension_usd);
+    cur.quantidade_total += it.quantidade;
+    map.set(key, cur);
+  }
+  let ncmGroups = [...map.values()];
+
+  // Legado: 1 NCM + valor total único
+  if (!items && parsed.ncm && (_num(parsed.vmle_usd) ?? 0) > 0) {
+    ncmGroups = [{ ncm: _fmtNcm(parsed.ncm) || String(parsed.ncm), ncm_origem: 'invoice',
+      items: [{ descricao: '', quantidade: 1, unit_price_usd: _num(parsed.vmle_usd), extension_usd: _num(parsed.vmle_usd) }],
+      extension_usd_total: _num(parsed.vmle_usd), quantidade_total: 1 }];
+  }
+
+  for (const g of ncmGroups) {
+    if (!g.ncm) avisos.push(`${g.items.length} item(ns) sem NCM (US$ ${g.extension_usd_total.toFixed(2)}) — informe o NCM manualmente.`);
+    else if (g.ncm_origem === 'sugerido_ia') avisos.push(`NCM ${g.ncm} SUGERIDO pela IA (a invoice não informa NCM)${g.ncm_justificativa ? ': ' + g.ncm_justificativa : ''} — confirme antes de enviar.`);
+    if (g.ncm && g.ncm_cadastrado === false) avisos.push(`NCM ${g.ncm} não encontrado na tabela TEC do sistema — verifique.`);
+  }
+
+  // Confere soma das linhas x total impresso
+  const soma = _r2(norm.reduce((s, i) => s + i.extension_usd, 0));
+  if (cabecalho.total_invoice_usd && soma && Math.abs(soma - cabecalho.total_invoice_usd) > Math.max(1, cabecalho.total_invoice_usd * 0.005)) {
+    avisos.push(`Soma dos itens (US$ ${soma.toFixed(2)}) difere do total da invoice (US$ ${cabecalho.total_invoice_usd.toFixed(2)}) — confira os valores.`);
+  }
+  if (!norm.length) avisos.push('Nenhum item de produto foi identificado na invoice.');
 
   const promptVersion = await getActivePromptVersionNumber();
   return {
-    fields: { ...cabecalho, ncmGroups, itemsRaw: items || [] },
+    fields: { ...cabecalho, soma_itens_usd: soma, ncmGroups, itemsRaw: items || [], avisos },
     raw: parsed,
     promptVersion,
   };
